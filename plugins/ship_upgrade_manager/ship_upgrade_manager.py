@@ -61,6 +61,10 @@ class SessionActionParams(BaseModel):
     pass
 
 
+class PlanChangeParams(BaseModel):
+    plan_input: str = Field(description="JSON loadout or supported plan URL")
+
+
 class ShipUpgradeManagerPlugin(PluginBase):
     """Persist generic ship plans and per-ship upgrade sessions."""
 
@@ -235,6 +239,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
             method=lambda _args, _context: self._list_plans_action(),
             action_type="ship",
         )
+        helper.register_action(
+            name="ship_upgrade_preview_changes",
+            description="Preview changes in a ship upgrade plan",
+            parameters=PlanChangeParams,
+            method=self._preview_changes_action,
+            action_type="ship",
+        )
+        helper.register_action(
+            name="ship_upgrade_apply_changes",
+            description="Apply a new ship upgrade plan and migrate its active session",
+            parameters=PlanChangeParams,
+            method=self._apply_changes_action,
+            action_type="ship",
+        )
         helper.register_sideeffect(self._on_event)
         helper.register_status_generator(self._status_generator)
         self._publish_status()
@@ -320,6 +338,42 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return "Available plans: " + "; ".join(
             f"{plan['plan_name']} for {plan['ship_model']} version {plan['plan_version']}"
             for plan in plans
+        )
+
+    def _preview_changes_action(
+        self, args: PlanChangeParams, _context: dict[str, Any]
+    ) -> str:
+        normalized = parse_plan_input(args.plan_input)
+        return self._format_plan_diff_text(
+            self.diff_plan(normalized["plan_name"], normalized)
+        )
+
+    def _apply_changes_action(
+        self, args: PlanChangeParams, _context: dict[str, Any]
+    ) -> str:
+        normalized = parse_plan_input(args.plan_input)
+        diff = self.diff_plan(normalized["plan_name"], normalized)
+        plan_id = self.import_plan(
+            normalized["ship_model"],
+            normalized["plan_name"],
+            normalized,
+        )
+        if diff["current_version"] is None:
+            return f"Applied new plan {normalized['plan_name']}."
+        return (
+            f"Applied {normalized['plan_name']} version {diff['next_version']}; "
+            f"{diff['added_count']} added, {diff['removed_count']} removed, "
+            f"{diff['changed_count']} changed. Plan id {plan_id}."
+        )
+
+    @staticmethod
+    def _format_plan_diff_text(diff: dict[str, Any]) -> str:
+        if diff["current_version"] is None:
+            return f"New plan {diff['plan_name']}; all modules will be added."
+        return (
+            f"{diff['plan_name']} version {diff['current_version']} to "
+            f"{diff['next_version']}: {diff['added_count']} added, "
+            f"{diff['removed_count']} removed, {diff['changed_count']} changed."
         )
 
     def _import_from_settings(self) -> None:

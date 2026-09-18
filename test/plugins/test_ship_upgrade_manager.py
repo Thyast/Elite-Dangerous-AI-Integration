@@ -209,6 +209,29 @@ def test_plan_diff_preview_is_rendered_in_settings(tmp_path: Path):
     assert "old_fsd" in plugin.settings["diff_status"]
 
 
+def test_voice_actions_preview_and_apply_plan_changes(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "old"}]},
+    )
+    updated = json.dumps(
+        {
+            "ship_model": "Python",
+            "plan_name": "PvE",
+            "steps": [{"id": "fsd", "item": "new"}, {"id": "shield", "item": "new"}],
+        }
+    )
+
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import PlanChangeParams
+
+    assert "1 added" in plugin._preview_changes_action(PlanChangeParams(plan_input=updated), {})
+    result = plugin._apply_changes_action(PlanChangeParams(plan_input=updated), {})
+    assert "1 added" in result
+    assert plugin.list_plans()[0]["plan_version"] == 2
+
+
 def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan(
