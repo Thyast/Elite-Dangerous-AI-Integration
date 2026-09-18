@@ -17,12 +17,9 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
     else:
         raise PlanParseError("Plan input is empty")
 
-    if isinstance(source, list) and len(source) == 1 and isinstance(source[0], dict):
-        source = source[0]
+    source, header = _unwrap_slef(source)
     if not isinstance(source, dict):
         raise PlanParseError("Plan export must be a JSON object")
-    if isinstance(source.get("data"), dict):
-        source = {**source, **source["data"]}
 
     ship_model = _first_string(
         source.get("ship_model"),
@@ -44,6 +41,7 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
         source.get("plan_name"),
         source.get("name"),
         source.get("title"),
+        source.get("ShipName"),
         "Imported plan",
     )
     steps = _normalize_steps(source)
@@ -52,8 +50,25 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
     normalized["plan_name"] = plan_name
     normalized["modules"] = steps
     normalized["steps"] = steps
-    normalized["source_format"] = _detect_format(source)
+    normalized["source_format"] = "slef" if header is not None else _detect_format(source)
+    if header is not None:
+        normalized["source_header"] = header
     return normalized
+
+
+def _unwrap_slef(value: Any) -> tuple[Any, dict[str, Any] | None]:
+    """Unwrap the Ship Loadout Event Format used by EDSY/Coriolis."""
+    if isinstance(value, list):
+        if len(value) != 1 or not isinstance(value[0], dict):
+            raise PlanParseError("SLEF export must contain exactly one record")
+        value = value[0]
+    if not isinstance(value, dict):
+        return value, None
+    data = value.get("data")
+    header = value.get("header")
+    if isinstance(data, dict) and isinstance(header, dict):
+        return data, header
+    return value, None
 
 
 def _parse_text(value: str) -> Any:

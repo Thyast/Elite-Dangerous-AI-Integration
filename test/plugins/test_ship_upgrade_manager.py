@@ -128,7 +128,8 @@ def test_parse_slef_and_delete_plan(tmp_path: Path):
     ]
     normalized = parse_plan_input(__import__("json").dumps(slef))
     assert normalized["ship_model"] == "panthermkii"
-    assert normalized["source_format"] == "edsy"
+    assert normalized["source_format"] == "slef"
+    assert normalized["source_header"]["appName"] == "EDSY"
     plugin.import_plan(normalized["ship_model"], "Cargo", normalized)
     assert len(plugin.list_plans()) == 1
     assert plugin.delete_plan("Cargo")
