@@ -508,6 +508,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         event_name = event.content.get("event")
         if event_name not in {
             "Loadout",
+            "ModuleInfo",
             "ModuleBuy",
             "ModuleSwap",
             "ModuleStore",
@@ -542,7 +543,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
     @staticmethod
     def _event_modules(content: dict[str, Any]) -> list[dict[str, Any]]:
         event_name = content.get("event")
-        if event_name == "Loadout":
+        if event_name in {"Loadout", "ModuleInfo"}:
             modules = content.get("Modules", [])
             return [
                 {

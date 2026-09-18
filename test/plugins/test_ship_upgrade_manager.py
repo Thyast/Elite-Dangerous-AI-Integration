@@ -427,6 +427,54 @@ def test_real_journal_module_events_use_ship_id_and_ignore_null_swap(tmp_path: P
     assert plugin.get_session()["completed_steps"] == ["beam"]
 
 
+def test_module_info_snapshot_auto_completes_without_ship_id(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Kestrel Mk II",
+        "Combat",
+        {
+            "steps": [
+                {
+                    "id": "beam",
+                    "item": "hpt_beamlaser_gimbal_large",
+                    "slot": "LargeHardpoint1",
+                },
+                {
+                    "id": "fsd",
+                    "item": "int_hyperdrive_overcharge_size4_class5",
+                    "slot": "FrameShiftDrive",
+                },
+            ],
+        },
+    )
+    plugin.start_session("Combat", "15")
+
+    from lib.Event import GameEvent
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "timestamp": "2026-09-16T05:36:36Z",
+                "event": "ModuleInfo",
+                "Modules": [
+                    {
+                        "Slot": "LargeHardpoint1",
+                        "Item": "hpt_beamlaser_gimbal_large",
+                    },
+                    {
+                        "Slot": "FrameShiftDrive",
+                        "Item": "int_hyperdrive_overcharge_size4_class5",
+                    },
+                ],
+            },
+            historic=False,
+        ),
+        {},
+    )
+
+    assert plugin.get_session()["completed_steps"] == ["beam", "fsd"]
+
+
 def test_parse_coriolis_components_to_normalized_steps():
     plan = parse_plan_input(
         {
