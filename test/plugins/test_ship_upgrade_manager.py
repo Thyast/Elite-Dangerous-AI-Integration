@@ -134,3 +134,24 @@ def test_parse_slef_and_delete_plan(tmp_path: Path):
     assert len(plugin.list_plans()) == 1
     assert plugin.delete_plan("Cargo")
     assert plugin.list_plans() == []
+
+
+def test_parse_edsy_compact_url():
+    url = (
+        "https://edsy.org/#/L=J-00000H4C0S00,,"
+        "CzYG05G_W0mpUDBwG05L_W0DBwG05L_W0DBwG0BL_W0,"
+        "9on10ABkH04q_W0ASwGD5I_W0Ag-G-bJ0060upD6upD8qpDE_PcGzcQKsPcAtyGD3G_W0"
+        "B8gG07L_W0BNCGD3G_W0Bfo1D,,"
+        "0D81D0DI1D0Ba1D0Bk1D0AA1D0AA1D7UIH07K_W008c1D34a10072104xo2002M20,,"
+        "NO_D22P"
+    )
+
+    normalized = parse_plan_input(url)
+
+    assert normalized["ship_model"] == "panthermkii"
+    assert normalized["source_format"] == "edsy"
+    assert normalized["steps"][0]["slot"] == "CargoHatch"
+    assert any(
+        step["item"] == "int_hyperdrive_overcharge_size7_class5"
+        for step in normalized["steps"]
+    )

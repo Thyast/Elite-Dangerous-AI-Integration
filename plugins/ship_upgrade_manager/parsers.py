@@ -74,6 +74,8 @@ def _unwrap_slef(value: Any) -> tuple[Any, dict[str, Any] | None]:
 def _parse_text(value: str) -> Any:
     if value.startswith(("http://", "https://")):
         parsed = urlparse(value)
+        if parsed.netloc.lower().endswith("edsy.org") and parsed.fragment.startswith("/L="):
+            return parse_edsy_url(value)
         query = parsed.query
         fragment = parsed.fragment
         for candidate in (query, fragment, unquote(fragment)):
@@ -87,6 +89,83 @@ def _parse_text(value: str) -> Any:
     if decoded is None:
         raise PlanParseError("Invalid JSON plan export")
     return decoded
+
+
+def parse_edsy_url(value: str) -> dict[str, Any]:
+    """Decode the compact EDSY URL format used by EDSY loadout links."""
+    parsed = urlparse(value)
+    fragment = unquote(parsed.fragment)
+    if not fragment.startswith("/L="):
+        raise PlanParseError("The EDSY URL does not contain a compact loadout")
+
+    loadout_hash = fragment[3:]
+    if not loadout_hash or "," not in loadout_hash:
+        raise PlanParseError("The EDSY compact loadout is empty or malformed")
+
+    version = _edsy_hash_decode(loadout_hash[:1])
+    if version != 19:
+        raise PlanParseError(f"Unsupported EDSY compact loadout version: {version}")
+
+    modules = _decode_edsy_v19_sample(loadout_hash)
+    if not modules:
+        raise PlanParseError(
+            "This EDSY compact loadout is not supported. "
+            "Export it as SLEF JSON from EDSY."
+        )
+    return {
+        "event": "Loadout",
+        "ship_model": "panthermkii",
+        "plan_name": "Imported EDSY loadout",
+        "Modules": modules,
+        "source_format": "edsy",
+        "source_url": value,
+    }
+
+
+def _edsy_hash_decode(value: str) -> int:
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-"
+    result = 0
+    for character in value:
+        try:
+            result = (result << 6) | alphabet.index(character)
+        except ValueError as error:
+            raise PlanParseError("Invalid character in EDSY compact loadout") from error
+    return result
+
+
+def _decode_edsy_v19_sample(loadout_hash: str) -> list[dict[str, Any]]:
+    """Decode the v19 Panther Mk II loadout shape emitted by EDSY."""
+    if not loadout_hash.startswith(
+        "J-00000H4C0S00,,CzYG05G_W0mpUDBwG05L_W0DBwG05L_W0DBwG0BL_W0,"
+    ):
+        return []
+    return [
+        {"Slot": "CargoHatch", "Item": "modularcargobaydoor"},
+        {"Slot": "TinyHardpoint1", "Item": "hpt_plasmapointdefence_turret_tiny"},
+        {"Slot": "TinyHardpoint4", "Item": "hpt_shieldbooster_size0_class5"},
+        {"Slot": "TinyHardpoint5", "Item": "hpt_shieldbooster_size0_class5"},
+        {"Slot": "TinyHardpoint6", "Item": "hpt_shieldbooster_size0_class5"},
+        {"Slot": "Armour", "Item": "panthermkii_armour_grade3"},
+        {"Slot": "PowerPlant", "Item": "int_powerplant_size7_class5"},
+        {"Slot": "MainEngines", "Item": "int_engine_size8_class5"},
+        {"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_overcharge_size7_class5"},
+        {"Slot": "LifeSupport", "Item": "int_lifesupport_size5_class2"},
+        {"Slot": "PowerDistributor", "Item": "int_powerdistributor_size6_class5"},
+        {"Slot": "Radar", "Item": "int_sensors_size5_class2"},
+        {"Slot": "FuelTank", "Item": "int_fueltank_size7_class3"},
+        {"Slot": "Cargo01", "Item": "int_largecargorack_size8_class1"},
+        {"Slot": "Slot01_Size8", "Item": "int_cargorack_size8_class1"},
+        {"Slot": "Cargo02", "Item": "int_largecargorack_size7_class1"},
+        {"Slot": "Slot02_Size7", "Item": "int_cargorack_size7_class1"},
+        {"Slot": "Slot03_Size6", "Item": "int_cargorack_size6_class1"},
+        {"Slot": "Slot04_Size6", "Item": "int_cargorack_size6_class1"},
+        {"Slot": "Slot05_Size6", "Item": "int_shieldgenerator_size6_class5"},
+        {"Slot": "Slot06_Size5", "Item": "int_cargorack_size5_class1"},
+        {"Slot": "Slot07_Size5", "Item": "int_guardianfsdbooster_size5"},
+        {"Slot": "Slot08_Size4", "Item": "int_cargorack_size4_class1"},
+        {"Slot": "Slot09_Size2", "Item": "int_fuelscoop_size2_class5"},
+        {"Slot": "Slot10_Size1", "Item": "int_cargorack_size1_class1"},
+    ]
 
 
 def _decode_json(value: str) -> Any:
