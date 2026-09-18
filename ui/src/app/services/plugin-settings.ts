@@ -21,6 +21,7 @@ export interface SettingBase {
     type: "paragraph" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "error";
     readonly: boolean | null;
     placeholder: string | null;
+    icon?: string;
     default_value?: any;
 
     // Paragraph & Error
