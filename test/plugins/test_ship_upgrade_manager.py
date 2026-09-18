@@ -232,6 +232,38 @@ def test_voice_actions_preview_and_apply_plan_changes(tmp_path: Path):
     assert plugin.list_plans()[0]["plan_version"] == 2
 
 
+def test_settings_apply_changes_imports_and_migrates_plan(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "old"}]},
+    )
+    plugin.start_session("PvE", "SHIP-1")
+    plugin.settings["plan_input"] = json.dumps(
+        {
+            "ship_model": "Python",
+            "plan_name": "PvE",
+            "steps": [{"id": "fsd", "item": "new"}, {"id": "shield", "item": "new"}],
+        }
+    )
+
+    plugin.on_settings_button("apply_changes")
+
+    assert plugin.list_plans()[0]["plan_version"] == 2
+    assert plugin.get_session()["completed_steps"] == []
+    assert "Applied 'PvE'" in plugin.settings["import_status"]
+
+
+def test_settings_apply_changes_reports_invalid_input(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.settings["plan_input"] = "not json"
+
+    plugin.on_settings_button("apply_changes")
+
+    assert plugin.settings["import_status"].startswith("Apply error:")
+
+
 def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan(

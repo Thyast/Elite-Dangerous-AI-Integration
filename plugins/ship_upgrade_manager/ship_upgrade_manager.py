@@ -107,6 +107,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
                             "placeholder": None,
                         },
                         {
+                            "key": "apply_changes",
+                            "label": "Apply changes",
+                            "type": "button",
+                            "readonly": False,
+                            "placeholder": None,
+                        },
+                        {
                             "key": "diff_status",
                             "label": "Plan changes",
                             "type": "paragraph",
@@ -270,6 +277,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._import_from_settings()
         elif key == "preview_diff":
             self._preview_diff_from_settings()
+        elif key == "apply_changes":
+            self._apply_changes_from_settings()
         elif key == "delete_plan":
             try:
                 self.delete_plan(self.settings.get("plan_to_delete", ""))
@@ -420,6 +429,32 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._set_diff_status(f"Diff error: {error}")
             log("error", f"Ship Upgrade Manager plan diff failed: {error}")
 
+    def _apply_changes_from_settings(self) -> None:
+        value = self.settings.get("plan_input", "")
+        try:
+            normalized = parse_plan_input(value)
+            diff = self.diff_plan(normalized["plan_name"], normalized)
+            plan_id = self.import_plan(
+                normalized["ship_model"],
+                normalized["plan_name"],
+                normalized,
+            )
+            change_summary = (
+                f"{diff['added_count']} added, "
+                f"{diff['removed_count']} removed, "
+                f"{diff['changed_count']} changed"
+                if diff["current_version"] is not None
+                else "new plan"
+            )
+            self._set_status(
+                f"Applied '{normalized['plan_name']}' for {normalized['ship_model']} "
+                f"({len(normalized['steps'])} modules; {change_summary})."
+            )
+            log("info", f"Applied Ship Upgrade Manager plan {plan_id} from settings")
+        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
+            self._set_status(f"Apply error: {error}")
+            log("error", f"Ship Upgrade Manager plan apply failed: {error}")
+
     def _set_diff_status(self, status: str) -> None:
         self.settings["diff_status"] = status
         if self.helper is not None:
@@ -460,12 +495,12 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
 
     def _set_status(self, status: str) -> None:
+        self._publish_status()
         self.settings["import_status"] = status
         if self.helper is not None:
             self.helper._plugin_manager.update_plugin_setting(
                 self.plugin_manifest.guid, "import_status", status
             )
-        self._publish_status()
 
     def _on_event(self, event: Event, _context: dict[str, Any]) -> None:
         if not isinstance(event, GameEvent):
