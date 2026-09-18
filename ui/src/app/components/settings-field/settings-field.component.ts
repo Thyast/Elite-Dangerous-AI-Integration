@@ -8,6 +8,7 @@ import { MatSlideToggleModule } from "@angular/material/slide-toggle";
 import { MatOptionModule } from "@angular/material/core";
 import { MatButtonModule } from "@angular/material/button";
 import { TranslateService } from "@ngx-translate/core";
+import { MatIconModule } from "@angular/material/icon";
 import { SettingBase } from "../../services/plugin-settings";
 import { resolveSettingText } from "../../services/setting-text";
 
@@ -27,6 +28,7 @@ import { resolveSettingText } from "../../services/setting-text";
         MatSlideToggleModule,
         MatOptionModule,
         MatButtonModule,
+        MatIconModule,
     ],
     templateUrl: "./settings-field.component.html",
     styleUrl: "./settings-field.component.css",

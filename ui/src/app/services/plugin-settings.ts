@@ -61,7 +61,9 @@ export interface ToggleSetting extends SettingBase {
     default_value: boolean | null;
 }
 
-export interface ButtonSetting extends SettingBase {}
+export interface ButtonSetting extends SettingBase {
+    icon?: string;
+}
 
 export interface ParagraphSetting extends SettingBase {}
 

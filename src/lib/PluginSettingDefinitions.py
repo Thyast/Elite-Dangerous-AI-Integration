@@ -47,7 +47,7 @@ class ToggleSetting(SettingBase):
 
 class ButtonSetting(SettingBase):
     """Used to display a button that invokes the plugin's settings-button hook."""
-    pass
+    icon: NotRequired[str]
 
 class ParagraphSetting(SettingBase):
     """Used to display a paragraph of text. The label is used as the title."""

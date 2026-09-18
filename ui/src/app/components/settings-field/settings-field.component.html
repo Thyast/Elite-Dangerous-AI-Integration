@@ -6,8 +6,16 @@
         </mat-slide-toggle>
     }
     @case ('button') {
-        <button mat-stroked-button type="button" [disabled]="field.readonly || !buttonEnabled" (click)="onButtonClick()">
-            {{ resolve(field.label) }}
+        <button mat-stroked-button type="button"
+                [attr.aria-label]="resolve(field.label)"
+                [disabled]="field.readonly || !buttonEnabled"
+                (click)="onButtonClick()">
+            @if (field.icon) {
+                <mat-icon>{{ field.icon }}</mat-icon>
+            }
+            @if (!field.icon) {
+                {{ resolve(field.label) }}
+            }
         </button>
     }
     @case ('paragraph') {

@@ -147,10 +147,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
                         },
                         {
                             "key": "delete_plan",
-                            "label": "Delete plan",
+                            "label": "Delete selected plan",
                             "type": "button",
                             "readonly": False,
                             "placeholder": None,
+                            "icon": "delete",
                         },
                         {
                             "key": "available_plans",
