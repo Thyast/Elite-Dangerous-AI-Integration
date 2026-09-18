@@ -74,9 +74,11 @@ Thank you for your interest in contributing! Here's how to set up your developme
      .venv\Scripts\activate.bat
      ```
    - On **Windows (PowerShell)**:
-     `powershell
-.venv\Scripts\Activate.ps1
-`
+     ```powershell
+     . .\.venv312\Scripts\Activate.ps1
+     ```
+     This activates the existing Python 3.12 virtual environment in the
+     current PowerShell session.
      You should see `(.venv)` at the beginning of your terminal prompt.
 
 4. **Install Dependencies:**
