@@ -290,6 +290,51 @@ def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path
     assert plugin.get_session()["completed_steps"] == ["fsd", "shield"]
 
 
+def test_storage_and_retrieval_events_auto_complete_matching_modules(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "fsd", "item": "int_hyperdrive_size5_class5", "slot": "FrameShiftDrive"},
+                {"id": "shield", "item": "int_shieldgenerator_size5_class5", "slot": "Slot01_Size5"},
+            ]
+        },
+    )
+    plugin.start_session("PvE", "SHIP-42")
+
+    from lib.Event import GameEvent
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "event": "ModuleStore",
+                "Ship": "SHIP-42",
+                "StoredItem": "int_hyperdrive_size5_class5",
+                "Slot": "FrameShiftDrive",
+            },
+            historic=False,
+        ),
+        {},
+    )
+    assert plugin.get_session()["completed_steps"] == ["fsd"]
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "event": "ModuleRetrieve",
+                "ShipIdent": "SHIP-42",
+                "RetrievedItem": "int_shieldgenerator_size5_class5",
+                "Slot": "Slot01_Size5",
+            },
+            historic=False,
+        ),
+        {},
+    )
+    assert plugin.get_session()["completed_steps"] == ["fsd", "shield"]
+
+
 def test_parse_coriolis_components_to_normalized_steps():
     plan = parse_plan_input(
         {

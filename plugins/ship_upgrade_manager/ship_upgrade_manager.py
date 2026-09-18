@@ -471,12 +471,24 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if not isinstance(event, GameEvent):
             return
         event_name = event.content.get("event")
-        if event_name not in {"Loadout", "ModuleBuy", "ModuleSwap"}:
+        if event_name not in {
+            "Loadout",
+            "ModuleBuy",
+            "ModuleSwap",
+            "ModuleStore",
+            "ModuleRetrieve",
+        }:
             return
         session = self.get_session()
         if session is None or session["paused"]:
             return
-        ship_id = str(event.content.get("ShipID") or event.content.get("ShipIdent") or "")
+        ship_id = str(
+            event.content.get("ShipID")
+            or event.content.get("ShipIdent")
+            or event.content.get("ShipName")
+            or event.content.get("Ship")
+            or ""
+        )
         if ship_id and ship_id not in {
             str(session["ship_instance_id"]),
             str(session.get("ship_custom_name") or ""),
@@ -510,6 +522,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return [{"item": content.get("BuyItem"), "slot": content.get("Slot")}]
         if event_name == "ModuleSwap":
             return [{"item": content.get("ToItem"), "slot": content.get("ToSlot")}]
+        if event_name == "ModuleStore":
+            return [{"item": content.get("StoredItem"), "slot": content.get("Slot")}]
+        if event_name == "ModuleRetrieve":
+            return [{"item": content.get("RetrievedItem"), "slot": content.get("Slot")}]
         return []
 
     @staticmethod
