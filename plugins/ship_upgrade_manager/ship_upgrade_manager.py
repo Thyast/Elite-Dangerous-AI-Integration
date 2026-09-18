@@ -8,12 +8,13 @@ from typing import Any, Iterator
 
 from pydantic import BaseModel, Field
 
-from lib.Event import Event, ProjectedEvent
+from lib.Event import Event, GameEvent, ProjectedEvent
 from lib.EventManager import Projection
 from lib.Logger import log
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginHelper import PluginHelper
 from lib.PluginSettingDefinitions import PluginSettings
+from .parsers import PlanParseError, parse_plan_input
 
 
 PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
@@ -77,6 +78,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     "label": "Status",
                     "fields": [
                         {
+                            "key": "plan_input",
+                            "label": "Coriolis / EDSY / Inara JSON or URL",
+                            "type": "textarea",
+                            "readonly": False,
+                            "placeholder": "Paste an exported JSON loadout or an embedded export URL",
+                            "default_value": "",
+                            "rows": 8,
+                            "cols": 60,
+                        },
+                        {
+                            "key": "import_plan",
+                            "label": "Import plan",
+                            "type": "button",
+                            "readonly": False,
+                            "placeholder": None,
+                        },
+                        {
                             "key": "import_status",
                             "label": "Import status",
                             "type": "paragraph",
@@ -104,6 +122,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
                             "readonly": True,
                             "placeholder": None,
                             "content": "No active session.",
+                        },
+                        {
+                            "key": "available_plans",
+                            "label": "Available plans",
+                            "type": "paragraph",
+                            "readonly": True,
+                            "placeholder": None,
+                            "content": "No plans imported.",
                         },
                     ],
                 },
@@ -149,6 +175,22 @@ class ShipUpgradeManagerPlugin(PluginBase):
             method=lambda _args, _context: self._session_stop_action(),
             action_type="ship",
         )
+        helper.register_action(
+            name="ship_upgrade_next_step",
+            description="Describe the next step of the active ship upgrade session",
+            parameters=SessionActionParams,
+            method=lambda _args, _context: self._next_step_action(),
+            action_type="ship",
+        )
+        helper.register_action(
+            name="ship_upgrade_list_plans",
+            description="List available ship upgrade plans",
+            parameters=SessionActionParams,
+            method=lambda _args, _context: self._list_plans_action(),
+            action_type="ship",
+        )
+        helper.register_sideeffect(self._on_event)
+        helper.register_status_generator(self._status_generator)
         self._publish_status()
 
     def on_chat_stop(self, helper: PluginHelper) -> None:
@@ -159,7 +201,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
         pass
 
     def on_settings_button(self, key: str) -> None:
-        if key == "reimport_plans":
+        if key == "import_plan":
+            self._import_from_settings()
+        elif key == "reimport_plans":
             self._publish_status()
         else:
             log("warning", f"Unknown Ship Upgrade Manager settings button: {key}")
@@ -196,6 +240,109 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _session_stop_action(self) -> str:
         self.stop_session()
         return "Ship upgrade session stopped."
+
+    def _next_step_action(self) -> str:
+        session = self.get_session()
+        if session is None:
+            return "There is no active ship upgrade session."
+        remaining = [
+            step for step in session["steps"]
+            if step["id"] not in session["completed_steps"]
+        ]
+        if not remaining:
+            return f"Plan {session['plan_name']} is complete."
+        step = remaining[0]
+        return (
+            f"Next step, {len(session['completed_steps']) + 1} of "
+            f"{session['total_steps']}: {step.get('label', step['id'])}."
+        )
+
+    def _list_plans_action(self) -> str:
+        plans = self.list_plans()
+        if not plans:
+            return "No ship upgrade plans are imported."
+        return "Available plans: " + "; ".join(
+            f"{plan['plan_name']} for {plan['ship_model']} version {plan['plan_version']}"
+            for plan in plans
+        )
+
+    def _import_from_settings(self) -> None:
+        value = self.settings.get("plan_input", "")
+        try:
+            normalized = parse_plan_input(value)
+            plan_id = self.import_plan(
+                normalized["ship_model"],
+                normalized["plan_name"],
+                normalized,
+            )
+            self._set_status(
+                f"Imported '{normalized['plan_name']}' for {normalized['ship_model']} "
+                f"({len(normalized['steps'])} steps)."
+            )
+            log("info", f"Imported Ship Upgrade Manager plan {plan_id}")
+        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
+            self._set_status(f"Import error: {error}")
+            log("error", f"Ship Upgrade Manager plan import failed: {error}")
+
+    def _set_status(self, status: str) -> None:
+        self.settings["import_status"] = status
+        if self.helper is not None:
+            self.helper._plugin_manager.update_plugin_setting(
+                self.plugin_manifest.guid, "import_status", status
+            )
+        self._publish_status()
+
+    def _on_event(self, event: Event, _context: dict[str, Any]) -> None:
+        if not isinstance(event, GameEvent) or event.content.get("event") != "Loadout":
+            return
+        session = self.get_session()
+        if session is None or session["paused"]:
+            return
+        ship_id = str(event.content.get("ShipID") or event.content.get("ShipIdent") or "")
+        if ship_id and ship_id not in {
+            str(session["ship_instance_id"]),
+            str(session.get("ship_custom_name") or ""),
+        }:
+            return
+        modules = event.content.get("Modules", [])
+        if not isinstance(modules, list):
+            return
+        for step in session["steps"]:
+            if step["id"] in session["completed_steps"]:
+                continue
+            item = step.get("item")
+            slot = step.get("slot")
+            if not item:
+                continue
+            if any(
+                isinstance(module, dict)
+                and module.get("Item") == item
+                and (not slot or module.get("Slot") == slot)
+                for module in modules
+            ):
+                try:
+                    self.complete_step(step["id"], "Detected from Loadout event")
+                except ValueError as error:
+                    log("warning", f"Could not auto-complete ship upgrade step: {error}")
+
+    def _status_generator(self, _states: dict[str, BaseModel]) -> list[tuple[str, Any]]:
+        session = self.get_session()
+        if session is None:
+            return []
+        remaining = [
+            step for step in session["steps"]
+            if step["id"] not in session["completed_steps"]
+        ]
+        next_step = remaining[0].get("label", remaining[0]["id"]) if remaining else "complete"
+        return [
+            (
+                "Ship upgrade",
+                f"{session['plan_name']} on "
+                f"{session['ship_custom_name'] or session['ship_instance_id']}: "
+                f"{len(session['completed_steps'])}/{session['total_steps']} complete; "
+                f"next: {next_step}",
+            )
+        ]
 
     def get_db_path(self) -> Path:
         if self.helper is None:
@@ -532,6 +679,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             ).fetchone()
 
         status = f"{plan_count} plan(s) available."
+        available_plans = self._format_available_plans()
         if session is None:
             session_summary = "No active session."
         else:
@@ -543,9 +691,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
         self.settings["import_status"] = status
         self.settings["session_summary"] = session_summary
-        self.helper._plugin_manager.update_plugin_setting(
-            self.plugin_manifest.guid, "import_status", status
-        )
-        self.helper._plugin_manager.update_plugin_setting(
+        manager = self.helper._plugin_manager
+        manager.update_plugin_setting(self.plugin_manifest.guid, "import_status", status)
+        manager.update_plugin_setting(
             self.plugin_manifest.guid, "session_summary", session_summary
+        )
+        manager.update_plugin_setting(
+            self.plugin_manifest.guid, "available_plans", available_plans
+        )
+
+    def _format_available_plans(self) -> str:
+        plans = self.list_plans()
+        if not plans:
+            return "No plans imported."
+        return "<br>".join(
+            f"{plan['plan_name']} ({plan['ship_model']}) - v{plan['plan_version']}"
+            for plan in plans
         )

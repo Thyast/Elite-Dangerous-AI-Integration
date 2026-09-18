@@ -7,6 +7,7 @@ from lib.PluginBase import PluginManifest
 from plugins.ship_upgrade_manager.ship_upgrade_manager import (
     ShipUpgradeManagerPlugin,
 )
+from plugins.ship_upgrade_manager.parsers import PlanParseError, parse_plan_input
 
 
 class _PluginManager:
@@ -27,6 +28,12 @@ class _Helper:
         pass
 
     def register_action(self, **_kwargs):
+        pass
+
+    def register_sideeffect(self, _sideeffect):
+        pass
+
+    def register_status_generator(self, _generator):
         pass
 
 
@@ -75,3 +82,30 @@ def test_reimport_only_increments_version_when_source_changes(tmp_path: Path):
 
     plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})
     assert plugin.list_plans()[0]["plan_version"] == 2
+
+
+def test_parse_coriolis_components_to_normalized_steps():
+    plan = parse_plan_input(
+        {
+            "name": "Mining",
+            "ship": {"name": "Python"},
+            "components": {
+                "standard": {
+                    "frame_shift_drive": {"name": "Frame Shift Drive", "slot": "FrameShiftDrive"}
+                }
+            },
+        }
+    )
+
+    assert plan["ship_model"] == "Python"
+    assert plan["source_format"] == "coriolis"
+    assert plan["steps"][0]["item"] == "Frame Shift Drive"
+
+
+def test_parse_rejects_missing_ship():
+    try:
+        parse_plan_input({"name": "Invalid", "steps": []})
+    except PlanParseError as error:
+        assert "ship model" in str(error)
+    else:
+        raise AssertionError("Missing ship model was accepted")

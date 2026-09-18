@@ -283,6 +283,17 @@ class PluginManager:
 
         save_config(self.config)
         emit_message("config", config=self.config)
+        settings_config = self.plugin_settings_configs.get(plugin_guid)
+        if settings_config is not None:
+            for grid in settings_config.get("grids", []):
+                for field in grid.get("fields", []):
+                    if field.get("key") == key and field.get("type") in {"paragraph", "error"}:
+                        field["content"] = str(value)
+            emit_message(
+                "plugin_settings_configs",
+                plugin_settings_configs=self.plugin_settings_configs,
+                has_plugin_settings=(len(self.plugin_settings_configs) > 0),
+            )
 
         try:
             plugin.on_settings_changed()
