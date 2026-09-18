@@ -342,7 +342,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
 
     def _on_event(self, event: Event, _context: dict[str, Any]) -> None:
-        if not isinstance(event, GameEvent) or event.content.get("event") != "Loadout":
+        if not isinstance(event, GameEvent):
+            return
+        event_name = event.content.get("event")
+        if event_name not in {"Loadout", "ModuleBuy", "ModuleSwap"}:
             return
         session = self.get_session()
         if session is None or session["paused"]:
@@ -353,26 +356,55 @@ class ShipUpgradeManagerPlugin(PluginBase):
             str(session.get("ship_custom_name") or ""),
         }:
             return
-        modules = event.content.get("Modules", [])
-        if not isinstance(modules, list):
-            return
+        modules = self._event_modules(event.content)
         for step in session["steps"]:
             if step["id"] in session["completed_steps"]:
                 continue
-            item = step.get("item")
-            slot = step.get("slot")
-            if not item:
-                continue
-            if any(
-                isinstance(module, dict)
-                and module.get("Item") == item
-                and (not slot or module.get("Slot") == slot)
-                for module in modules
-            ):
+            if any(self._module_matches_step(step, module) for module in modules):
                 try:
                     self.complete_step(step["id"], "Detected from Loadout event")
                 except ValueError as error:
                     log("warning", f"Could not auto-complete ship upgrade step: {error}")
+
+    @staticmethod
+    def _event_modules(content: dict[str, Any]) -> list[dict[str, Any]]:
+        event_name = content.get("event")
+        if event_name == "Loadout":
+            modules = content.get("Modules", [])
+            return [
+                {
+                    "item": module.get("Item"),
+                    "slot": module.get("Slot"),
+                    "engineering": module.get("Engineering"),
+                }
+                for module in modules
+                if isinstance(module, dict)
+            ] if isinstance(modules, list) else []
+        if event_name == "ModuleBuy":
+            return [{"item": content.get("BuyItem"), "slot": content.get("Slot")}]
+        if event_name == "ModuleSwap":
+            return [{"item": content.get("ToItem"), "slot": content.get("ToSlot")}]
+        return []
+
+    @staticmethod
+    def _module_matches_step(step: dict[str, Any], module: dict[str, Any]) -> bool:
+        item = step.get("item")
+        slot = step.get("slot")
+        if not isinstance(item, str) or not item:
+            return False
+        if module.get("item") != item or (slot and module.get("slot") != slot):
+            return False
+        expected_engineering = step.get("engineering")
+        if not expected_engineering:
+            return True
+        actual_engineering = module.get("engineering")
+        if not isinstance(actual_engineering, dict):
+            return False
+        for key in ("BlueprintName", "Level", "ExperimentalEffect"):
+            expected = expected_engineering.get(key)
+            if expected is not None and actual_engineering.get(key) != expected:
+                return False
+        return True
 
     def _status_generator(self, _states: dict[str, BaseModel]) -> list[tuple[str, Any]]:
         session = self.get_session()
@@ -585,6 +617,78 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "ORDER BY ship_model, plan_name"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_plan(self, plan_id: str) -> dict[str, Any]:
+        """Return one complete plan, including normalized modules."""
+        if not plan_id.strip():
+            raise ValueError("plan_id is required")
+        with self.get_db() as db:
+            row = db.execute("SELECT * FROM plans WHERE id = ?", (plan_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown plan: {plan_id}")
+        plan = dict(row)
+        plan["source"] = json.loads(plan.pop("source_json") or "{}")
+        plan["modules"] = self._plan_steps(json.dumps(plan["source"]))
+        return plan
+
+    def update_plan(
+        self,
+        plan_id: str,
+        ship_model: str,
+        plan_name: str,
+        source: dict[str, Any],
+    ) -> str:
+        """Update an existing plan without creating a different record."""
+        current = self.get_plan(plan_id)
+        if not ship_model.strip() or not plan_name.strip():
+            raise ValueError("ship_model and plan_name are required")
+        if (ship_model, plan_name) != (
+            current["ship_model"],
+            current["plan_name"],
+        ):
+            with self.get_db() as db:
+                duplicate = db.execute(
+                    "SELECT id FROM plans WHERE ship_model = ? AND plan_name = ?",
+                    (ship_model, plan_name),
+                ).fetchone()
+            if duplicate is not None and duplicate["id"] != plan_id:
+                raise ValueError("A plan with this ship model and name already exists")
+        source_json = json.dumps(source, sort_keys=True, separators=(",", ":"))
+        source_hash = hashlib.sha256(source_json.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc).isoformat()
+        old_steps = current["modules"]
+        with self.get_db() as db:
+            new_version = current["plan_version"] + (
+                1 if current["source_hash"] != source_hash else 0
+            )
+            db.execute(
+                """
+                UPDATE plans
+                SET ship_model = ?, plan_name = ?, source_json = ?,
+                    source_hash = ?, plan_version = ?, last_modified = ?
+                WHERE id = ?
+                """,
+                (
+                    ship_model,
+                    plan_name,
+                    source_json,
+                    source_hash,
+                    new_version,
+                    now,
+                    plan_id,
+                ),
+            )
+            if new_version != current["plan_version"]:
+                self._migrate_active_session(
+                    db,
+                    plan_id,
+                    old_steps,
+                    self._plan_steps(source_json),
+                    new_version,
+                    now,
+                )
+        self._publish_status()
+        return plan_id
 
     def delete_plan(self, plan_name: str) -> bool:
         """Delete a plan and its applications/session through foreign keys."""

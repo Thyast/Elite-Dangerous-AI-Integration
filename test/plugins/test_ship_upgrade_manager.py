@@ -142,6 +142,83 @@ def test_reimport_migrates_active_session_without_completing_changed_modules(
     assert session["plan_version_at_session_start"] == 2
 
 
+def test_plan_crud_reads_and_updates_existing_record(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plan_id = plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "old"}]},
+    )
+
+    assert plugin.get_plan(plan_id)["modules"][0]["item"] == "old"
+    assert plugin.update_plan(
+        plan_id,
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "new"}]},
+    ) == plan_id
+    assert plugin.get_plan(plan_id)["modules"][0]["item"] == "new"
+    assert plugin.list_plans()[0]["plan_version"] == 2
+
+
+def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "fsd", "item": "int_hyperdrive_size5_class5", "slot": "FrameShiftDrive"},
+                {
+                    "id": "shield",
+                    "item": "int_shieldgenerator_size5_class5",
+                    "slot": "Slot01_Size5",
+                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                },
+            ]
+        },
+    )
+    plugin.start_session("PvE", "42")
+
+    from lib.Event import GameEvent
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "event": "ModuleBuy",
+                "ShipID": 42,
+                "BuyItem": "int_hyperdrive_size5_class5",
+                "Slot": "FrameShiftDrive",
+            },
+            historic=False,
+        ),
+        {},
+    )
+    assert plugin.get_session()["completed_steps"] == ["fsd"]
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "event": "Loadout",
+                "ShipID": 42,
+                "Modules": [
+                    {
+                        "Item": "int_shieldgenerator_size5_class5",
+                        "Slot": "Slot01_Size5",
+                        "Engineering": {
+                            "BlueprintName": "ShieldGenerator_Reinforced",
+                            "Level": 5,
+                        },
+                    }
+                ],
+            },
+            historic=False,
+        ),
+        {},
+    )
+    assert plugin.get_session()["completed_steps"] == ["fsd", "shield"]
+
+
 def test_parse_coriolis_components_to_normalized_steps():
     plan = parse_plan_input(
         {
