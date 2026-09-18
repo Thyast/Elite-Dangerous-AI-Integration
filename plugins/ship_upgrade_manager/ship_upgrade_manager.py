@@ -1,4 +1,5 @@
 import hashlib
+from html import escape
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -93,6 +94,21 @@ class ShipUpgradeManagerPlugin(PluginBase):
                             "type": "button",
                             "readonly": False,
                             "placeholder": None,
+                        },
+                        {
+                            "key": "preview_diff",
+                            "label": "Preview plan changes",
+                            "type": "button",
+                            "readonly": False,
+                            "placeholder": None,
+                        },
+                        {
+                            "key": "diff_status",
+                            "label": "Plan changes",
+                            "type": "paragraph",
+                            "readonly": True,
+                            "placeholder": None,
+                            "content": "No diff calculated.",
                         },
                         {
                             "key": "import_status",
@@ -234,6 +250,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def on_settings_button(self, key: str) -> None:
         if key == "import_plan":
             self._import_from_settings()
+        elif key == "preview_diff":
+            self._preview_diff_from_settings()
         elif key == "delete_plan":
             try:
                 self.delete_plan(self.settings.get("plan_to_delete", ""))
@@ -332,6 +350,60 @@ class ShipUpgradeManagerPlugin(PluginBase):
         except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
             self._set_status(f"Import error: {error}")
             log("error", f"Ship Upgrade Manager plan import failed: {error}")
+
+    def _preview_diff_from_settings(self) -> None:
+        value = self.settings.get("plan_input", "")
+        try:
+            normalized = parse_plan_input(value)
+            diff = self.diff_plan(normalized["plan_name"], normalized)
+            rendered = self._format_plan_diff(diff)
+            self.settings["diff_status"] = rendered
+            if self.helper is not None:
+                self.helper._plugin_manager.update_plugin_setting(
+                    self.plugin_manifest.guid, "diff_status", rendered
+                )
+        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
+            self._set_diff_status(f"Diff error: {error}")
+            log("error", f"Ship Upgrade Manager plan diff failed: {error}")
+
+    def _set_diff_status(self, status: str) -> None:
+        self.settings["diff_status"] = status
+        if self.helper is not None:
+            self.helper._plugin_manager.update_plugin_setting(
+                self.plugin_manifest.guid, "diff_status", status
+            )
+
+    @staticmethod
+    def _format_plan_diff(diff: dict[str, Any]) -> str:
+        if diff["current_version"] is None:
+            return "<p>New plan; all modules will be added.</p>"
+
+        def module_label(module: dict[str, Any]) -> str:
+            label = module.get("item") or module.get("label") or module.get("id", "")
+            slot = module.get("slot")
+            return escape(f"{label} ({slot})" if slot else str(label))
+
+        sections = [
+            ("Added", diff["added"], "added"),
+            ("Removed", diff["removed"], "removed"),
+        ]
+        body = "".join(
+            f"<p><strong>{title} ({len(modules)})</strong></p><ul>"
+            + "".join(f"<li>{module_label(module)}</li>" for module in modules)
+            + "</ul>"
+            for title, modules, _ in sections
+            if modules
+        )
+        changed_body = "".join(
+            f"<li>{module_label(item['before'])} → {module_label(item['after'])}</li>"
+            for item in diff["changed"]
+        )
+        if changed_body:
+            body += f"<p><strong>Changed ({len(diff['changed'])})</strong></p><ul>{changed_body}</ul>"
+        return (
+            f"<p>Version {diff['current_version']} → {diff['next_version']}</p>"
+            + (body or "<p>No module changes.</p>")
+        )
 
     def _set_status(self, status: str) -> None:
         self.settings["import_status"] = status

@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -180,6 +181,32 @@ def test_plan_crud_reads_and_updates_existing_record(tmp_path: Path):
     ) == plan_id
     assert plugin.get_plan(plan_id)["modules"][0]["item"] == "new"
     assert plugin.list_plans()[0]["plan_version"] == 2
+
+
+def test_plan_diff_preview_is_rendered_in_settings(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "old_fsd", "slot": "FrameShiftDrive"}]},
+    )
+    plugin.settings["plan_input"] = json.dumps(
+        {
+            "ship_model": "Python",
+            "plan_name": "PvE",
+            "steps": [
+                {"id": "fsd", "item": "new_fsd", "slot": "FrameShiftDrive"},
+                {"id": "shield", "item": "shield", "slot": "Slot01_Size5"},
+            ],
+        }
+    )
+
+    plugin.on_settings_button("preview_diff")
+
+    assert "Version 1" in plugin.settings["diff_status"]
+    assert "new_fsd" in plugin.settings["diff_status"]
+    assert "shield" in plugin.settings["diff_status"]
+    assert "old_fsd" in plugin.settings["diff_status"]
 
 
 def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):
