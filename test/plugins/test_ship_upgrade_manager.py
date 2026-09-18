@@ -109,3 +109,27 @@ def test_parse_rejects_missing_ship():
         assert "ship model" in str(error)
     else:
         raise AssertionError("Missing ship model was accepted")
+
+
+def test_parse_slef_and_delete_plan(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    slef = [
+        {
+            "header": {"appName": "EDSY"},
+            "data": {
+                "event": "Loadout",
+                "Ship": "panthermkii",
+                "ShipName": "Cargo",
+                "Modules": [
+                    {"Slot": "PowerPlant", "Item": "int_powerplant_size7_class5"}
+                ],
+            },
+        }
+    ]
+    normalized = parse_plan_input(__import__("json").dumps(slef))
+    assert normalized["ship_model"] == "panthermkii"
+    assert normalized["source_format"] == "edsy"
+    plugin.import_plan(normalized["ship_model"], "Cargo", normalized)
+    assert len(plugin.list_plans()) == 1
+    assert plugin.delete_plan("Cargo")
+    assert plugin.list_plans() == []

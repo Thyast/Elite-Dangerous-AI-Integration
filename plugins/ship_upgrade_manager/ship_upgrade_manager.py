@@ -52,7 +52,7 @@ class StartSessionParams(BaseModel):
 
 
 class CompleteStepParams(BaseModel):
-    step_id: str = Field(description="Identifier of the completed upgrade step")
+    step_id: str = Field(description="Identifier of the completed upgrade module")
     notes: str = Field(default="", description="Optional completion notes")
 
 
@@ -113,7 +113,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 },
                 {
                     "key": "session",
-                    "label": "Active session",
+                    "label": "Active session (modules)",
                     "fields": [
                         {
                             "key": "session_summary",
@@ -122,6 +122,35 @@ class ShipUpgradeManagerPlugin(PluginBase):
                             "readonly": True,
                             "placeholder": None,
                             "content": "No active session.",
+                        },
+                        {
+                            "key": "plan_filter",
+                            "label": "Search plans",
+                            "type": "text",
+                            "readonly": False,
+                            "placeholder": "Name or ship type",
+                            "default_value": "",
+                            "max_length": 100,
+                            "min_length": 0,
+                            "hidden": False,
+                        },
+                        {
+                            "key": "plan_to_delete",
+                            "label": "Plan to delete",
+                            "type": "text",
+                            "readonly": False,
+                            "placeholder": "Exact plan name",
+                            "default_value": "",
+                            "max_length": 100,
+                            "min_length": 0,
+                            "hidden": False,
+                        },
+                        {
+                            "key": "delete_plan",
+                            "label": "Delete plan",
+                            "type": "button",
+                            "readonly": False,
+                            "placeholder": None,
                         },
                         {
                             "key": "available_plans",
@@ -149,7 +178,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
         helper.register_action(
             name="ship_upgrade_complete_step",
-            description="Mark a ship upgrade step as completed",
+            description="Mark a ship upgrade module as completed",
             parameters=CompleteStepParams,
             method=self._complete_step_action,
             action_type="ship",
@@ -177,7 +206,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
         helper.register_action(
             name="ship_upgrade_next_step",
-            description="Describe the next step of the active ship upgrade session",
+            description="Describe the next module of the active ship upgrade session",
             parameters=SessionActionParams,
             method=lambda _args, _context: self._next_step_action(),
             action_type="ship",
@@ -197,12 +226,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self.helper = None
 
     def on_settings_changed(self) -> None:
-        # Settings updates are already reflected in self.settings by PluginManager.
-        pass
+        plan_filter = self.settings.get("plan_filter", "")
+        if plan_filter != getattr(self, "_last_plan_filter", ""):
+            self._publish_status()
 
     def on_settings_button(self, key: str) -> None:
         if key == "import_plan":
             self._import_from_settings()
+        elif key == "delete_plan":
+            try:
+                self.delete_plan(self.settings.get("plan_to_delete", ""))
+                self._set_status("Plan deleted.")
+            except ValueError as error:
+                self._set_status(f"Delete error: {error}")
+                log("error", f"Ship Upgrade Manager plan deletion failed: {error}")
         elif key == "reimport_plans":
             self._publish_status()
         else:
@@ -253,7 +290,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return f"Plan {session['plan_name']} is complete."
         step = remaining[0]
         return (
-            f"Next step, {len(session['completed_steps']) + 1} of "
+            f"Next module, {len(session['completed_steps']) + 1} of "
             f"{session['total_steps']}: {step.get('label', step['id'])}."
         )
 
@@ -482,6 +519,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_plan(self, plan_name: str) -> bool:
+        """Delete a plan and its applications/session through foreign keys."""
+        if not isinstance(plan_name, str) or not plan_name.strip():
+            raise ValueError("plan_to_delete is required")
+        with self.get_db() as db:
+            plan = db.execute(
+                "SELECT id FROM plans WHERE plan_name = ?", (plan_name.strip(),)
+            ).fetchone()
+            if plan is None:
+                raise ValueError(f"Unknown plan: {plan_name}")
+            db.execute("DELETE FROM plans WHERE id = ?", (plan["id"],))
+        self._publish_status()
+        return True
+
     def start_session(
         self,
         plan_name: str,
@@ -679,7 +730,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
             ).fetchone()
 
         status = f"{plan_count} plan(s) available."
-        available_plans = self._format_available_plans()
+        plan_filter = str(self.settings.get("plan_filter", "")).strip().lower()
+        self._last_plan_filter = plan_filter
+        available_plans = self._format_available_plans(plan_filter)
         if session is None:
             session_summary = "No active session."
         else:
@@ -700,11 +753,34 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self.plugin_manifest.guid, "available_plans", available_plans
         )
 
-    def _format_available_plans(self) -> str:
-        plans = self.list_plans()
+    def _format_available_plans(self, plan_filter: str = "") -> str:
+        plans = [
+            plan for plan in self.list_plans()
+            if not plan_filter
+            or plan_filter in plan["plan_name"].lower()
+            or plan_filter in plan["ship_model"].lower()
+        ]
         if not plans:
-            return "No plans imported."
-        return "<br>".join(
-            f"{plan['plan_name']} ({plan['ship_model']}) - v{plan['plan_version']}"
-            for plan in plans
+            return "No plans match the current filter." if plan_filter else "No plans imported."
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for plan in plans:
+            grouped.setdefault(plan["ship_model"], []).append(plan)
+        return "".join(
+            f"<details open><summary>{ship_model} ({len(ship_plans)})</summary>"
+            + "".join(
+                f"<div><strong>{plan['plan_name']}</strong> · v{plan['plan_version']} "
+                f"· {self._plan_module_count(plan['id'])} modules</div>"
+                for plan in ship_plans
+            )
+            + "</details>"
+            for ship_model, ship_plans in sorted(grouped.items())
         )
+
+    def _plan_module_count(self, plan_id: str) -> int:
+        with self.get_db() as db:
+            row = db.execute(
+                "SELECT source_json FROM plans WHERE id = ?", (plan_id,)
+            ).fetchone()
+        if row is None:
+            return 0
+        return len(self._plan_steps(row["source_json"]))

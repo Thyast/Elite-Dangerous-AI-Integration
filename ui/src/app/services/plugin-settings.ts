@@ -10,6 +10,8 @@ export interface PluginSettings {
 export interface SettingsGrid {
     key: string;
     label: string;
+    collapsible?: boolean;
+    default_collapsed?: boolean;
     fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting)[];
 }
 

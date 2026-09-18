@@ -1,3 +1,19 @@
+@if (grid.collapsible) {
+<mat-expansion-panel [expanded]="!grid.default_collapsed">
+    <mat-expansion-panel-header>{{ grid.label }}</mat-expansion-panel-header>
+    <div [class]="gridClass">
+        @for (field of grid.fields; track field.key) {
+            <app-settings-field
+                [field]="field"
+                [value]="getFieldValue(field)"
+                [buttonEnabled]="onButtonClick !== undefined"
+                (valueChange)="onFieldChange(field, $event)"
+                (buttonClick)="handleButtonClick(field)">
+            </app-settings-field>
+        }
+    </div>
+</mat-expansion-panel>
+} @else {
 <div [class]="gridClass">
     @switch (headerLevel) {
         @case ('h2') {
@@ -20,3 +36,4 @@
         </app-settings-field>
     }
 </div>
+}

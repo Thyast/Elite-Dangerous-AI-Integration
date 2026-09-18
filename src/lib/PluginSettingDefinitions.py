@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 class SettingBase(TypedDict):
     key: str
@@ -62,6 +62,8 @@ class SettingsGrid(TypedDict):
     key: str
     label: str
     fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting]
+    collapsible: NotRequired[bool]
+    default_collapsed: NotRequired[bool]
 
 class PluginSettings(TypedDict):
     """Used to define the settings for a plugin."""

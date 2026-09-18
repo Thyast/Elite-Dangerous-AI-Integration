@@ -17,8 +17,12 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
     else:
         raise PlanParseError("Plan input is empty")
 
+    if isinstance(source, list) and len(source) == 1 and isinstance(source[0], dict):
+        source = source[0]
     if not isinstance(source, dict):
         raise PlanParseError("Plan export must be a JSON object")
+    if isinstance(source.get("data"), dict):
+        source = {**source, **source["data"]}
 
     ship_model = _first_string(
         source.get("ship_model"),
@@ -46,12 +50,13 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
     normalized = dict(source)
     normalized["ship_model"] = ship_model
     normalized["plan_name"] = plan_name
+    normalized["modules"] = steps
     normalized["steps"] = steps
     normalized["source_format"] = _detect_format(source)
     return normalized
 
 
-def _parse_text(value: str) -> dict[str, Any]:
+def _parse_text(value: str) -> Any:
     if value.startswith(("http://", "https://")):
         parsed = urlparse(value)
         query = parsed.query
@@ -69,7 +74,7 @@ def _parse_text(value: str) -> dict[str, Any]:
     return decoded
 
 
-def _decode_json(value: str) -> dict[str, Any] | None:
+def _decode_json(value: str) -> Any:
     if not value:
         return None
     candidates = [value]
@@ -82,17 +87,17 @@ def _decode_json(value: str) -> dict[str, Any] | None:
             result = json.loads(candidate)
         except (TypeError, json.JSONDecodeError):
             continue
-        if isinstance(result, dict):
+        if isinstance(result, (dict, list)):
             return result
     return None
 
 
 def _normalize_steps(source: dict[str, Any]) -> list[dict[str, Any]]:
-    explicit = source.get("steps")
+    explicit = source.get("modules") or source.get("steps")
     if isinstance(explicit, list):
         return [_normalize_step(step, index) for index, step in enumerate(explicit)]
 
-    modules = source.get("modules")
+    modules = source.get("modules") or source.get("Modules")
     if isinstance(modules, dict):
         modules = list(modules.values())
     elif isinstance(source.get("components"), dict):
@@ -154,7 +159,7 @@ def _first_string(*values: Any) -> str | None:
 def _detect_format(source: dict[str, Any]) -> str:
     if "components" in source:
         return "coriolis"
-    if "modules" in source:
+    if "modules" in source or "Modules" in source:
         return "edsy"
     if "ship" in source and isinstance(source.get("ship"), dict):
         return "inara"
