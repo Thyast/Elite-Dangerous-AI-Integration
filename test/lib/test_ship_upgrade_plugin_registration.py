@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 from lib.PluginHelper import PluginHelper
 from lib.PluginManager import PluginManager
 from lib.PluginBase import PluginManifest
+from lib.Event import GameEvent
 from plugins.ship_upgrade_manager.ship_upgrade_manager import (
     ShipUpgradeManagerPlugin,
     ShipUpgradeProjection,
@@ -95,3 +96,56 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
 
     assert prompt_generator.status_generators[0]({}) == []
     plugin.on_chat_stop(helper)
+
+
+def test_registered_sideeffect_completes_module_from_game_event(tmp_path: Path):
+    action_manager = _ActionManager()
+    event_manager = _EventManager()
+    helper = _PluginDataHelper(
+        PluginManager({"plugin_settings": {}}),
+        _PromptGenerator(),
+        {},
+        action_manager,
+        event_manager,
+        None,
+        None,
+        None,
+        None,
+        None,
+        data_path=tmp_path,
+    )
+    plugin = ShipUpgradeManagerPlugin(
+        PluginManifest(
+            '{"guid":"event-test-guid","name":"Ship Upgrade","version":"1.0.0"}'
+        )
+    )
+    plugin.on_chat_start(helper)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {
+                    "id": "fsd",
+                    "item": "int_hyperdrive_size5_class5",
+                    "slot": "FrameShiftDrive",
+                }
+            ],
+        },
+    )
+    plugin.start_session("PvE", "SHIP-1")
+
+    event_manager.sideeffects[0](
+        GameEvent(
+            content={
+                "event": "ModuleBuy",
+                "ShipID": "SHIP-1",
+                "BuyItem": "int_hyperdrive_size5_class5",
+                "Slot": "FrameShiftDrive",
+            },
+            historic=False,
+        ),
+        {},
+    )
+
+    assert plugin.get_session()["completed_steps"] == ["fsd"]
