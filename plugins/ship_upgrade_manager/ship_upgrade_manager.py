@@ -554,14 +554,49 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 if isinstance(module, dict)
             ] if isinstance(modules, list) else []
         if event_name == "ModuleBuy":
-            return [{"item": content.get("BuyItem"), "slot": content.get("Slot")}]
+            return [
+                {
+                    "item": ShipUpgradeManagerPlugin._normalize_event_item(
+                        content.get("BuyItem")
+                    ),
+                    "slot": content.get("Slot"),
+                }
+            ]
         if event_name == "ModuleSwap":
-            return [{"item": content.get("ToItem"), "slot": content.get("ToSlot")}]
+            item = content.get("ToItem")
+            return [
+                {
+                    "item": ShipUpgradeManagerPlugin._normalize_event_item(item),
+                    "slot": content.get("ToSlot"),
+                }
+            ]
         if event_name == "ModuleStore":
-            return [{"item": content.get("StoredItem"), "slot": content.get("Slot")}]
+            return [
+                {
+                    "item": ShipUpgradeManagerPlugin._normalize_event_item(
+                        content.get("StoredItem")
+                    ),
+                    "slot": content.get("Slot"),
+                }
+            ]
         if event_name == "ModuleRetrieve":
-            return [{"item": content.get("RetrievedItem"), "slot": content.get("Slot")}]
+            return [
+                {
+                    "item": ShipUpgradeManagerPlugin._normalize_event_item(
+                        content.get("RetrievedItem")
+                    ),
+                    "slot": content.get("Slot"),
+                }
+            ]
         return []
+
+    @staticmethod
+    def _normalize_event_item(item: Any) -> str | None:
+        if not isinstance(item, str) or not item or item == "Null":
+            return None
+        if item.startswith("$") and item.endswith("_name;"):
+            return item[1:-6]
+        return item
 
     @staticmethod
     def _module_matches_step(step: dict[str, Any], module: dict[str, Any]) -> bool:

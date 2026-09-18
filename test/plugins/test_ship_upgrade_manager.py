@@ -367,6 +367,66 @@ def test_storage_and_retrieval_events_auto_complete_matching_modules(tmp_path: P
     assert plugin.get_session()["completed_steps"] == ["fsd", "shield"]
 
 
+def test_real_journal_module_events_use_ship_id_and_ignore_null_swap(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Kestrel Mk II",
+        "Combat",
+        {
+            "steps": [
+                {
+                    "id": "beam",
+                    "item": "hpt_beamlaser_gimbal_large",
+                    "slot": "LargeHardpoint1",
+                },
+                {
+                    "id": "frag",
+                    "item": "hpt_slugshot_gimbal_small",
+                    "slot": "SmallHardpoint1",
+                },
+            ],
+        },
+    )
+    plugin.start_session("Combat", "15")
+
+    from lib.Event import GameEvent
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "timestamp": "2026-07-05T18:31:28Z",
+                "event": "ModuleBuy",
+                "Slot": "LargeHardpoint1",
+                "StoredItem": "$hpt_mkiiplasmashockautocannon_fixed_large_name;",
+                "BuyItem": "$hpt_beamlaser_gimbal_large_name;",
+                "Ship": "smallcombat01_nx",
+                "ShipID": 15,
+            },
+            historic=False,
+        ),
+        {},
+    )
+    assert plugin.get_session()["completed_steps"] == ["beam"]
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "timestamp": "2026-07-05T20:28:44Z",
+                "event": "ModuleSwap",
+                "FromSlot": "TinyHardpoint1",
+                "ToSlot": "TinyHardpoint4",
+                "FromItem": "$hpt_heatsinklauncher_turret_tiny_name;",
+                "ToItem": "Null",
+                "Ship": "smallcombat01_nx",
+                "ShipID": 15,
+            },
+            historic=False,
+        ),
+        {},
+    )
+    assert plugin.get_session()["completed_steps"] == ["beam"]
+
+
 def test_parse_coriolis_components_to_normalized_steps():
     plan = parse_plan_input(
         {
