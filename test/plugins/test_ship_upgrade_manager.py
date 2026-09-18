@@ -72,6 +72,27 @@ def test_plan_import_and_session_progression(tmp_path: Path):
     assert len(plugin.complete_step("shield")["completed_steps"]) == 2
 
 
+def test_session_history_is_archived_when_stopped_or_replaced(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})
+    plugin.start_session("PvE", "SHIP-1")
+    plugin.complete_step("fsd")
+    plugin.stop_session()
+
+    history = plugin.list_session_history()
+    assert len(history) == 1
+    assert history[0]["ship_instance_id"] == "SHIP-1"
+    assert history[0]["completed_steps"] == ["fsd"]
+    assert history[0]["completion_percent"] == 50
+
+    plugin.start_session("PvE", "SHIP-2")
+    plugin.start_session("PvE", "SHIP-3")
+    assert [item["ship_instance_id"] for item in plugin.list_session_history()] == [
+        "SHIP-2",
+        "SHIP-1",
+    ]
+
+
 def test_reimport_only_increments_version_when_source_changes(tmp_path: Path):
     plugin = _plugin(tmp_path)
     source = {"steps": [{"id": "fsd"}]}

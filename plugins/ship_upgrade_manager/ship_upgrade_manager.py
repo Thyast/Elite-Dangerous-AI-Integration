@@ -493,6 +493,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     UNIQUE(plan_session_id, step_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS session_history (
+                    id TEXT PRIMARY KEY,
+                    plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+                    ship_instance_id TEXT NOT NULL,
+                    ship_custom_name TEXT,
+                    completed_steps TEXT NOT NULL DEFAULT '[]',
+                    session_start TEXT NOT NULL,
+                    session_end TEXT NOT NULL,
+                    plan_version_at_session_start INTEGER NOT NULL,
+                    completion_percent REAL NOT NULL DEFAULT 0
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_plan_applications_ship
                     ON plan_applications(ship_instance_id);
                 """
@@ -714,6 +726,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             raise ValueError("plan_name and ship_instance_id are required")
 
         with self.get_db() as db:
+            self._archive_active_session(db, datetime.now(timezone.utc).isoformat())
             plan = db.execute(
                 "SELECT * FROM plans WHERE plan_name = ? ORDER BY last_modified DESC LIMIT 1",
                 (plan_name,),
@@ -859,8 +872,69 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def stop_session(self) -> None:
         with self.get_db() as db:
+            self._archive_active_session(db, datetime.now(timezone.utc).isoformat())
             db.execute("DELETE FROM active_session WHERE id = 'active'")
         self._publish_status()
+
+    def list_session_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        with self.get_db() as db:
+            rows = db.execute(
+                """
+                SELECT h.*, p.plan_name, p.ship_model
+                FROM session_history h
+                JOIN plans p ON p.id = h.plan_id
+                ORDER BY h.session_end DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        history = []
+        for row in rows:
+            item = dict(row)
+            item["completed_steps"] = json.loads(item["completed_steps"] or "[]")
+            history.append(item)
+        return history
+
+    def _archive_active_session(
+        self, db: sqlite3.Connection, session_end: str
+    ) -> None:
+        row = db.execute(
+            """
+            SELECT s.*, p.plan_name, p.source_json
+            FROM active_session s
+            JOIN plans p ON p.id = s.plan_id
+            WHERE s.id = 'active'
+            """
+        ).fetchone()
+        if row is None:
+            return
+        completed = json.loads(row["completed_steps"] or "[]")
+        total = len(self._plan_steps(row["source_json"]))
+        history_id = hashlib.sha256(
+            f"{row['session_start']}\0{row['plan_id']}\0{row['ship_instance_id']}".encode()
+        ).hexdigest()
+        db.execute(
+            """
+            INSERT OR REPLACE INTO session_history
+                (id, plan_id, ship_instance_id, ship_custom_name,
+                 completed_steps, session_start, session_end,
+                 plan_version_at_session_start, completion_percent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                history_id,
+                row["plan_id"],
+                row["ship_instance_id"],
+                row["ship_custom_name"],
+                json.dumps(completed),
+                row["session_start"],
+                session_end,
+                row["plan_version_at_session_start"],
+                (len(completed) / total * 100) if total else 100,
+            ),
+        )
 
     @staticmethod
     def _plan_steps(source_json: str | None) -> list[dict[str, Any]]:
