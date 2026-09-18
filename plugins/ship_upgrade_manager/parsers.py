@@ -21,19 +21,7 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
     if not isinstance(source, dict):
         raise PlanParseError("Plan export must be a JSON object")
 
-    ship_model = _first_string(
-        source.get("ship_model"),
-        source.get("ship"),
-        source.get("ship", {}).get("name") if isinstance(source.get("ship"), dict) else None,
-        source.get("ship", {}).get("model") if isinstance(source.get("ship"), dict) else None,
-        source.get("shipType"),
-        source.get("Ship"),
-    )
-    if isinstance(source.get("ship"), dict):
-        ship_model = ship_model or _first_string(
-            source["ship"].get("ship"),
-            source["ship"].get("type"),
-        )
+    ship_model = _find_ship_model(source)
     if not ship_model:
         raise PlanParseError("Could not identify the ship model")
 
@@ -195,14 +183,9 @@ def _normalize_steps(source: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(modules, dict):
         modules = list(modules.values())
     elif isinstance(source.get("components"), dict):
-        components = source["components"]
-        modules = [
-            module
-            for group in components.values()
-            if isinstance(group, dict)
-            for module in group.values()
-            if isinstance(module, dict)
-        ]
+        modules = _flatten_component_modules(source["components"])
+    elif isinstance(source.get("loadout"), dict):
+        modules = _flatten_component_modules(source["loadout"])
     if not isinstance(modules, list):
         modules = []
 
@@ -233,6 +216,65 @@ def _normalize_steps(source: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def _find_ship_model(source: dict[str, Any]) -> str | None:
+    ship = source.get("ship")
+    candidates = [
+        source.get("ship_model"),
+        source.get("shipType"),
+        source.get("Ship"),
+        source.get("shipName"),
+        ship.get("shipType") if isinstance(ship, dict) else None,
+        ship.get("model") if isinstance(ship, dict) else None,
+        ship.get("ship") if isinstance(ship, dict) else None,
+        ship.get("name") if isinstance(ship, dict) else ship,
+        source.get("vehicle", {}).get("name")
+        if isinstance(source.get("vehicle"), dict)
+        else None,
+        source.get("vehicle", {}).get("model")
+        if isinstance(source.get("vehicle"), dict)
+        else None,
+    ]
+    return _first_string(*candidates)
+
+
+def _flatten_component_modules(value: Any) -> list[dict[str, Any]]:
+    """Flatten Coriolis/Inara component trees without treating metadata as modules."""
+    modules: list[dict[str, Any]] = []
+    if isinstance(value, list):
+        for item in value:
+            modules.extend(_flatten_component_modules(item))
+        return modules
+    if not isinstance(value, dict):
+        return modules
+
+    item = _first_string(
+        value.get("item"),
+        value.get("Item"),
+        value.get("module"),
+        value.get("module_id"),
+        value.get("id") if value.get("slot") or value.get("name") else None,
+        value.get("name") if value.get("slot") else None,
+    )
+    slot = _first_string(
+        value.get("slot"),
+        value.get("Slot"),
+        value.get("slot_id"),
+        value.get("position"),
+    )
+    if item:
+        module = dict(value)
+        module["item"] = item
+        if slot:
+            module["slot"] = slot
+        modules.append(module)
+        return modules
+
+    for child in value.values():
+        if isinstance(child, (dict, list)):
+            modules.extend(_flatten_component_modules(child))
+    return modules
+
+
 def _normalize_step(step: Any, index: int) -> dict[str, Any]:
     if not isinstance(step, dict):
         raise PlanParseError(f"Step {index} must be an object")
@@ -251,9 +293,17 @@ def _first_string(*values: Any) -> str | None:
 
 
 def _detect_format(source: dict[str, Any]) -> str:
-    if "components" in source:
+    if source.get("format") in {"coriolis", "inara"}:
+        return str(source["format"])
+    if "components" in source or "$schema" in source and "coriolis.io" in str(source["$schema"]):
         return "coriolis"
-    if "modules" in source or "Modules" in source:
+    if "modules" in source or "Modules" in source or "loadout" in source:
+        if "shipType" in source or "shipId" in source:
+            return "inara"
+        if isinstance(source.get("ship"), dict) and (
+            "shipType" in source["ship"] or "shipId" in source["ship"]
+        ):
+            return "inara"
         return "edsy"
     if "ship" in source and isinstance(source.get("ship"), dict):
         return "inara"

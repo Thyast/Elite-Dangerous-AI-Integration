@@ -102,6 +102,65 @@ def test_parse_coriolis_components_to_normalized_steps():
     assert plan["steps"][0]["item"] == "Frame Shift Drive"
 
 
+def test_parse_coriolis_nested_component_groups():
+    plan = parse_plan_input(
+        {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "ship": "python",
+            "components": {
+                "hardpoints": {
+                    "medium_1": {
+                        "name": "2D Beam Laser",
+                        "slot": "MediumHardpoint1",
+                    }
+                },
+                "standard": {
+                    "powerplant": {
+                        "module": "5A Power Plant",
+                        "slot": "PowerPlant",
+                    }
+                },
+            },
+        }
+    )
+
+    assert plan["source_format"] == "coriolis"
+    assert {step["slot"] for step in plan["steps"]} == {
+        "MediumHardpoint1",
+        "PowerPlant",
+    }
+
+
+def test_parse_inara_loadout():
+    plan = parse_plan_input(
+        {
+            "name": "Exploration",
+            "ship": {"shipType": "diamondbackexplorer", "name": "DBX"},
+            "loadout": {
+                "core": {
+                    "frame_shift_drive": {
+                        "module_id": "int_hyperdrive_size5_class5",
+                        "slot_id": "FrameShiftDrive",
+                    }
+                },
+                "optional": [
+                    {
+                        "item": "int_detailedsurfacescanner_tiny",
+                        "position": "Slot01_Size1",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert plan["source_format"] == "inara"
+    assert plan["ship_model"] == "diamondbackexplorer"
+    assert [step["item"] for step in plan["steps"]] == [
+        "int_hyperdrive_size5_class5",
+        "int_detailedsurfacescanner_tiny",
+    ]
+
+
 def test_parse_rejects_missing_ship():
     try:
         parse_plan_input({"name": "Invalid", "steps": []})
