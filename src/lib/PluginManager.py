@@ -4,9 +4,9 @@ import json
 import os
 
 import sys
-from typing import Self
+from typing import Any, Self
 
-from lib.Config import Config
+from lib.Config import Config, save_config
 
 from .PluginSettingDefinitions import PluginSettings, ModelProviderDefinition, ParagraphSetting, SettingsGrid, ErrorSetting
 from .Logger import log
@@ -258,8 +258,38 @@ class PluginManager:
             try:
                 if module.plugin_manifest.guid in new_config.get('plugin_settings', {}):
                     module.settings = new_config.get('plugin_settings', {}).get(module.plugin_manifest.guid) or {}
+                module.on_settings_changed()
             except Exception as e:
                 log('error', f"Failed to execute on_settings_changed hook for {module.plugin_manifest.name}: {e}")
+
+    def update_plugin_setting(self, plugin_guid: str, key: str, value: Any) -> bool:
+        """Persist one plugin setting and notify the UI and owning plugin."""
+        plugin = next(
+            (
+                module
+                for module in self.plugin_list.values()
+                if module.plugin_manifest.guid == plugin_guid
+            ),
+            None,
+        )
+        if plugin is None:
+            log('warning', f"Ignoring setting update for unknown plugin {plugin_guid}")
+            return False
+
+        plugin_settings = self.config.setdefault('plugin_settings', {})
+        settings = plugin_settings.setdefault(plugin_guid, {})
+        settings[key] = value
+        plugin.settings = settings
+
+        save_config(self.config)
+        emit_message("config", config=self.config)
+
+        try:
+            plugin.on_settings_changed()
+        except Exception as e:
+            log('error', f"Failed to execute on_settings_changed hook for {plugin.plugin_manifest.name}: {e}")
+            return False
+        return True
 
     def on_settings_button(self, plugin_guid: str, key: str):
         """Route a plugin settings button click to its owning plugin."""

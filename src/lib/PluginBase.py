@@ -82,6 +82,10 @@ class PluginBase(ABC):
         """Handle a click on a button declared in this plugin's settings UI."""
         pass
 
+    def on_settings_changed(self) -> None:
+        """Called after persisted settings for this plugin have changed."""
+        pass
+
     def migrate_settings(self, settings: dict[str, Any], from_version: int) -> None:
         """Migrate settings from one schema version to the next."""
         pass

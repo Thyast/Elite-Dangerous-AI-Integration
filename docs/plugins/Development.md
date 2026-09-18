@@ -105,6 +105,23 @@ And a manifest file like this: (**The GUID must be unique. Generate a new one fo
 }
 ```
 
+## Updating plugin settings from Python
+
+Plugins can update a persisted setting and notify the UI through the plugin manager:
+
+```python
+helper._plugin_manager.update_plugin_setting(
+    plugin_manifest.guid,
+    "status",
+    "Import completed",
+)
+```
+
+The manager persists the value in `config.json`, emits the normal `config` message,
+and calls the plugin's optional `on_settings_changed()` hook. The hook is also called
+when settings are changed from the UI. Plugins should keep durable application data
+in their dedicated `plugin_data/<guid>` directory rather than in plugin settings.
+
 The `PluginBase` base class has the following methods that can be overridden:
 
 - `on_chat_start(self, helper: PluginHelper)`:  
