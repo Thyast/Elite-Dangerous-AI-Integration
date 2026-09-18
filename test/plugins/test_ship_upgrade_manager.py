@@ -84,6 +84,64 @@ def test_reimport_only_increments_version_when_source_changes(tmp_path: Path):
     assert plugin.list_plans()[0]["plan_version"] == 2
 
 
+def test_plan_diff_reports_added_removed_and_changed_modules(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "old"}, {"id": "shield", "item": "same"}]},
+    )
+
+    diff = plugin.diff_plan(
+        "PvE",
+        {
+            "steps": [
+                {"id": "fsd", "item": "new"},
+                {"id": "cargo", "item": "added"},
+            ]
+        },
+    )
+
+    assert diff["current_version"] == 1
+    assert diff["next_version"] == 2
+    assert [step["id"] for step in diff["added"]] == ["cargo"]
+    assert [step["id"] for step in diff["removed"]] == ["shield"]
+    assert diff["changed"][0]["before"]["item"] == "old"
+    assert diff["changed"][0]["after"]["item"] == "new"
+
+
+def test_reimport_migrates_active_session_without_completing_changed_modules(
+    tmp_path: Path,
+):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "fsd", "item": "same"}, {"id": "shield", "item": "old"}]},
+    )
+    plugin.start_session("PvE", "SHIP-1")
+    plugin.complete_step("fsd")
+
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "fsd", "item": "same"},
+                {"id": "shield", "item": "new"},
+                {"id": "cargo", "item": "added"},
+            ]
+        },
+    )
+
+    session = plugin.get_session()
+    assert session is not None
+    assert session["completed_steps"] == ["fsd"]
+    assert session["current_step"] == 1
+    assert session["plan_version"] == 2
+    assert session["plan_version_at_session_start"] == 2
+
+
 def test_parse_coriolis_components_to_normalized_steps():
     plan = parse_plan_input(
         {

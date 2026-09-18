@@ -308,14 +308,25 @@ class ShipUpgradeManagerPlugin(PluginBase):
         value = self.settings.get("plan_input", "")
         try:
             normalized = parse_plan_input(value)
+            diff = self.diff_plan(
+                normalized["plan_name"],
+                normalized,
+            )
             plan_id = self.import_plan(
                 normalized["ship_model"],
                 normalized["plan_name"],
                 normalized,
             )
+            change_summary = (
+                f"{diff['added_count']} added, "
+                f"{diff['removed_count']} removed, "
+                f"{diff['changed_count']} changed"
+                if diff["current_version"] is not None
+                else "new plan"
+            )
             self._set_status(
                 f"Imported '{normalized['plan_name']}' for {normalized['ship_model']} "
-                f"({len(normalized['steps'])} steps)."
+                f"({len(normalized['steps'])} modules; {change_summary})."
             )
             log("info", f"Imported Ship Upgrade Manager plan {plan_id}")
         except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
@@ -479,7 +490,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
         with self.get_db() as db:
             existing = db.execute(
-                "SELECT id, plan_version, source_hash FROM plans "
+                "SELECT id, plan_version, source_hash, source_json FROM plans "
                 "WHERE ship_model = ? AND plan_name = ?",
                 (ship_model, plan_name),
             ).fetchone()
@@ -501,6 +512,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if existing["source_hash"] == source_hash:
                 return existing["id"]
 
+            old_steps = self._plan_steps(existing["source_json"])
+            new_steps = self._plan_steps(source_json)
+            new_version = existing["plan_version"] + 1
             db.execute(
                 """
                 UPDATE plans
@@ -508,9 +522,61 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     last_modified = ?
                 WHERE id = ?
                 """,
-                (source_json, source_hash, existing["plan_version"] + 1, now, existing["id"]),
+                (source_json, source_hash, new_version, now, existing["id"]),
+            )
+            self._migrate_active_session(
+                db, existing["id"], old_steps, new_steps, new_version, now
             )
             return existing["id"]
+
+    def diff_plan(
+        self,
+        plan_name: str,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Compare an imported source with the currently stored plan."""
+        if not plan_name.strip():
+            raise ValueError("plan_name is required")
+        incoming = self._plan_steps(json.dumps(source, sort_keys=True))
+        ship_model = next(
+            (
+                value.strip()
+                for value in (
+                    source.get("ship_model"),
+                    source.get("ship"),
+                    source.get("Ship"),
+                )
+                if isinstance(value, str) and value.strip()
+            ),
+            None,
+        )
+        with self.get_db() as db:
+            if ship_model:
+                row = db.execute(
+                    "SELECT source_json, plan_version FROM plans "
+                    "WHERE plan_name = ? AND ship_model = ? "
+                    "ORDER BY last_modified DESC LIMIT 1",
+                    (plan_name.strip(), ship_model),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT source_json, plan_version FROM plans "
+                    "WHERE plan_name = ? ORDER BY last_modified DESC LIMIT 1",
+                    (plan_name.strip(),),
+                ).fetchone()
+        if row is None:
+            return {
+                "plan_name": plan_name,
+                "current_version": None,
+                "next_version": 1,
+                **self._diff_steps([], incoming),
+            }
+        return {
+            "plan_name": plan_name,
+            "current_version": row["plan_version"],
+            "next_version": row["plan_version"] + 1,
+            **self._diff_steps(self._plan_steps(row["source_json"]), incoming),
+        }
 
     def list_plans(self) -> list[dict[str, Any]]:
         with self.get_db() as db:
@@ -713,6 +779,95 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if len({step["id"] for step in steps}) != len(steps):
             raise ValueError("Plan step ids must be unique")
         return steps
+
+    @staticmethod
+    def _step_signature(step: dict[str, Any]) -> str:
+        comparable = {key: value for key, value in step.items() if key != "id"}
+        return json.dumps(comparable, sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def _diff_steps(
+        cls,
+        old_steps: list[dict[str, Any]],
+        new_steps: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        old_by_id = {step["id"]: step for step in old_steps}
+        new_by_id = {step["id"]: step for step in new_steps}
+        added = [new_by_id[key] for key in new_by_id.keys() - old_by_id.keys()]
+        removed = [old_by_id[key] for key in old_by_id.keys() - new_by_id.keys()]
+        changed = [
+            {"before": old_by_id[key], "after": new_by_id[key]}
+            for key in old_by_id.keys() & new_by_id.keys()
+            if cls._step_signature(old_by_id[key]) != cls._step_signature(new_by_id[key])
+        ]
+        changed_ids = {item["after"]["id"] for item in changed}
+        unchanged = [
+            new_by_id[key]
+            for key in old_by_id.keys() & new_by_id.keys()
+            if key not in changed_ids
+        ]
+        return {
+            "added": added,
+            "removed": removed,
+            "changed": changed,
+            "unchanged": unchanged,
+            "added_count": len(added),
+            "removed_count": len(removed),
+            "changed_count": len(changed),
+        }
+
+    def _migrate_active_session(
+        self,
+        db: sqlite3.Connection,
+        plan_id: str,
+        old_steps: list[dict[str, Any]],
+        new_steps: list[dict[str, Any]],
+        new_version: int,
+        now: str,
+    ) -> None:
+        session = db.execute(
+            "SELECT completed_steps FROM active_session "
+            "WHERE id = 'active' AND plan_id = ?",
+            (plan_id,),
+        ).fetchone()
+        if session is None:
+            return
+
+        completed = json.loads(session["completed_steps"] or "[]")
+        old_by_id = {step["id"]: step for step in old_steps}
+        new_by_id = {step["id"]: step for step in new_steps}
+        migrated = [
+            step_id
+            for step_id in completed
+            if step_id in new_by_id
+            and step_id in old_by_id
+            and self._step_signature(old_by_id[step_id])
+            == self._step_signature(new_by_id[step_id])
+        ]
+        current_step = next(
+            (
+                index
+                for index, step in enumerate(new_steps)
+                if step["id"] not in migrated
+            ),
+            len(new_steps),
+        )
+        db.execute(
+            """
+            UPDATE active_session
+            SET completed_steps = ?, current_step = ?,
+                plan_version_at_session_start = ?, last_activity = ?
+            WHERE id = 'active'
+            """,
+            (json.dumps(migrated), current_step, new_version, now),
+        )
+        db.execute(
+            "DELETE FROM step_history WHERE plan_session_id = 'active' "
+            "AND step_id NOT IN ({})".format(
+                ",".join("?" for _ in migrated) or "''"
+            ),
+            migrated,
+        )
 
     def _publish_status(self) -> None:
         if self.helper is None:
