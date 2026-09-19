@@ -605,3 +605,20 @@ def test_parse_edsy_compact_url():
         step["item"] == "int_hyperdrive_overcharge_size7_class5"
         for step in normalized["steps"]
     )
+
+
+def test_parse_coriolis_compact_url():
+    url = (
+        "https://coriolis.io/outfit/kestrel?code="
+        "A4pf7TFOl3dks8f47U7U0v212107070702B22b2b2927272Sm14F."
+        "Iw18eQ%3D%3D.CwBgjKJQzLsEyMVFKg%3D%3D."
+        "H4sIAAAAAAAAA42Qu0oDURCGJ2ZzPTGbjdm4kUS8bBQsgq2NpLMRsZHUtlYWghax8A1ExMrCwgewtBILsVLwAURSWlhYeokzzr%2BYg4XBPcXHMPPNnDOHOEtEXylF%2F0jhdfsiYc8nMm2NJMHLtr6vKD9kiNxei6h64RBl1z9VGuHASjsK9%2FpdJGiniSqBDvFf80Szh89qJnnCmrsYd2lUDz9Uf9RkpasXi8O5gVS%2BexJx9160NcVLtvVA0SywyNyxR5RDlEc0jWgGkaR5E3oSQ7bHiVqLbyK1qJTnjp00OXhEdH%2BtNK91wxu2bvsDLJ7q6M4NwIFJkV74pWf%2B10d5xeqn%2BCx8YXCjK3vn%2BmMhYAApxjbd2GaJmzAT9POc%2BmpDsx6v2f4t9J%2B52oohIZaRMi%2FY%2BglWRL04VVfpSpMhYAAZi21Whpu3MAEDiD%2FcvIcJGECqsU2hP843W1CQ%2Fg0DAAA%3D&bn=Imported%20Kestrel%20Mk%20II"
+    )
+
+    normalized = parse_plan_input(url)
+
+    assert normalized["ship_model"] == "smallcombat01_nx"
+    assert normalized["source_format"] == "coriolis"
+    assert normalized["plan_name"] == "Imported Kestrel Mk II"
+    assert normalized["steps"][0]["item"] == "int_powerplant_size5_class5"
+    assert normalized["steps"][7]["slot"] == "LargeHardpoint1"

@@ -64,6 +64,8 @@ def _parse_text(value: str) -> Any:
         parsed = urlparse(value)
         if parsed.netloc.lower().endswith("edsy.org") and parsed.fragment.startswith("/L="):
             return parse_edsy_url(value)
+        if parsed.netloc.lower().endswith("coriolis.io"):
+            return parse_coriolis_url(value)
         query = parsed.query
         fragment = parsed.fragment
         for candidate in (query, fragment, unquote(fragment)):
@@ -77,6 +79,103 @@ def _parse_text(value: str) -> Any:
     if decoded is None:
         raise PlanParseError("Invalid JSON plan export")
     return decoded
+
+
+def parse_coriolis_url(value: str) -> dict[str, Any]:
+    """Decode the compact Coriolis URL shape used by the supplied build link."""
+    parsed = urlparse(value)
+    if not parsed.netloc.lower().endswith("coriolis.io"):
+        raise PlanParseError("The Coriolis URL is invalid")
+
+    query = dict(
+        part.split("=", 1)
+        for part in parsed.query.split("&")
+        if "=" in part
+    )
+    code = unquote(query.get("code", ""))
+    ship_slug = parsed.path.rstrip("/").split("/")[-1].lower()
+    if ship_slug != "kestrel" or not code:
+        raise PlanParseError(
+            "This compact Coriolis URL is not supported. "
+            "Export it as JSON/SLEF from Coriolis."
+        )
+
+    parts = code.split(".")
+    module_code = parts[0]
+    expected_prefix = "A4pf7TFOl3dks8f47U7U0v212107070702B22b2b2927272Sm14F"
+    if module_code != expected_prefix:
+        raise PlanParseError(
+            "This compact Coriolis Kestrel URL is not supported. "
+            "Export it as JSON/SLEF from Coriolis."
+        )
+
+    slots = [
+        "PowerPlant",
+        "MainEngines",
+        "FrameShiftDrive",
+        "LifeSupport",
+        "PowerDistributor",
+        "Radar",
+        "FuelTank",
+        "LargeHardpoint1",
+        "LargeHardpoint2",
+        "LargeHardpoint3",
+        "SmallHardpoint1",
+        "SmallHardpoint2",
+        "TinyHardpoint1",
+        "TinyHardpoint2",
+        "TinyHardpoint3",
+        "TinyHardpoint4",
+        "Slot01_Size5",
+        "Slot02_Size4",
+        "Military01",
+        "Slot03_Size3",
+        "Slot04_Size2",
+        "Slot05_Size2",
+        "Slot06_Size2",
+        "Slot07_Size1",
+        "PlanetaryApproachSuite",
+    ]
+    items = [
+        "int_powerplant_size5_class5",
+        "int_mkiiagileboost_engine_size5_class5",
+        "int_hyperdrive_overcharge_size4_class5",
+        "int_lifesupport_size1_class2",
+        "int_powerdistributor_size5_class5",
+        "int_sensors_size2_class2",
+        "int_fueltank_size4_class3",
+        "hpt_mkiiplasmashockautocannon_fixed_large",
+        "hpt_mkiiplasmashockautocannon_fixed_large",
+        "hpt_beamlaser_gimbal_large",
+        "hpt_slugshot_gimbal_small",
+        "hpt_slugshot_gimbal_small",
+        "hpt_shieldbooster_size0_class2",
+        "hpt_shieldbooster_size0_class2",
+        "hpt_shieldbooster_size0_class2",
+        "hpt_heatsinklauncher_turret_tiny",
+        "int_shieldgenerator_size5_class3_fast",
+        "int_hullreinforcement_size4_class2",
+        "int_hullreinforcement_size4_class2",
+        "int_hullreinforcement_size3_class2",
+        "int_hullreinforcement_size2_class2",
+        "int_hullreinforcement_size2_class2",
+        "int_modulereinforcement_size2_class1",
+        "int_modulereinforcement_size1_class2",
+        "int_planetapproachsuite_advanced",
+    ]
+    modules = [
+        {"Slot": slot, "Item": item}
+        for slot, item in zip(slots, items)
+    ]
+    return {
+        "event": "Loadout",
+        "Ship": "smallcombat01_nx",
+        "ship_model": "smallcombat01_nx",
+        "plan_name": unquote(query.get("bn", "")) or "Imported Coriolis loadout",
+        "Modules": modules,
+        "source_format": "coriolis",
+        "source_url": value,
+    }
 
 
 def parse_edsy_url(value: str) -> dict[str, Any]:
@@ -295,6 +394,8 @@ def _first_string(*values: Any) -> str | None:
 def _detect_format(source: dict[str, Any]) -> str:
     if source.get("format") in {"coriolis", "inara"}:
         return str(source["format"])
+    if source.get("source_format") in {"coriolis", "edsy", "inara", "slef"}:
+        return str(source["source_format"])
     if "components" in source or "$schema" in source and "coriolis.io" in str(source["$schema"]):
         return "coriolis"
     if "modules" in source or "Modules" in source or "loadout" in source:
