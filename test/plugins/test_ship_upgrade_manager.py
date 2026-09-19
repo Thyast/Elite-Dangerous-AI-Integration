@@ -264,6 +264,17 @@ def test_settings_apply_changes_reports_invalid_input(tmp_path: Path):
     assert plugin.settings["import_status"].startswith("Apply error:")
 
 
+def test_settings_button_before_chat_start_is_ignored_without_exception():
+    plugin = ShipUpgradeManagerPlugin(
+        PluginManifest(
+            '{"guid":"not-started-test-guid","name":"Ship Upgrade","version":"1.0.0"}'
+        )
+    )
+
+    plugin.on_settings_button("import_plan")
+    plugin.on_settings_button("apply_changes")
+
+
 def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan(

@@ -273,6 +273,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._publish_status()
 
     def on_settings_button(self, key: str) -> None:
+        if self.helper is None:
+            log(
+                "warning",
+                f"Ignoring Ship Upgrade Manager settings button '{key}' "
+                "before chat start",
+            )
+            return
         if key == "import_plan":
             self._import_from_settings()
         elif key == "preview_diff":
