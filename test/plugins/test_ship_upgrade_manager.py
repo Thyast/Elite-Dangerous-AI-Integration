@@ -3,6 +3,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from lib.PluginBase import PluginManifest
@@ -11,6 +13,16 @@ from plugins.ship_upgrade_manager.ship_upgrade_manager import (
     ShipUpgradeManagerPlugin,
 )
 from plugins.ship_upgrade_manager.parsers import PlanParseError, parse_plan_input
+
+
+@pytest.fixture(autouse=True)
+def _empty_journal_dir(tmp_path, monkeypatch):
+    """Keep journal reads hermetic; journal-specific tests override the path."""
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    empty = tmp_path / "no-journals"
+    empty.mkdir()
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(empty))
 
 
 class _PluginManager:
@@ -623,13 +635,7 @@ def test_rename_plan_to_existing_name_reports_error(tmp_path: Path):
     assert {plan["plan_name"] for plan in plugin.list_plans()} == {"Mining", "Combat"}
 
 
-def test_activate_plan_starts_session_for_current_ship(tmp_path: Path, monkeypatch):
-    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
-
-    empty_dir = tmp_path / "no-journals"
-    empty_dir.mkdir()
-    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(empty_dir))
-
+def test_activate_plan_starts_session_for_current_ship(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plan_id = plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}]})
 
@@ -679,6 +685,69 @@ def test_activate_plan_falls_back_to_journal_detection(tmp_path: Path, monkeypat
     assert session is not None
     assert session["ship_instance_id"] == "42"
     assert plugin._current_ship_id == "42"
+
+
+def test_session_start_baselines_steps_satisfied_by_current_loadout(
+    tmp_path: Path, monkeypatch
+):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    modules = [
+        {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"},
+        {
+            "Slot": "FrameShiftDrive",
+            "Item": "int_hyperdrive_size5_class5",
+            "Engineering": {"BlueprintName": "FSD_LongRange", "Level": 3},
+        },
+        {
+            "Slot": "ShieldGenerator",
+            "Item": "int_shieldgenerator_size5_class5",
+            "Engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+        },
+    ]
+    (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
+        json.dumps(
+            {"event": "Loadout", "Ship": "python", "ShipID": 7, "Modules": modules}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "pp", "item": "int_powerplant_size5_class5"},
+                {
+                    "id": "fsd",
+                    "item": "int_hyperdrive_size5_class5",
+                    "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5},
+                },
+                {
+                    "id": "shield",
+                    "item": "int_shieldgenerator_size5_class5",
+                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                },
+            ]
+        },
+    )
+
+    plugin.start_session("PvE", "7")
+
+    session = plugin.get_session()
+    assert set(session["completed_steps"]) == {"pp", "shield"}
+    assert "fsd" not in session["completed_steps"]
+    assert session["current_step"] == 1
+    progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
+    assert progress[0]["completed"] == 2
+    assert progress[0]["total"] == 3
+    assert progress[0]["pct"] == 67
+    assert progress[0]["next_label"] == "int_hyperdrive_size5_class5"
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):

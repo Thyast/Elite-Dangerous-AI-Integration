@@ -1385,6 +1385,110 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
         return True
 
+    def _loadout_baseline_for_ship(self, ship_instance_id: str) -> list[dict[str, Any]]:
+        """Most recent Loadout modules for the given ship, from the journals."""
+        try:
+            journals_path = get_ed_journals_path({})
+            log_files = [
+                os.path.join(journals_path, name)
+                for name in os.listdir(journals_path)
+                if os.path.isfile(os.path.join(journals_path, name))
+                and name.startswith("Journal.")
+            ]
+        except (OSError, FileNotFoundError) as error:
+            log("warning", f"Ship Upgrade Manager loadout baseline failed: {error}")
+            return []
+        for log_file in sorted(log_files, key=os.path.getmtime, reverse=True):
+            try:
+                with open(log_file, encoding="utf-8", errors="ignore") as handle:
+                    lines = handle.readlines()
+            except OSError as error:
+                log("warning", f"Ship Upgrade Manager loadout baseline read failed: {error}")
+                continue
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("event") != "Loadout":
+                    continue
+                if str(entry.get("ShipID", "")) != str(ship_instance_id):
+                    continue
+                modules = entry.get("Modules")
+                return modules if isinstance(modules, list) else []
+        return []
+
+    @staticmethod
+    def _normalize_module_id(module_id: str) -> str:
+        normalized = module_id.strip()
+        if normalized.startswith("$"):
+            normalized = normalized[1:]
+        if normalized.lower().endswith("_name;"):
+            normalized = normalized[:-len("_name;")]
+        return normalized.lower()
+
+    @staticmethod
+    def _blueprint_key(blueprint: str) -> str:
+        """Comparable blueprint key: 'Engine_Dirty' and 'dirty' both map to 'dirty'."""
+        last_segment = blueprint.strip().split("_")[-1]
+        return re.sub(r"[^a-z0-9]", "", last_segment.lower())
+
+    def _steps_satisfied_by_loadout(
+        self, steps: list[dict[str, Any]], modules: list[dict[str, Any]]
+    ) -> list[str]:
+        """Step ids already satisfied by the ship's current loadout.
+
+        A step is satisfied when a loadout module carries the same item and,
+        when the plan requires engineering, a blueprint of the same family at
+        an equal or higher level. Steps without an installed module stay open,
+        so engineering-only progress starts from the real ship state."""
+        loadout: dict[str, list[tuple[str, Any]]] = {}
+        for module in modules:
+            item = self._normalize_module_id(str(module.get("Item") or ""))
+            if not item or item == "null":
+                continue
+            engineering = module.get("Engineering") or {}
+            blueprint = str(engineering.get("BlueprintName") or engineering.get("blueprint") or "")
+            level = engineering.get("Level") or engineering.get("level")
+            loadout.setdefault(item, []).append((blueprint, level))
+        satisfied: list[str] = []
+        for step in steps:
+            item = self._normalize_module_id(
+                str(step.get("item") or step.get("id") or "")
+            )
+            candidates = loadout.get(item)
+            if not candidates:
+                continue
+            required = step.get("engineering") or {}
+            required_blueprint = str(
+                required.get("BlueprintName") or required.get("blueprint") or ""
+            )
+            required_level = required.get("Level") or required.get("level")
+            if required_blueprint or required_level:
+                satisfied_module = any(
+                    (
+                        not required_blueprint
+                        or self._blueprint_key(blueprint)
+                        == self._blueprint_key(required_blueprint)
+                    )
+                    and (
+                        required_level is None
+                        or (
+                            isinstance(level, (int, float))
+                            and level >= required_level
+                        )
+                    )
+                    for blueprint, level in candidates
+                    if blueprint
+                )
+                if not satisfied_module:
+                    continue
+            satisfied.append(str(step["id"]))
+        return satisfied
+
     def start_session(
         self,
         plan_name: str,
@@ -1413,19 +1517,32 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 self._archive_active_session(
                     db, now, session_id=session_id
                 )
+            # Baseline: steps already satisfied by the ship's current loadout
+            # (installed module, and matching engineering when the plan asks
+            # for it) start completed instead of from zero.
+            baseline_modules = self._loadout_baseline_for_ship(ship_instance_id)
+            satisfied = self._steps_satisfied_by_loadout(steps, baseline_modules)
+            current_step = next(
+                (
+                    index
+                    for index, step in enumerate(steps)
+                    if step["id"] not in satisfied
+                ),
+                len(steps),
+            )
             db.execute(
                 """
                 INSERT INTO active_session
                     (id, plan_id, ship_instance_id, ship_custom_name,
-                     completed_steps, session_start, last_activity,
+                     completed_steps, current_step, session_start, last_activity,
                      plan_version_at_session_start, paused)
-                VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(id) DO UPDATE SET
                     plan_id = excluded.plan_id,
                     ship_instance_id = excluded.ship_instance_id,
                     ship_custom_name = excluded.ship_custom_name,
-                    current_step = 0,
-                    completed_steps = '[]',
+                    completed_steps = excluded.completed_steps,
+                    current_step = excluded.current_step,
                     session_start = excluded.session_start,
                     last_activity = excluded.last_activity,
                     plan_version_at_session_start = excluded.plan_version_at_session_start,
@@ -1436,6 +1553,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     plan["id"],
                     ship_instance_id,
                     ship_custom_name or None,
+                    json.dumps(satisfied),
+                    current_step,
                     now,
                     now,
                     plan["plan_version"],
