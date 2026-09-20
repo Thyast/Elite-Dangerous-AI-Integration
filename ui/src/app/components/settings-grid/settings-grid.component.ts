@@ -69,4 +69,8 @@ export class SettingsGridComponent {
     handleButtonClick(field: SettingBase): void {
         this.onButtonClick?.(field.key);
     }
+
+    handleListAction(event: { action: string; rowKey: string }): void {
+        this.onButtonClick?.(`${event.action}:${event.rowKey}`);
+    }
 }

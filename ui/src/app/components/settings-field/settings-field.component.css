@@ -54,3 +54,54 @@ mat-slide-toggle {
     color: #ff9800;
     font-style: italic;
 }
+
+.list-field {
+    margin: 8px 0;
+}
+
+.list-field h4 {
+    margin: 0 0 4px 0;
+    font-weight: 500;
+}
+
+.list-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.2));
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+.list-row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.list-row-title {
+    font-weight: 500;
+}
+
+.list-row-meta {
+    font-size: 0.85em;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}
+
+.list-row-actions {
+    display: flex;
+    gap: 4px;
+    flex: none;
+}
+
+.list-row-actions button.danger {
+    color: #ef5350;
+}
+
+.list-empty {
+    margin: 0;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}

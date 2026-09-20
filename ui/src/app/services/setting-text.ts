@@ -16,13 +16,17 @@ export function looksLikeI18nKey(value: string | null | undefined): boolean {
  * Keys are translated; literal strings pass through untouched so plugins
  * that have not been migrated to i18n keep working.
  */
-export function resolveSettingText(translate: TranslateService, value: string | null | undefined): string {
+export function resolveSettingText(
+    translate: TranslateService,
+    value: string | null | undefined,
+    params?: { [name: string]: string | number },
+): string {
     if (!value) {
         return "";
     }
     if (!looksLikeI18nKey(value)) {
         return value;
     }
-    const translated = translate.instant(value);
+    const translated = translate.instant(value, params);
     return typeof translated === "string" ? translated : value;
 }

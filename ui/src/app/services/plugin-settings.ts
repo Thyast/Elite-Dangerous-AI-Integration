@@ -12,17 +12,18 @@ export interface SettingsGrid {
     label: string;
     collapsible?: boolean;
     default_collapsed?: boolean;
-    fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting)[];
+    fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting)[];
 }
 
 export interface SettingBase {
     key: string;
     label: string;
-    type: "paragraph" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "error";
+    type: "paragraph" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "list" | "error";
     readonly: boolean | null;
     placeholder: string | null;
     icon?: string;
     default_value?: any;
+    params?: { [name: string]: string | number };
 
     // Paragraph & Error
     content: string;
@@ -44,6 +45,10 @@ export interface SettingBase {
     // Select
     select_options: SelectOption[];
     multi_select: boolean;
+
+    // List
+    items: ListRow[];
+    row_actions: ListAction[];
 }
 
 export interface TextSetting extends SettingBase {
@@ -69,6 +74,21 @@ export interface ButtonSetting extends SettingBase {
 export interface ParagraphSetting extends SettingBase {}
 
 export interface ErrorSetting extends SettingBase {}
+
+export interface ListAction {
+    action: string;
+    icon?: string;
+    label?: string;
+    danger?: boolean;
+}
+
+export interface ListRow {
+    key: string;
+    title: string;
+    meta?: string;
+}
+
+export interface ListSetting extends SettingBase {}
 
 export interface SelectSetting extends SettingBase {
     default_value: string | string[] | null;

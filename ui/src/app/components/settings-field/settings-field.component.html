@@ -23,7 +23,7 @@
             @if (resolve(field.label)) {
                 <h4>{{ resolve(field.label) }}</h4>
             }
-            <p [innerHTML]="resolve(field.content)"></p>
+            <p [innerHTML]="resolve(field.content, field.params)"></p>
         </div>
     }
     @case ('error') {
@@ -31,7 +31,7 @@
             @if (resolve(field.label)) {
                 <h4>{{ resolve(field.label) }}</h4>
             }
-            <pre>{{ resolve(field.content) }}</pre>
+            <pre>{{ resolve(field.content, field.params) }}</pre>
         </div>
     }
     @case ('text') {
@@ -94,6 +94,35 @@
                 }
             </mat-select>
         </mat-form-field>
+    }
+    @case ('list') {
+        <div class="list-field">
+            @if (resolve(field.label)) {
+                <h4>{{ resolve(field.label) }}</h4>
+            }
+            @for (row of field.items; track row.key) {
+                <div class="list-row">
+                    <div class="list-row-text">
+                        <span class="list-row-title">{{ row.title }}</span>
+                        @if (row.meta) {
+                            <span class="list-row-meta">{{ row.meta }}</span>
+                        }
+                    </div>
+                    <div class="list-row-actions">
+                        @for (action of field.row_actions; track action.action) {
+                            <button mat-icon-button type="button"
+                                    [attr.aria-label]="resolve(action.label)"
+                                    [class.danger]="action.danger"
+                                    (click)="onListAction(action, row)">
+                                <mat-icon>{{ action.icon }}</mat-icon>
+                            </button>
+                        }
+                    </div>
+                </div>
+            } @empty {
+                <p class="list-empty">{{ resolve(field.placeholder) }}</p>
+            }
+        </div>
     }
     @default {
         <p class="unknown-field">Unknown field type: {{ field.type }}</p>

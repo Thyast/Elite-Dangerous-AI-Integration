@@ -9,7 +9,7 @@ import { MatOptionModule } from "@angular/material/core";
 import { MatButtonModule } from "@angular/material/button";
 import { TranslateService } from "@ngx-translate/core";
 import { MatIconModule } from "@angular/material/icon";
-import { SettingBase } from "../../services/plugin-settings";
+import { SettingBase, ListAction, ListRow } from "../../services/plugin-settings";
 import { resolveSettingText } from "../../services/setting-text";
 
 /**
@@ -53,9 +53,13 @@ export class SettingsFieldComponent {
      */
     @Output() valueChange = new EventEmitter<any>();
     @Output() buttonClick = new EventEmitter<void>();
+    @Output() listAction = new EventEmitter<{ action: string; rowKey: string }>();
 
-    resolve(value: string | null | undefined): string {
-        return resolveSettingText(this.translate, value);
+    resolve(
+        value: string | null | undefined,
+        params?: { [name: string]: string | number },
+    ): string {
+        return resolveSettingText(this.translate, value, params);
     }
 
     optionLabel(option: { label?: string | null }): string {
@@ -68,5 +72,9 @@ export class SettingsFieldComponent {
 
     onButtonClick(): void {
         this.buttonClick.emit();
+    }
+
+    onListAction(action: ListAction, row: ListRow): void {
+        this.listAction.emit({ action: action.action, rowKey: row.key });
     }
 }
