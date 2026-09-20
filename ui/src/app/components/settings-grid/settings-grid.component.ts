@@ -1,7 +1,9 @@
-import { Component, Input, Output, EventEmitter } from "@angular/core";
+import { Component, Input, Output, EventEmitter, inject } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { SettingsFieldComponent } from "../settings-field/settings-field.component";
 import { SettingsGrid, SettingBase } from "../../services/plugin-settings";
+import { TranslateService } from "@ngx-translate/core";
+import { resolveSettingText } from "../../services/setting-text";
 
 /**
  * A reusable component for rendering a settings grid with a label and fields.
@@ -18,6 +20,8 @@ import { SettingsGrid, SettingBase } from "../../services/plugin-settings";
     styleUrl: "./settings-grid.component.css",
 })
 export class SettingsGridComponent {
+    private readonly translate = inject(TranslateService);
+
     /**
      * The settings grid definition containing label and fields.
      */
@@ -54,6 +58,10 @@ export class SettingsGridComponent {
 
     getFieldValue(field: SettingBase): any {
         return this.getValue(field.key, field.default_value);
+    }
+
+    resolve(value: string | null | undefined): string {
+        return resolveSettingText(this.translate, value);
     }
 
     handleButtonClick(field: SettingBase): void {

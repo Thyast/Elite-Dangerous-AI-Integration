@@ -1,0 +1,52 @@
+{
+  "common": {
+    "cancel": "Annuler"
+  },
+  "plugin": {
+    "sum": {
+      "label": "Ship Upgrade Manager",
+      "grid": {
+        "import": "Import de plan",
+        "plans": "Plans importés",
+        "session": "Session active (modules)"
+      },
+      "step": {
+        "data": "Données du plan",
+        "diff": "Diff & confirmation",
+        "imported": "Importé"
+      },
+      "btn": {
+        "import": "Importer un plan",
+        "analyze": "Analyser le plan",
+        "confirm": "Confirmer l'import",
+        "modify": "Modifier les données",
+        "newImport": "Nouvel import",
+        "refresh": "Rafraîchir",
+        "delete": "Supprimer ce plan"
+      },
+      "noImportYet": "Aucun import effectué.",
+      "idleHint": "Le formulaire d'import n'apparaît qu'au besoin — rien n'est affiché par défaut.",
+      "planDataLabel": "Données du plan — Coriolis / EDSY / Inara JSON ou URL",
+      "planDataPlaceholder": "Collez un JSON de loadout exporté ou une URL d'export embarquée",
+      "analyzeHint": "« Analyser » calcule le diff sans importer.",
+      "planChanges": "Changements du plan",
+      "confirmHint": "« Confirmer » applique le plan et migre les sessions actives.",
+      "lastChanges": "Derniers changements appliqués",
+      "errFormat": "Erreur d'import : format de plan non reconnu.",
+      "noPlans": "Aucun plan importé.",
+      "noDeleteYet": "Utilisez l'icône poubelle à côté d'un plan pour le supprimer.",
+      "noSession": "Aucune session active.",
+      "searchPlaceholder": "Nom ou type de vaisseau",
+      "availablePlans": "Plans disponibles",
+      "msg": {
+        "diffBanner": "Diff calculé contre {{plan}} — version {{from}} → {{to}}",
+        "doneBanner": "Plan importé — {{plan}} · v{{version}} · {{modules}} modules · {{sessions}} session(s) active(s) migrée(s)",
+        "importedToday": "importé aujourd'hui",
+        "importedYesterday": "importé hier",
+        "deleted": "Plan « {{plan}} » supprimé.",
+        "deletedNotFound": "Plan « {{plan}} » introuvable — le nom doit correspondre exactement.",
+        "sessionActive": "{{plan}} — {{ship}} · étape {{step}}/{{total}} · {{pct}}% complété"
+      }
+    }
+  }
+}

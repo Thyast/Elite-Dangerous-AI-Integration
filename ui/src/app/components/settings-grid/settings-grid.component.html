@@ -1,13 +1,13 @@
 <div [class]="gridClass">
     @switch (headerLevel) {
         @case ('h2') {
-            <h2>{{ grid.label }}</h2>
+            <h2>{{ resolve(grid.label) }}</h2>
         }
         @case ('h3') {
-            <h3>{{ grid.label }}</h3>
+            <h3>{{ resolve(grid.label) }}</h3>
         }
         @case ('h4') {
-            <h4>{{ grid.label }}</h4>
+            <h4>{{ resolve(grid.label) }}</h4>
         }
     }
     @for (field of grid.fields; track field.key) {

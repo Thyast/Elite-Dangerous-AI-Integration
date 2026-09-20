@@ -1,0 +1,52 @@
+{
+  "common": {
+    "cancel": "Cancel"
+  },
+  "plugin": {
+    "sum": {
+      "label": "Ship Upgrade Manager",
+      "grid": {
+        "import": "Import plan",
+        "plans": "Imported plans",
+        "session": "Active session (modules)"
+      },
+      "step": {
+        "data": "Plan data",
+        "diff": "Diff & confirmation",
+        "imported": "Imported"
+      },
+      "btn": {
+        "import": "Import plan",
+        "analyze": "Analyze plan",
+        "confirm": "Confirm import",
+        "modify": "Modify data",
+        "newImport": "New import",
+        "refresh": "Refresh",
+        "delete": "Delete this plan"
+      },
+      "noImportYet": "No import yet.",
+      "idleHint": "The import form only appears when needed — nothing is shown by default.",
+      "planDataLabel": "Plan data — Coriolis / EDSY / Inara JSON or URL",
+      "planDataPlaceholder": "Paste an exported JSON loadout or an embedded export URL",
+      "analyzeHint": "\"Analyze\" computes the diff without importing.",
+      "planChanges": "Plan changes",
+      "confirmHint": "\"Confirm import\" applies the plan and migrates active sessions.",
+      "lastChanges": "Last changes applied",
+      "errFormat": "Import error: unrecognized plan format.",
+      "noPlans": "No plans imported.",
+      "noDeleteYet": "Use the trash icon next to a plan to delete it.",
+      "noSession": "No active session.",
+      "searchPlaceholder": "Name or ship type",
+      "availablePlans": "Available plans",
+      "msg": {
+        "diffBanner": "Diff computed against {{plan}} — version {{from}} → {{to}}",
+        "doneBanner": "Plan imported — {{plan}} · v{{version}} · {{modules}} modules · {{sessions}} active session(s) migrated",
+        "importedToday": "imported today",
+        "importedYesterday": "imported yesterday",
+        "deleted": "Plan \"{{plan}}\" deleted.",
+        "deletedNotFound": "Plan \"{{plan}}\" not found — the name must match exactly.",
+        "sessionActive": "{{plan}} — {{ship}} · step {{step}}/{{total}} · {{pct}}% completed"
+      }
+    }
+  }
+}
