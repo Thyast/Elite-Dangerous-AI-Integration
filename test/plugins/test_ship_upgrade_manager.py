@@ -501,6 +501,39 @@ def test_plan_filter_filters_rows_live_and_groups_by_ship(tmp_path: Path):
     assert [row["group"] for row in rows] == ["Krait", "Python", "Python"]
 
 
+def test_plan_filter_applies_through_config_updates(tmp_path: Path, monkeypatch):
+    import lib.PluginManager as plugin_manager_module
+    from lib.PluginManager import PluginManager
+
+    guid = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
+    monkeypatch.setattr(plugin_manager_module, "save_config", lambda _config: None)
+    emitted: list[str] = []
+    monkeypatch.setattr(
+        plugin_manager_module,
+        "emit_message",
+        lambda event, **_payload: emitted.append(event),
+    )
+
+    plugin = ShipUpgradeManagerPlugin(
+        PluginManifest(json.dumps({"guid": guid, "name": "SUM", "version": "1.0.0"}))
+    )
+    plugin.on_chat_start(_Helper(tmp_path))
+    plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser"}]})
+    plugin.import_plan("Krait", "Combat", {"steps": [{"id": "cannon"}]})
+
+    manager = PluginManager({"plugin_settings": {}})
+    manager.plugin_list[guid] = plugin
+    manager.register_settings()
+
+    # The UI pushes plugin field values through the generic config channel;
+    # the manager must publish the refreshed rows after running the hooks.
+    manager.on_settings_changed({"plugin_settings": {guid: {"plan_filter": "mining"}}})
+
+    rows = plugin._field("plans", "available_plans")["items"]
+    assert [row["title"] for row in rows] == ["Mining"]
+    assert "plugin_settings_configs" in emitted
+
+
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})

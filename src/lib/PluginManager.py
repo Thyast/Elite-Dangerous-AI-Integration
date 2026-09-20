@@ -261,6 +261,13 @@ class PluginManager:
                 module.on_settings_changed()
             except Exception as e:
                 log('error', f"Failed to execute on_settings_changed hook for {module.plugin_manifest.name}: {e}")
+        # Emit after the hooks so field mutations made inside them (e.g. live
+        # list filtering) are included in the published snapshot.
+        emit_message(
+            "plugin_settings_configs",
+            plugin_settings_configs=self.plugin_settings_configs,
+            has_plugin_settings=(len(self.plugin_settings_configs) > 0),
+        )
 
     def update_plugin_setting(self, plugin_guid: str, key: str, value: Any) -> bool:
         """Persist one plugin setting and notify the UI and owning plugin."""
