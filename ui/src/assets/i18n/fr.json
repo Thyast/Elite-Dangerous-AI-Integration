@@ -49,7 +49,8 @@
         "inProgress": "En cours",
         "paused": "En pause",
         "modules": "{{completed}} / {{total}} modules installés · {{pct}}%",
-        "nextModule": "Prochain module :"
+        "nextModule": "Prochain module :",
+        "suggestedModule": "Premier module suggéré :"
       },
       "msg": {
         "diffBanner": "Diff calculé contre {{plan}} — version {{from}} → {{to}}",

@@ -161,14 +161,14 @@
                     @for (progress of entry.row.progress ?? []; track $index) {
                         <div class="row-progress">
                             <div class="progress-head">
-                                <span class="progress-ship">{{ progress.ship }}<span class="progress-ship-model"> · {{ progress.ship_model || entry.row.group }}</span></span>
+                                <span class="progress-ship">{{ progress.ship }}@if (progress.ship_model && progress.ship_model !== progress.ship) {<span class="progress-ship-model"> · {{ progress.ship_model }}</span>}</span>
                                 <span class="progress-badge" [class.paused]="progress.paused">{{ progress.paused ? resolve('plugin.sum.progress.paused') : resolve('plugin.sum.progress.inProgress') }}</span>
                             </div>
                             <mat-progress-bar [value]="progress.pct ?? 0"></mat-progress-bar>
                             <div class="progress-stats">{{ progressModulesLabel(progress) }}</div>
                             @if (progress.next_label) {
                                 <div class="progress-next">
-                                    <span class="progress-next-label">{{ resolve('plugin.sum.progress.nextModule') }}</span>
+                                    <span class="progress-next-label">{{ progress.completed ? resolve('plugin.sum.progress.nextModule') : resolve('plugin.sum.progress.suggestedModule') }}</span>
                                     <span class="progress-next-module">{{ progress.next_label }}@if (progress.next_grade) {<span> · Grade {{ progress.next_grade }}</span>}@if (progress.next_engineering) {<span> · {{ progress.next_engineering }}</span>}</span>
                                 </div>
                             }

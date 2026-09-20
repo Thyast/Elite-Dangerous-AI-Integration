@@ -113,6 +113,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         super().__init__(plugin_manifest)
         self.helper: PluginHelper | None = None
         self._current_ship_id = ""
+        self._current_ship_name = ""
         self._pending_diff: dict[str, Any] | None = None
         self._last_plan_filter = ""
         self._initialize_database()
@@ -360,14 +361,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return []
         steps = self._plan_steps(plan_row["source_json"])
         total = len(steps)
+        display_model = self._ship_display_name(ship_model)
         progress: list[dict[str, Any]] = []
         for session in sessions:
             completed = json.loads(session["completed_steps"] or "[]")
             completed_set = set(completed)
             next_step = next((step for step in steps if step["id"] not in completed_set), None)
+            custom_name = session["ship_custom_name"] or ""
             entry: dict[str, Any] = {
-                "ship": session["ship_custom_name"] or session["ship_instance_id"],
-                "ship_model": ship_model,
+                # No custom name yet: show the public ship model instead of the
+                # raw journal ship id.
+                "ship": custom_name or display_model,
+                "ship_model": display_model if custom_name else "",
                 "paused": bool(session["paused"]),
                 "completed": len(completed),
                 "total": total,
@@ -725,8 +730,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
         self._publish_status()
 
-    def _detect_ship_from_journal(self) -> str:
-        """Best-effort read of the journals to find the current ship id.
+    def _detect_ship_from_journal(self) -> dict[str, str]:
+        """Best-effort read of the journals to find the current ship id and name.
 
         Journal side effects only reach the plugin once the runtime is started,
         so the settings UI relies on this direct read in config state. Journals
@@ -742,7 +747,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             ]
         except (OSError, FileNotFoundError) as error:
             log("warning", f"Ship Upgrade Manager journal detection failed: {error}")
-            return ""
+            return {}
         for log_file in sorted(log_files, key=os.path.getmtime, reverse=True):
             try:
                 with open(log_file, encoding="utf-8", errors="ignore") as handle:
@@ -759,9 +764,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 except json.JSONDecodeError:
                     continue
                 ship_id = entry.get("ShipID")
-                if ship_id is not None:
-                    return str(ship_id)
-        return ""
+                if ship_id is None:
+                    continue
+                detected: dict[str, str] = {"id": str(ship_id)}
+                ship_name = entry.get("ShipName")
+                if isinstance(ship_name, str) and ship_name.strip():
+                    detected["name"] = ship_name.strip()
+                return detected
+        return {}
 
     def _rename_plan_from_settings(self, plan_id: str, new_name: str) -> None:
         try:
@@ -773,15 +783,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
             )
 
     def _start_plan_session_from_settings(self, plan_id: str) -> None:
-        ship_id = self._current_ship_id or self._detect_ship_from_journal()
-        if ship_id:
-            self._current_ship_id = ship_id
-        if not ship_id:
+        if not self._current_ship_id:
+            detected = self._detect_ship_from_journal()
+            self._current_ship_id = detected.get("id", "")
+            if detected.get("name") and not self._current_ship_name:
+                self._current_ship_name = detected["name"]
+        if not self._current_ship_id:
             self._set_message_field("plans", "plans_status", "plugin.sum.errNoShip")
             return
         try:
             plan = self.get_plan(plan_id)
-            self.start_session(plan["plan_name"], ship_id)
+            self.start_session(plan["plan_name"], self._current_ship_id, self._current_ship_name)
         except ValueError as error:
             log("error", f"Ship Upgrade Manager session start failed: {error}")
             self._set_message_field(
@@ -880,6 +892,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
         if ship_id:
             self._current_ship_id = ship_id
+            ship_name = event.content.get("ShipName")
+            if isinstance(ship_name, str) and ship_name.strip():
+                self._current_ship_name = ship_name.strip()
         modules = self._event_modules(event.content)
         with self.get_db() as db:
             rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
