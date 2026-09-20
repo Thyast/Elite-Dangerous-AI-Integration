@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -649,16 +650,24 @@ def test_activate_plan_starts_session_for_current_ship(tmp_path: Path, monkeypat
 
 
 def test_activate_plan_falls_back_to_journal_detection(tmp_path: Path, monkeypatch):
-    import lib.PluginManager  # noqa: F401  (ensures import order)
     import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
 
     journal_dir = tmp_path / "journals"
     journal_dir.mkdir()
-    (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
-        json.dumps({"event": "Music", "name": "MainTheme"}) + "\n"
+    newest = journal_dir / "Journal.2026-09-20T120000.01.log"
+    newest.write_text(
+        json.dumps({"event": "Fileheader"}) + "\n"
+        + json.dumps({"event": "Music", "name": "MainTheme"}) + "\n",
+        encoding="utf-8",
+    )
+    os.utime(newest, (2_000_000_000, 2_000_000_000))
+    older = journal_dir / "Journal.2026-09-19T080000.01.log"
+    older.write_text(
+        json.dumps({"event": "Rank"}) + "\n"
         + json.dumps({"event": "Loadout", "Ship": "smallcombat01_nx", "ShipID": 42}) + "\n",
         encoding="utf-8",
     )
+    os.utime(older, (1_900_000_000, 1_900_000_000))
     monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
 
     plugin = _plugin(tmp_path)

@@ -726,10 +726,12 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
 
     def _detect_ship_from_journal(self) -> str:
-        """Best-effort read of the newest journal to find the current ship id.
+        """Best-effort read of the journals to find the current ship id.
 
         Journal side effects only reach the plugin once the runtime is started,
-        so the settings UI relies on this direct read in config state."""
+        so the settings UI relies on this direct read in config state. Journals
+        are scanned from the newest file backwards: the first ship id found is
+        the most recently recorded one."""
         try:
             journals_path = get_ed_journals_path({})
             log_files = [
@@ -741,26 +743,24 @@ class ShipUpgradeManagerPlugin(PluginBase):
         except (OSError, FileNotFoundError) as error:
             log("warning", f"Ship Upgrade Manager journal detection failed: {error}")
             return ""
-        if not log_files:
-            return ""
-        latest = max(log_files, key=os.path.getmtime)
-        try:
-            with open(latest, encoding="utf-8", errors="ignore") as handle:
-                recent_lines = handle.readlines()[-400:]
-        except OSError as error:
-            log("warning", f"Ship Upgrade Manager journal read failed: {error}")
-            return ""
-        for line in reversed(recent_lines):
-            line = line.strip()
-            if not line:
-                continue
+        for log_file in sorted(log_files, key=os.path.getmtime, reverse=True):
             try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
+                with open(log_file, encoding="utf-8", errors="ignore") as handle:
+                    lines = handle.readlines()
+            except OSError as error:
+                log("warning", f"Ship Upgrade Manager journal read failed: {error}")
                 continue
-            ship_id = entry.get("ShipID")
-            if ship_id is not None:
-                return str(ship_id)
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ship_id = entry.get("ShipID")
+                if ship_id is not None:
+                    return str(ship_id)
         return ""
 
     def _rename_plan_from_settings(self, plan_id: str, new_name: str) -> None:
