@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from lib.Event import Event, GameEvent, ProjectedEvent
 from lib.EventManager import Projection
 from lib.Logger import log
-from lib.Config import get_asset_path
+from lib.Config import get_asset_path, get_ed_journals_path
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginHelper import PluginHelper
 from lib.PluginSettingDefinitions import (
@@ -725,6 +725,44 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
         self._publish_status()
 
+    def _detect_ship_from_journal(self) -> str:
+        """Best-effort read of the newest journal to find the current ship id.
+
+        Journal side effects only reach the plugin once the runtime is started,
+        so the settings UI relies on this direct read in config state."""
+        try:
+            journals_path = get_ed_journals_path({})
+            log_files = [
+                os.path.join(journals_path, name)
+                for name in os.listdir(journals_path)
+                if os.path.isfile(os.path.join(journals_path, name))
+                and name.startswith("Journal.")
+            ]
+        except (OSError, FileNotFoundError) as error:
+            log("warning", f"Ship Upgrade Manager journal detection failed: {error}")
+            return ""
+        if not log_files:
+            return ""
+        latest = max(log_files, key=os.path.getmtime)
+        try:
+            with open(latest, encoding="utf-8", errors="ignore") as handle:
+                recent_lines = handle.readlines()[-400:]
+        except OSError as error:
+            log("warning", f"Ship Upgrade Manager journal read failed: {error}")
+            return ""
+        for line in reversed(recent_lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ship_id = entry.get("ShipID")
+            if ship_id is not None:
+                return str(ship_id)
+        return ""
+
     def _rename_plan_from_settings(self, plan_id: str, new_name: str) -> None:
         try:
             self.rename_plan(plan_id, new_name)
@@ -735,7 +773,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
             )
 
     def _start_plan_session_from_settings(self, plan_id: str) -> None:
-        ship_id = self._current_ship_id
+        ship_id = self._current_ship_id or self._detect_ship_from_journal()
+        if ship_id:
+            self._current_ship_id = ship_id
         if not ship_id:
             self._set_message_field("plans", "plans_status", "plugin.sum.errNoShip")
             return
