@@ -303,16 +303,19 @@ reference and can be deleted once the UI is validated.
 
 Structure:
 
-1. Grid `import` ("plugin.sum.grid.import"): an import button when idle;
-   a data-entry state (textarea, analyze, cancel); a diff state (rendered
-   diff, confirm, modify, cancel); an imported state (keyed banner, the
-   applied diff kept visible for tracking, new-import entry point).
-   `import_status` only carries import result messages.
-2. Grid `plans` ("plugin.sum.grid.plans"): search, a `list` settings field
-   with one row per plan and a per-row trash action routed as
-   `delete_plan:<plan id>`, refresh, and a delete status paragraph. The
-   old `plan_to_delete` text field is gone.
-3. Grid `session` ("plugin.sum.grid.session"): unchanged summary.
+1. The import entry point is a header action (`import_plan`, icon `add`)
+   rendered to the right of the `plans` grid label; the tunnel grid is
+   omitted entirely while idle. The header action disappears while the
+   tunnel is open.
+2. Grid `import` ("plugin.sum.grid.import"): a data-entry state (textarea,
+   analyze, cancel); a diff state (rendered diff, confirm, modify, cancel);
+   an imported state (keyed banner, the applied diff kept visible for
+   tracking, new-import entry point).
+3. Grid `plans` ("plugin.sum.grid.plans", displayed as "Plans"): search, a
+   `list` settings field with one row per plan and a per-row trash action
+   routed as `delete_plan:<plan id>`, refresh, and a delete status
+   paragraph.
+4. Grid `session` ("plugin.sum.grid.session"): unchanged summary.
 
 The last applied import (banner params and diff HTML) persists in the
 plugin database (`plugin_meta` table) so the confirmed diff stays visible
