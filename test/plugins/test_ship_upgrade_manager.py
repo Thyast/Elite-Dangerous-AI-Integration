@@ -592,9 +592,13 @@ def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
     rows = plugin._field("plans", "available_plans")["items"]
     progress = rows[0]["progress"]
     assert progress[0]["ship"] == "Mina"
-    assert progress[0]["completed"] == 1
-    assert progress[0]["total"] == 2
-    assert progress[0]["pct"] == 50
+    # The bars reflect the ship's current loadout, which is empty here.
+    assert progress[0]["modules_done"] == 0
+    assert progress[0]["modules_total"] == 2
+    assert progress[0]["modules_pct"] == 0
+    assert progress[0]["eng_target"] == 5
+    assert progress[0]["eng_current"] == 0
+    assert progress[0]["eng_pct"] == 0
     assert progress[0]["paused"] is False
     assert progress[0]["next_label"] == "Shield Generator · Size 5 · Class 5"
     assert progress[0]["next_grade"] == 5
@@ -757,10 +761,65 @@ def test_session_start_baselines_steps_satisfied_by_current_loadout(
     assert "fsd" not in session["completed_steps"]
     assert session["current_step"] == 1
     progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
-    assert progress[0]["completed"] == 2
-    assert progress[0]["total"] == 3
-    assert progress[0]["pct"] == 67
+    assert progress[0]["modules_done"] == 3
+    assert progress[0]["modules_total"] == 3
+    assert progress[0]["modules_pct"] == 100
+    # fsd carries the right blueprint at level 3 (< 5), shield at 5: 8/10.
+    assert progress[0]["eng_current"] == 8
+    assert progress[0]["eng_target"] == 10
+    assert progress[0]["eng_pct"] == 80
     assert progress[0]["next_label"] == "Hyperdrive · Size 5 · Class 5"
+
+
+def test_engineering_progress_requires_matching_blueprint(
+    tmp_path: Path, monkeypatch
+):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    modules = [
+        {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"},
+        {
+            "Slot": "ShieldGenerator",
+            "Item": "int_shieldgenerator_size5_class5",
+            "Engineering": {"BlueprintName": "ShieldGenerator_Blast", "Level": 5},
+        },
+    ]
+    (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
+        json.dumps(
+            {"event": "Loadout", "Ship": "python", "ShipID": 7, "Modules": modules}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "pp", "item": "int_powerplant_size5_class5"},
+                {
+                    "id": "shield",
+                    "item": "int_shieldgenerator_size5_class5",
+                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                },
+            ]
+        },
+    )
+
+    plugin.start_session("PvE", "7")
+
+    progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
+    assert progress[0]["modules_done"] == 2
+    assert progress[0]["modules_pct"] == 100
+    # Wrong blueprint: strict rule gives zero engineering points.
+    assert progress[0]["eng_target"] == 5
+    assert progress[0]["eng_current"] == 0
+    assert progress[0]["eng_pct"] == 0
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):

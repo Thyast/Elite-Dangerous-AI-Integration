@@ -48,9 +48,10 @@
       "progress": {
         "inProgress": "In progress",
         "paused": "Paused",
-        "modules": "{{completed}} / {{total}} modules installed · {{pct}}%",
         "nextModule": "Next module:",
-        "suggestedModule": "Suggested first module:"
+        "suggestedModule": "Suggested first module:",
+        "modulesLabel": "Modules",
+        "engineeringLabel": "Engineering"
       },
       "msg": {
         "diffBanner": "Diff computed against {{plan}} — version {{from}} → {{to}}",

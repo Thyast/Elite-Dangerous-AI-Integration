@@ -136,6 +136,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self.helper: PluginHelper | None = None
         self._current_ship_id = ""
         self._current_ship_name = ""
+        self._current_loadout_modules: list[dict[str, Any]] = []
         self._pending_diff: dict[str, Any] | None = None
         self._last_plan_filter = ""
         self._initialize_database()
@@ -386,6 +387,108 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return f"{family} · Size {match.group(2)} · Class {match.group(3)}"
         return family
 
+    def _loadout_for_ship(self, ship_instance_id: str) -> list[dict[str, Any]]:
+        """Current modules of a ship: live runtime snapshot, else journal read."""
+        if self._current_loadout_modules and str(self._current_ship_id) == str(
+            ship_instance_id
+        ):
+            return self._current_loadout_modules
+        return self._loadout_baseline_for_ship(ship_instance_id)
+
+    def _progress_metrics(
+        self, steps: list[dict[str, Any]], modules: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        """Two-criteria progress of a plan against the ship's current loadout.
+
+        Modules: installed steps matched one-to-one against the loadout (slot
+        preferred when known). Engineering: for steps that require it, the sum
+        of target levels vs the sum of levels currently reached — a level only
+        counts when the blueprint matches the target (strict)."""
+        available: list[dict[str, Any]] = []
+        for module in modules:
+            item = self._normalize_module_id(str(module.get("Item") or ""))
+            if not item or item == "null":
+                continue
+            engineering = module.get("Engineering") or {}
+            available.append(
+                {
+                    "item": item,
+                    "slot": str(module.get("Slot") or "").lower(),
+                    "blueprint": str(
+                        engineering.get("BlueprintName")
+                        or engineering.get("blueprint")
+                        or ""
+                    ),
+                    "level": engineering.get("Level") or engineering.get("level"),
+                }
+            )
+        used = [False] * len(available)
+        modules_done = 0
+        eng_target = 0
+        eng_current = 0
+        for step in steps:
+            required = step.get("engineering") or {}
+            required_level = required.get("Level") or required.get("level")
+            if required_level is not None:
+                # The target sums every engineering step of the plan, whether
+                # or not the module is installed yet.
+                eng_target += int(float(required_level))
+            item = self._normalize_module_id(
+                str(step.get("item") or step.get("id") or "")
+            )
+            step_slot = str(step.get("slot") or "").lower()
+            candidate_index = next(
+                (
+                    index
+                    for index, candidate in enumerate(available)
+                    if not used[index]
+                    and candidate["item"] == item
+                    and (
+                        not step_slot
+                        or not candidate["slot"]
+                        or candidate["slot"] == step_slot
+                    )
+                ),
+                None,
+            )
+            if candidate_index is None:
+                candidate_index = next(
+                    (
+                        index
+                        for index, candidate in enumerate(available)
+                        if not used[index] and candidate["item"] == item
+                    ),
+                    None,
+                )
+            if candidate_index is None:
+                continue
+            used[candidate_index] = True
+            modules_done += 1
+            if required_level is None:
+                continue
+            required_level = float(required_level)
+            candidate = available[candidate_index]
+            required_blueprint = str(
+                required.get("BlueprintName") or required.get("blueprint") or ""
+            )
+            level = candidate["level"]
+            if (
+                required_blueprint
+                and isinstance(level, (int, float))
+                and self._blueprint_key(candidate["blueprint"])
+                == self._blueprint_key(required_blueprint)
+            ):
+                eng_current += int(min(float(level), required_level))
+        total = len(steps)
+        return {
+            "modules_done": modules_done,
+            "modules_total": total,
+            "modules_pct": round((modules_done / total) * 100) if total else 0,
+            "eng_current": eng_current,
+            "eng_target": eng_target,
+            "eng_pct": round((eng_current / eng_target) * 100) if eng_target else 0,
+        }
+
     def _plan_progress(self, plan_id: str, ship_model: str) -> list[dict[str, Any]]:
         with self.get_db() as db:
             plan_row = db.execute(
@@ -401,7 +504,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if plan_row is None or not sessions:
             return []
         steps = self._plan_steps(plan_row["source_json"])
-        total = len(steps)
         display_model = self._ship_display_name(ship_model)
         progress: list[dict[str, Any]] = []
         for session in sessions:
@@ -415,10 +517,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "ship": custom_name or display_model,
                 "ship_model": display_model if custom_name else "",
                 "paused": bool(session["paused"]),
-                "completed": len(completed),
-                "total": total,
-                "pct": round((len(completed) / total) * 100) if total else 0,
             }
+            entry.update(self._progress_metrics(steps, self._loadout_for_ship(session["ship_instance_id"])))
             if next_step is not None:
                 next_item = next_step.get("item")
                 if next_item:
@@ -940,6 +1040,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
             ship_name = event.content.get("ShipName")
             if isinstance(ship_name, str) and ship_name.strip():
                 self._current_ship_name = ship_name.strip()
+        if event_name in {"Loadout", "ModuleInfo"} and (
+            not ship_id or not self._current_ship_id or ship_id == self._current_ship_id
+        ):
+            loadout_modules = event.content.get("Modules")
+            if isinstance(loadout_modules, list):
+                self._current_loadout_modules = [
+                    module for module in loadout_modules if isinstance(module, dict)
+                ]
         modules = self._event_modules(event.content)
         with self.get_db() as db:
             rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
@@ -969,6 +1077,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
                         )
                     except ValueError as error:
                         log("warning", f"Could not auto-complete ship upgrade step: {error}")
+        # The progress bars reflect the ship's current loadout, so refresh
+        # whenever a relevant journal event changes that state.
+        self._publish_status()
 
     @staticmethod
     def _event_modules(content: dict[str, Any]) -> list[dict[str, Any]]:

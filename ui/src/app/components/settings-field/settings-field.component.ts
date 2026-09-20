@@ -148,12 +148,4 @@ export class SettingsFieldComponent {
         const key = entry.count === 1 ? "plugin.sum.groupOne" : "plugin.sum.groupMany";
         return this.resolve(key, { count: entry.count });
     }
-
-    progressModulesLabel(progress: { completed?: number; total?: number; pct?: number }): string {
-        return this.resolve("plugin.sum.progress.modules", {
-            completed: progress.completed ?? 0,
-            total: progress.total ?? 0,
-            pct: progress.pct ?? 0,
-        });
-    }
 }

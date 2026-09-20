@@ -96,9 +96,12 @@ export interface ListRowProgress {
     ship?: string;
     ship_model?: string;
     paused?: boolean;
-    completed?: number;
-    total?: number;
-    pct?: number;
+    modules_done?: number;
+    modules_total?: number;
+    modules_pct?: number;
+    eng_current?: number;
+    eng_target?: number;
+    eng_pct?: number;
     next_label?: string;
     next_grade?: number | string;
     next_engineering?: string;

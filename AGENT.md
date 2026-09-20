@@ -321,6 +321,13 @@ The last applied import (banner params and diff HTML) persists in the
 plugin database (`plugin_meta` table) so the confirmed diff stays visible
 across restarts. Deleting the last imported plan resets the tunnel to idle.
 
+Progress under each plan row reflects two criteria computed from the ship's
+current loadout (runtime snapshot of `Loadout`/`ModuleInfo` events, falling
+back to a journal read in config state): modules matched one-to-one against
+the plan, and engineering levels summed as target vs currently reached — a
+level only counts when the blueprint matches the target (strict). Event
+completions still drive the step order and the suggested next module.
+
 ## Internationalization (i18n) Policy
 
 All user-facing strings must be internationalized; hardcoding English text is

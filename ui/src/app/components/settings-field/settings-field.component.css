@@ -239,6 +239,32 @@ mat-slide-toggle {
     border-color: var(--color-warning-orange, #ff9800);
 }
 
+.progress-criterion {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.criterion-label {
+    flex: none;
+    width: 84px;
+    font-size: 0.8em;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}
+
+.progress-criterion mat-progress-bar {
+    flex: 1;
+}
+
+.criterion-value {
+    flex: none;
+    font-size: 0.8em;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.72));
+    min-width: 74px;
+    text-align: right;
+}
+
 .progress-stats {
     margin-top: 8px;
     font-size: 0.9em;

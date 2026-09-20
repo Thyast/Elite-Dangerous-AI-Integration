@@ -164,11 +164,21 @@
                                 <span class="progress-ship">{{ progress.ship }}@if (progress.ship_model && progress.ship_model !== progress.ship) {<span class="progress-ship-model"> · {{ progress.ship_model }}</span>}</span>
                                 <span class="progress-badge" [class.paused]="progress.paused">{{ progress.paused ? resolve('plugin.sum.progress.paused') : resolve('plugin.sum.progress.inProgress') }}</span>
                             </div>
-                            <mat-progress-bar [value]="progress.pct ?? 0"></mat-progress-bar>
-                            <div class="progress-stats">{{ progressModulesLabel(progress) }}</div>
+                            <div class="progress-criterion">
+                                <span class="criterion-label">{{ resolve('plugin.sum.progress.modulesLabel') }}</span>
+                                <mat-progress-bar [value]="progress.modules_pct ?? 0"></mat-progress-bar>
+                                <span class="criterion-value">{{ progress.modules_done ?? 0 }} / {{ progress.modules_total ?? 0 }} · {{ progress.modules_pct ?? 0 }}%</span>
+                            </div>
+                            @if (progress.eng_target) {
+                                <div class="progress-criterion">
+                                    <span class="criterion-label">{{ resolve('plugin.sum.progress.engineeringLabel') }}</span>
+                                    <mat-progress-bar [value]="progress.eng_pct ?? 0"></mat-progress-bar>
+                                    <span class="criterion-value">{{ progress.eng_current ?? 0 }} / {{ progress.eng_target }} · {{ progress.eng_pct ?? 0 }}%</span>
+                                </div>
+                            }
                             @if (progress.next_label) {
                                 <div class="progress-next">
-                                    <span class="progress-next-label">{{ progress.completed ? resolve('plugin.sum.progress.nextModule') : resolve('plugin.sum.progress.suggestedModule') }}</span>
+                                    <span class="progress-next-label">{{ progress.modules_done ? resolve('plugin.sum.progress.nextModule') : resolve('plugin.sum.progress.suggestedModule') }}</span>
                                     <span class="progress-next-module">{{ progress.next_label }}@if (progress.next_grade) {<span> · Grade {{ progress.next_grade }}</span>}@if (progress.next_engineering) {<span> · {{ progress.next_engineering }}</span>}</span>
                                 </div>
                             }
