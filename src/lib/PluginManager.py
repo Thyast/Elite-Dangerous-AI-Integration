@@ -289,17 +289,21 @@ class PluginManager:
                 for field in grid.get("fields", []):
                     if field.get("key") == key and field.get("type") in {"paragraph", "error"}:
                         field["content"] = str(value)
-            emit_message(
-                "plugin_settings_configs",
-                plugin_settings_configs=self.plugin_settings_configs,
-                has_plugin_settings=(len(self.plugin_settings_configs) > 0),
-            )
 
         try:
             plugin.on_settings_changed()
         except Exception as e:
             log('error', f"Failed to execute on_settings_changed hook for {plugin.plugin_manifest.name}: {e}")
             return False
+
+        if settings_config is not None:
+            # Emit after the hook so plugin-side field mutations made in
+            # on_settings_changed are included in the published snapshot.
+            emit_message(
+                "plugin_settings_configs",
+                plugin_settings_configs=self.plugin_settings_configs,
+                has_plugin_settings=(len(self.plugin_settings_configs) > 0),
+            )
         return True
 
     def on_settings_button(self, plugin_guid: str, key: str):

@@ -242,14 +242,19 @@ def test_plan_crud_reads_and_updates_existing_record(tmp_path: Path):
     assert plugin.list_plans()[0]["plan_version"] == 2
 
 
-def test_plan_diff_preview_is_rendered_in_settings(tmp_path: Path):
+def _set_plan_input(plugin: ShipUpgradeManagerPlugin, payload: dict) -> None:
+    plugin.settings["plan_input"] = json.dumps(payload)
+
+
+def test_import_tunnel_analyzes_and_renders_diff_before_import(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan(
         "Python",
         "PvE",
         {"steps": [{"id": "fsd", "item": "old_fsd", "slot": "FrameShiftDrive"}]},
     )
-    plugin.settings["plan_input"] = json.dumps(
+    _set_plan_input(
+        plugin,
         {
             "ship_model": "Python",
             "plan_name": "PvE",
@@ -257,89 +262,227 @@ def test_plan_diff_preview_is_rendered_in_settings(tmp_path: Path):
                 {"id": "fsd", "item": "new_fsd", "slot": "FrameShiftDrive"},
                 {"id": "shield", "item": "shield", "slot": "Slot01_Size5"},
             ],
-        }
+        },
     )
 
-    plugin.on_settings_button("preview_diff")
+    plugin.on_settings_button("import_plan")
+    assert plugin._import_state == "data"
 
-    assert "Version 1" in plugin.settings["diff_status"]
-    assert "new_fsd" in plugin.settings["diff_status"]
-    assert "shield" in plugin.settings["diff_status"]
-    assert "old_fsd" in plugin.settings["diff_status"]
+    plugin.on_settings_button("analyze_plan")
+
+    assert plugin._import_state == "diff"
+    diff_content = plugin._field("import", "diff_preview")["content"]
+    assert "Version 1" in diff_content
+    assert "new_fsd" in diff_content
+    assert "old_fsd" in diff_content
+    assert plugin.list_plans()[0]["plan_version"] == 1
 
 
-def test_voice_actions_preview_and_apply_plan_changes(tmp_path: Path):
+def test_import_tunnel_confirm_imports_migrates_and_keeps_diff_visible(tmp_path: Path):
     plugin = _plugin(tmp_path)
-    plugin.import_plan(
-        "Python",
-        "PvE",
-        {"steps": [{"id": "fsd", "item": "old"}]},
+    # Import the baseline through the same normalization path the tunnel uses
+    # so step signatures are comparable.
+    initial = parse_plan_input(
+        json.dumps(
+            {
+                "ship_model": "Python",
+                "plan_name": "PvE",
+                "steps": [{"id": "fsd", "item": "old"}],
+            }
+        )
     )
-    updated = json.dumps(
-        {
-            "ship_model": "Python",
-            "plan_name": "PvE",
-            "steps": [{"id": "fsd", "item": "new"}, {"id": "shield", "item": "new"}],
-        }
-    )
-
-    from plugins.ship_upgrade_manager.ship_upgrade_manager import PlanChangeParams
-
-    assert "1 added" in plugin._preview_changes_action(PlanChangeParams(plan_input=updated), {})
-    result = plugin._apply_changes_action(PlanChangeParams(plan_input=updated), {})
-    assert "1 added" in result
-    assert plugin.list_plans()[0]["plan_version"] == 2
-
-
-def test_settings_apply_changes_imports_and_migrates_plan(tmp_path: Path):
-    plugin = _plugin(tmp_path)
-    plugin.import_plan(
-        "Python",
-        "PvE",
-        {"steps": [{"id": "fsd", "item": "old"}]},
-    )
+    plugin.import_plan(initial["ship_model"], initial["plan_name"], initial)
     plugin.start_session("PvE", "SHIP-1")
-    plugin.settings["plan_input"] = json.dumps(
+    plugin.complete_step("fsd")
+    _set_plan_input(
+        plugin,
         {
             "ship_model": "Python",
             "plan_name": "PvE",
-            "steps": [{"id": "fsd", "item": "new"}, {"id": "shield", "item": "new"}],
-        }
+            "steps": [{"id": "fsd", "item": "old"}, {"id": "shield", "item": "new"}],
+        },
     )
 
-    plugin.on_settings_button("apply_changes")
+    plugin.on_settings_button("import_plan")
+    plugin.on_settings_button("analyze_plan")
+    plugin.on_settings_button("confirm_import")
 
+    assert plugin._import_state == "imported"
     assert plugin.list_plans()[0]["plan_version"] == 2
-    assert plugin.get_session()["completed_steps"] == []
-    assert "Applied 'PvE'" in plugin.settings["import_status"]
+    session = plugin.get_session()
+    assert "fsd" in session["completed_steps"]
+    last_changes = plugin._field("import", "last_changes")["content"]
+    assert "Version 1" in last_changes
+    assert "new" in last_changes
+    banner = plugin._field("import", "import_done")
+    assert banner["content"] == "plugin.sum.msg.doneBanner"
+    assert banner["params"]["plan"] == "PvE"
+    assert banner["params"]["version"] == 2
 
 
-def test_settings_apply_changes_reports_invalid_input(tmp_path: Path):
+def test_import_tunnel_reports_invalid_input_and_stays_in_data_state(tmp_path: Path):
     plugin = _plugin(tmp_path)
+    plugin.on_settings_button("import_plan")
     plugin.settings["plan_input"] = "not json"
 
-    plugin.on_settings_button("apply_changes")
+    plugin.on_settings_button("analyze_plan")
 
-    assert plugin.settings["import_status"].startswith("Apply error:")
+    assert plugin._import_state == "data"
+    error_field = plugin._field("import", "import_error")
+    assert error_field["content"] == "plugin.sum.errParse"
+    assert "detail" in error_field["params"]
 
 
-def test_settings_button_before_chat_start_imports_from_config_state(tmp_path: Path):
+def test_import_tunnel_cancel_returns_to_idle_and_clears_input(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.on_settings_button("import_plan")
+    plugin.settings["plan_input"] = "junk"
+
+    plugin.on_settings_button("cancel_import")
+
+    assert plugin._import_state == "idle"
+    assert plugin.settings["plan_input"] == ""
+    keys = [field["key"] for field in plugin._grid("import")["fields"]]
+    assert "import_plan" in keys
+    assert "plan_input" not in keys
+
+
+def test_import_tunnel_before_chat_start_imports_from_config_state(tmp_path: Path):
     plugin = ShipUpgradeManagerPlugin(
         PluginManifest(
             '{"guid":"not-started-test-guid","name":"Ship Upgrade","version":"1.0.0"}'
         )
     )
-    plugin.settings["plan_input"] = json.dumps(
+
+    plugin.on_settings_button("import_plan")
+    _set_plan_input(
+        plugin,
         {
             "ship_model": "Python",
             "plan_name": "Config plan",
             "steps": [{"id": "fsd", "item": "int_hyperdrive_size5_class5"}],
-        }
+        },
     )
-
-    plugin.on_settings_button("import_plan")
+    plugin.on_settings_button("analyze_plan")
+    plugin.on_settings_button("confirm_import")
 
     assert plugin.list_plans()[0]["plan_name"] == "Config plan"
+    assert plugin._import_state == "imported"
+
+
+def test_plan_rows_expose_delete_action_and_delete_by_row(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plan_id = plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}]})
+    plugin._publish_status()
+
+    plans_field = plugin._field("plans", "available_plans")
+    assert [row["key"] for row in plans_field["items"]] == [plan_id]
+    assert plans_field["row_actions"][0]["action"] == "delete_plan"
+    assert plans_field["row_actions"][0]["label"] == "plugin.sum.btn.delete"
+
+    plugin.on_settings_button(f"delete_plan:{plan_id}")
+
+    assert plugin.list_plans() == []
+    assert plugin._field("plans", "delete_status")["content"] == "plugin.sum.msg.deleted"
+    assert plugin._field("plans", "delete_status")["params"]["plan"] == "PvE"
+
+
+def test_delete_unknown_plan_row_reports_error(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+
+    plugin.on_settings_button("delete_plan:unknown-id")
+
+    field = plugin._field("plans", "delete_status")
+    assert field["content"] == "plugin.sum.errDelete"
+    assert "detail" in field["params"]
+
+
+def test_delete_last_imported_plan_resets_import_state(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.on_settings_button("import_plan")
+    _set_plan_input(
+        plugin,
+        {
+            "ship_model": "Python",
+            "plan_name": "PvE",
+            "steps": [{"id": "fsd", "item": "int_hyperdrive_size5_class5"}],
+        },
+    )
+    plugin.on_settings_button("analyze_plan")
+    plugin.on_settings_button("confirm_import")
+    plan_id = plugin.list_plans()[0]["id"]
+
+    plugin.on_settings_button(f"delete_plan:{plan_id}")
+
+    assert plugin._import_state == "idle"
+    assert plugin._last_import is None
+    assert plugin._field("import", "import_status")["content"] == "plugin.sum.noImportYet"
+
+
+def test_last_import_persists_across_plugin_restart(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    initial = parse_plan_input(
+        json.dumps(
+            {
+                "ship_model": "Python",
+                "plan_name": "PvE",
+                "steps": [{"id": "fsd", "item": "int_hyperdrive_size5_class5"}],
+            }
+        )
+    )
+    plugin.import_plan(initial["ship_model"], initial["plan_name"], initial)
+    _set_plan_input(
+        plugin,
+        {
+            "ship_model": "Python",
+            "plan_name": "PvE",
+            "steps": [
+                {"id": "fsd", "item": "int_hyperdrive_size5_class5"},
+                {"id": "shield", "item": "int_shieldgenerator_size5_class5"},
+            ],
+        },
+    )
+    plugin.on_settings_button("import_plan")
+    plugin.on_settings_button("analyze_plan")
+    plugin.on_settings_button("confirm_import")
+
+    restarted = ShipUpgradeManagerPlugin(
+        PluginManifest('{"guid":"test-guid","name":"Test","version":"1.0.0"}')
+    )
+    restarted.on_chat_start(_Helper(tmp_path))
+
+    assert restarted._import_state == "imported"
+    banner = restarted._field("import", "import_done")
+    assert banner["content"] == "plugin.sum.msg.doneBanner"
+    assert banner["params"]["plan"] == "PvE"
+    assert banner["params"]["version"] == 2
+    assert "int_shieldgenerator_size5_class5" in restarted._field("import", "last_changes")["content"]
+
+
+def test_plan_filter_filters_rows_on_refresh(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser"}]})
+    plugin.import_plan("Python", "Combat", {"steps": [{"id": "cannon"}]})
+    plugin.settings["plan_filter"] = "mining"
+
+    plugin.on_settings_button("refresh_plans")
+
+    rows = plugin._field("plans", "available_plans")["items"]
+    assert [row["title"] for row in rows] == ["Mining"]
+
+
+def test_session_summary_is_published_as_i18n_key(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})
+    plugin.start_session("PvE", "SHIP-1")
+    plugin.complete_step("fsd")
+
+    plugin.on_settings_button("refresh_plans")
+
+    summary = plugin._field("session", "session_summary")
+    assert summary["content"] == "plugin.sum.msg.sessionActive"
+    assert summary["params"]["total"] == 2
+    assert summary["params"]["pct"] == 50
 
 
 def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):

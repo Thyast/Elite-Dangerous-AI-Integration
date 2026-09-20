@@ -3,9 +3,10 @@ from typing import Literal, NotRequired, TypedDict
 class SettingBase(TypedDict):
     key: str
     label: str | None
-    type: Literal['paragraph', 'text', 'textarea', 'toggle', 'number', 'select', 'error']
+    type: Literal['paragraph', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'error']
     readonly: bool
     placeholder: str | None
+    params: NotRequired[dict[str, str | int | float]]
 
 
 class SelectOption(TypedDict):
@@ -57,11 +58,33 @@ class ErrorSetting(SettingBase):
     """Used to display an error message."""
     content: str
 
+class ListAction(TypedDict):
+    """Defines an action button rendered on every row of a list field.
+
+    Clicking it invokes the plugin's settings-button hook with the key
+    ``<action>:<row key>``.
+    """
+    action: str
+    icon: NotRequired[str]
+    label: NotRequired[str]
+    danger: NotRequired[bool]
+
+class ListRow(TypedDict):
+    """Defines one row of a list field."""
+    key: str
+    title: str
+    meta: NotRequired[str]
+
+class ListSetting(SettingBase):
+    """Used to display a list of rows, each carrying optional actions."""
+    items: list[ListRow]
+    row_actions: NotRequired[list[ListAction]]
+
 class SettingsGrid(TypedDict):
     """Defines a grid of settings for a plugin."""
     key: str
     label: str
-    fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting]
+    fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting]
     collapsible: NotRequired[bool]
     default_collapsed: NotRequired[bool]
 

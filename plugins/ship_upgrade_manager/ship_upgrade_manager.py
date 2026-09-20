@@ -15,11 +15,30 @@ from lib.EventManager import Projection
 from lib.Logger import log
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginHelper import PluginHelper
-from lib.PluginSettingDefinitions import PluginSettings
+from lib.PluginSettingDefinitions import (
+    ButtonSetting,
+    ErrorSetting,
+    ListAction,
+    ListRow,
+    ListSetting,
+    ParagraphSetting,
+    PluginSettings,
+    SettingsGrid,
+    SettingBase,
+    TextAreaSetting,
+    TextSetting,
+)
 from .parsers import PlanParseError, parse_plan_input
 
 
 PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
+
+IMPORT_STATE_IDLE = "idle"
+IMPORT_STATE_DATA = "data"
+IMPORT_STATE_DIFF = "diff"
+IMPORT_STATE_IMPORTED = "imported"
+
+LAST_IMPORT_META_KEY = "last_import"
 
 
 class ShipUpgradeState(BaseModel):
@@ -75,130 +94,268 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def __init__(self, plugin_manifest: PluginManifest):
         super().__init__(plugin_manifest)
         self.helper: PluginHelper | None = None
-        self.settings_config: PluginSettings = {
-            "key": plugin_manifest.guid,
-            "label": "Ship Upgrade Manager",
+        self._pending_diff: dict[str, Any] | None = None
+        self._last_plan_filter = ""
+        self._initialize_database()
+        self._last_import = self._load_last_import()
+        self._import_state = IMPORT_STATE_IMPORTED if self._last_import else IMPORT_STATE_IDLE
+        self.settings_config = self._build_settings_config()
+
+    # ------------------------------------------------------------------
+    # Settings UI construction (import tunnel state machine)
+    # ------------------------------------------------------------------
+
+    def _build_settings_config(self) -> PluginSettings:
+        return {
+            "key": self.plugin_manifest.guid,
+            "label": "plugin.sum.label",
             "icon": "rocket_launch",
             "grids": [
                 {
-                    "key": "status",
-                    "label": "Status",
-                    "fields": [
-                        {
-                            "key": "plan_input",
-                            "label": "Coriolis / EDSY / Inara JSON or URL",
-                            "type": "textarea",
-                            "readonly": False,
-                            "placeholder": "Paste an exported JSON loadout or an embedded export URL",
-                            "default_value": "",
-                            "rows": 8,
-                            "cols": 60,
-                        },
-                        {
-                            "key": "import_plan",
-                            "label": "Import plan",
-                            "type": "button",
-                            "readonly": False,
-                            "placeholder": None,
-                        },
-                        {
-                            "key": "preview_diff",
-                            "label": "Preview plan changes",
-                            "type": "button",
-                            "readonly": False,
-                            "placeholder": None,
-                        },
-                        {
-                            "key": "apply_changes",
-                            "label": "Apply changes",
-                            "type": "button",
-                            "readonly": False,
-                            "placeholder": None,
-                        },
-                        {
-                            "key": "diff_status",
-                            "label": "Plan changes",
-                            "type": "paragraph",
-                            "readonly": True,
-                            "placeholder": None,
-                            "content": "No diff calculated.",
-                        },
-                        {
-                            "key": "import_status",
-                            "label": "Import status",
-                            "type": "paragraph",
-                            "readonly": True,
-                            "placeholder": None,
-                            "content": "No plans imported.",
-                        },
-                        {
-                            "key": "reimport_plans",
-                            "label": "Refresh plan status",
-                            "type": "button",
-                            "readonly": False,
-                            "placeholder": None,
-                        },
-                    ],
+                    "key": "import",
+                    "label": "plugin.sum.grid.import",
+                    "fields": self._import_fields(),
+                },
+                {
+                    "key": "plans",
+                    "label": "plugin.sum.grid.plans",
+                    "fields": self._plans_fields(),
                 },
                 {
                     "key": "session",
-                    "label": "Active session (modules)",
-                    "fields": [
-                        {
-                            "key": "session_summary",
-                            "label": "Session",
-                            "type": "paragraph",
-                            "readonly": True,
-                            "placeholder": None,
-                            "content": "No active session.",
-                        },
-                        {
-                            "key": "plan_filter",
-                            "label": "Search plans",
-                            "type": "text",
-                            "readonly": False,
-                            "placeholder": "Name or ship type",
-                            "default_value": "",
-                            "max_length": 100,
-                            "min_length": 0,
-                            "hidden": False,
-                        },
-                        {
-                            "key": "plan_to_delete",
-                            "label": "Plan to delete",
-                            "type": "text",
-                            "readonly": False,
-                            "placeholder": "Exact plan name",
-                            "default_value": "",
-                            "max_length": 100,
-                            "min_length": 0,
-                            "hidden": False,
-                        },
-                        {
-                            "key": "delete_plan",
-                            "label": "Delete selected plan",
-                            "type": "button",
-                            "readonly": False,
-                            "placeholder": None,
-                            "icon": "delete",
-                        },
-                        {
-                            "key": "available_plans",
-                            "label": "Available plans",
-                            "type": "paragraph",
-                            "readonly": True,
-                            "placeholder": None,
-                            "content": "No plans imported.",
-                        },
-                    ],
+                    "label": "plugin.sum.grid.session",
+                    "fields": self._session_fields(),
                 },
             ],
         }
-        self._initialize_database()
+
+    def _base_field(self, key: str, type_: str, label: str | None = None) -> SettingBase:
+        return {
+            "key": key,
+            "label": label,
+            "type": type_,  # type: ignore[typeddict-item]
+            "readonly": type_ in {"paragraph", "error", "list"},
+            "placeholder": None,
+        }
+
+    def _button(self, key: str, label: str, icon: str | None = None) -> ButtonSetting:
+        field: ButtonSetting = self._base_field(key, "button", label)  # type: ignore[assignment]
+        if icon:
+            field["icon"] = icon
+        return field
+
+    def _paragraph(
+        self,
+        key: str,
+        content: str,
+        label: str | None = None,
+        params: dict[str, str | int | float] | None = None,
+    ) -> ParagraphSetting:
+        field: ParagraphSetting = self._base_field(key, "paragraph", label)  # type: ignore[assignment]
+        field["content"] = content
+        if params:
+            field["params"] = params
+        return field
+
+    def _import_fields(
+        self,
+        error: tuple[str, dict[str, str | int | float]] | None = None,
+    ) -> list[SettingBase]:
+        state = self._import_state
+        if state == IMPORT_STATE_DATA:
+            textarea: TextAreaSetting = self._base_field("plan_input", "textarea", "plugin.sum.planDataLabel")  # type: ignore[assignment]
+            textarea.update({
+                "placeholder": "plugin.sum.planDataPlaceholder",
+                "default_value": "",
+                "rows": 8,
+                "cols": 60,
+            })
+            fields: list[SettingBase] = [
+                textarea,
+                self._button("analyze_plan", "plugin.sum.btn.analyze"),
+                self._button("cancel_import", "common.cancel"),
+            ]
+        elif state == IMPORT_STATE_DIFF:
+            fields = [
+                self._paragraph(
+                    "diff_preview",
+                    str(self.settings.get("diff_preview", "")),
+                    label="plugin.sum.planChanges",
+                ),
+                self._button("confirm_import", "plugin.sum.btn.confirm"),
+                self._button("modify_data", "plugin.sum.btn.modify"),
+                self._button("cancel_import", "common.cancel"),
+            ]
+        elif state == IMPORT_STATE_IMPORTED:
+            record = self._last_import or {}
+            fields = [
+                self._paragraph(
+                    "import_done",
+                    "plugin.sum.msg.doneBanner",
+                    params={
+                        "plan": record.get("plan_name", ""),
+                        "version": record.get("version", 1),
+                        "modules": record.get("modules", 0),
+                        "sessions": record.get("sessions", 0),
+                    },
+                ),
+                self._paragraph(
+                    "last_changes",
+                    str(record.get("diff_html", "")),
+                    label="plugin.sum.lastChanges",
+                ),
+                self._button("new_import", "plugin.sum.btn.newImport"),
+            ]
+        else:
+            fields = [
+                self._button("import_plan", "plugin.sum.btn.import"),
+                self._paragraph(
+                    "import_status",
+                    str(self.settings.get("import_status", "") or "plugin.sum.noImportYet"),
+                ),
+            ]
+        if error is not None:
+            fields.append(self._paragraph("import_error", error[0], params=error[1]))
+        return fields
+
+    def _plans_fields(self) -> list[SettingBase]:
+        plan_filter: TextSetting = self._base_field("plan_filter", "text", "plugin.sum.search")  # type: ignore[assignment]
+        plan_filter.update({
+            "placeholder": "plugin.sum.searchPlaceholder",
+            "default_value": "",
+            "max_length": 100,
+            "min_length": 0,
+            "hidden": False,
+        })
+        plans_list: ListSetting = self._base_field("available_plans", "list", "plugin.sum.availablePlans")  # type: ignore[assignment]
+        plans_list.update({
+            "placeholder": "plugin.sum.noPlans",
+            "items": self._make_plan_rows(),
+            "row_actions": [
+                {
+                    "action": "delete_plan",
+                    "icon": "delete",
+                    "label": "plugin.sum.btn.delete",
+                    "danger": True,
+                }
+            ],
+        })
+        refresh: ButtonSetting = self._button("refresh_plans", "plugin.sum.btn.refresh")
+        delete_status = self._paragraph("delete_status", str(self.settings.get("delete_status", "") or "plugin.sum.noDeleteYet"))
+        return [plan_filter, plans_list, refresh, delete_status]
+
+    def _session_fields(self) -> list[SettingBase]:
+        return [
+            self._paragraph(
+                "session_summary",
+                str(self.settings.get("session_summary", "") or "plugin.sum.noSession"),
+                label="plugin.sum.session",
+            )
+        ]
+
+    def _grid(self, key: str) -> SettingsGrid:
+        return next(grid for grid in self.settings_config["grids"] if grid["key"] == key)
+
+    def _field(self, grid_key: str, field_key: str) -> SettingBase:
+        return next(
+            field for field in self._grid(grid_key)["fields"] if field["key"] == field_key
+        )
+
+    def _enter_import_state(
+        self,
+        state: str,
+        error: tuple[str, dict[str, str | int | float]] | None = None,
+    ) -> None:
+        self._import_state = state
+        grid = self._grid("import")
+        grid["fields"] = self._import_fields(error)
+        for field in grid["fields"]:
+            if field["type"] in {"paragraph", "error"}:
+                self.settings[field["key"]] = field.get("content", "")
+
+    def _make_plan_rows(self) -> list[ListRow]:
+        filter_value = str(self.settings.get("plan_filter", "")).strip().lower()
+        self._last_plan_filter = filter_value
+        plans = [
+            plan
+            for plan in self.list_plans()
+            if not filter_value
+            or filter_value in plan["plan_name"].lower()
+            or filter_value in plan["ship_model"].lower()
+        ]
+        return [
+            {
+                "key": plan["id"],
+                "title": plan["plan_name"],
+                "meta": f"v{plan['plan_version']} · {self._plan_module_count(plan['id'])} modules · {plan['ship_model']}",
+            }
+            for plan in plans
+        ]
+
+    def _set_plan_rows(self, rows: list[ListRow]) -> None:
+        field: ListSetting = self._field("plans", "available_plans")  # type: ignore[assignment]
+        field["items"] = rows
+
+    def _set_message_field(self, grid_key: str, field_key: str, content: str, params: dict[str, str | int | float] | None = None) -> None:
+        field = self._field(grid_key, field_key)
+        field["content"] = content
+        if params:
+            field["params"] = params
+        else:
+            field.pop("params", None)
+        self.settings[field_key] = content
+
+    # ------------------------------------------------------------------
+    # Last-import persistence (diff kept visible across restarts)
+    # ------------------------------------------------------------------
+
+    def _load_last_import(self) -> dict[str, Any] | None:
+        with self.get_db() as db:
+            row = db.execute(
+                "SELECT value FROM plugin_meta WHERE key = ?", (LAST_IMPORT_META_KEY,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row["value"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+    def _save_last_import(self, record: dict[str, Any]) -> None:
+        with self.get_db() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO plugin_meta (key, value) VALUES (?, ?)",
+                (LAST_IMPORT_META_KEY, json.dumps(record)),
+            )
+
+    def _clear_last_import(self) -> None:
+        self._last_import = None
+        with self.get_db() as db:
+            db.execute("DELETE FROM plugin_meta WHERE key = ?", (LAST_IMPORT_META_KEY,))
+
+    def _reload_state_from_database(self) -> None:
+        """Re-derive the import state once the runtime data path is known."""
+        last_import = self._load_last_import()
+        if last_import == self._last_import:
+            return
+        self._last_import = last_import
+        if last_import is None:
+            if self._import_state == IMPORT_STATE_IMPORTED:
+                self._import_state = IMPORT_STATE_IDLE
+                self.settings["import_status"] = "plugin.sum.noImportYet"
+        elif self._import_state in {IMPORT_STATE_IDLE, IMPORT_STATE_IMPORTED}:
+            self._import_state = IMPORT_STATE_IMPORTED
+        else:
+            return
+        self._grid("import")["fields"] = self._import_fields()
+        for field in self._grid("import")["fields"]:
+            if field["type"] in {"paragraph", "error"}:
+                self.settings[field["key"]] = field.get("content", "")
 
     def on_chat_start(self, helper: PluginHelper) -> None:
         self.helper = helper
         self._initialize_database()
+        self._reload_state_from_database()
         helper.register_projection(ShipUpgradeProjection())
         helper.register_action(
             name="ship_upgrade_start_session",
@@ -277,20 +434,26 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def on_settings_button(self, key: str) -> None:
         if key == "import_plan":
-            self._import_from_settings()
-        elif key == "preview_diff":
-            self._preview_diff_from_settings()
-        elif key == "apply_changes":
-            self._apply_changes_from_settings()
-        elif key == "delete_plan":
-            try:
-                self.delete_plan(self.settings.get("plan_to_delete", ""))
-                self._set_status("Plan deleted.")
-            except ValueError as error:
-                self._set_status(f"Delete error: {error}")
-                log("error", f"Ship Upgrade Manager plan deletion failed: {error}")
-        elif key == "reimport_plans":
+            self._pending_diff = None
+            self._enter_import_state(IMPORT_STATE_DATA)
+        elif key == "analyze_plan":
+            self._analyze_plan_input()
+        elif key == "confirm_import":
+            self._confirm_plan_import()
+        elif key == "modify_data":
+            self._enter_import_state(IMPORT_STATE_DATA)
+        elif key == "cancel_import":
+            self.settings["plan_input"] = ""
+            self._pending_diff = None
+            self._enter_import_state(IMPORT_STATE_IDLE)
+        elif key == "new_import":
+            self.settings["plan_input"] = ""
+            self._pending_diff = None
+            self._enter_import_state(IMPORT_STATE_DATA)
+        elif key == "refresh_plans":
             self._publish_status()
+        elif key.startswith("delete_plan:"):
+            self._delete_plan_by_id(key.split(":", 1)[1])
         else:
             log("warning", f"Unknown Ship Upgrade Manager settings button: {key}")
 
@@ -390,82 +553,85 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f"{diff['removed_count']} removed, {diff['changed_count']} changed."
         )
 
-    def _import_from_settings(self) -> None:
-        value = self.settings.get("plan_input", "")
-        try:
-            normalized = parse_plan_input(value)
-            diff = self.diff_plan(
-                normalized["plan_name"],
-                normalized,
-            )
-            plan_id = self.import_plan(
-                normalized["ship_model"],
-                normalized["plan_name"],
-                normalized,
-            )
-            change_summary = (
-                f"{diff['added_count']} added, "
-                f"{diff['removed_count']} removed, "
-                f"{diff['changed_count']} changed"
-                if diff["current_version"] is not None
-                else "new plan"
-            )
-            self._set_status(
-                f"Imported '{normalized['plan_name']}' for {normalized['ship_model']} "
-                f"({len(normalized['steps'])} modules; {change_summary})."
-            )
-            log("info", f"Imported Ship Upgrade Manager plan {plan_id}")
-        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
-            self._set_status(f"Import error: {error}")
-            log("error", f"Ship Upgrade Manager plan import failed: {error}")
-
-    def _preview_diff_from_settings(self) -> None:
+    def _analyze_plan_input(self) -> None:
         value = self.settings.get("plan_input", "")
         try:
             normalized = parse_plan_input(value)
             diff = self.diff_plan(normalized["plan_name"], normalized)
-            rendered = self._format_plan_diff(diff)
-            self.settings["diff_status"] = rendered
-            if self.helper is not None:
-                self.helper._plugin_manager.update_plugin_setting(
-                    self.plugin_manifest.guid, "diff_status", rendered
-                )
         except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
-            self._set_diff_status(f"Diff error: {error}")
-            log("error", f"Ship Upgrade Manager plan diff failed: {error}")
+            log("error", f"Ship Upgrade Manager plan analysis failed: {error}")
+            self._enter_import_state(
+                IMPORT_STATE_DATA, error=("plugin.sum.errParse", {"detail": str(error)})
+            )
+            return
+        self._pending_diff = {
+            "normalized": normalized,
+            "diff": diff,
+            "rendered": self._format_plan_diff(diff),
+        }
+        self.settings["diff_preview"] = self._pending_diff["rendered"]
+        self._enter_import_state(IMPORT_STATE_DIFF)
 
-    def _apply_changes_from_settings(self) -> None:
-        value = self.settings.get("plan_input", "")
+    def _confirm_plan_import(self) -> None:
+        pending = self._pending_diff
+        if pending is None:
+            self._enter_import_state(
+                IMPORT_STATE_DATA,
+                error=("plugin.sum.errParse", {"detail": "no analyzed plan"}),
+            )
+            return
+        normalized = pending["normalized"]
         try:
-            normalized = parse_plan_input(value)
-            diff = self.diff_plan(normalized["plan_name"], normalized)
             plan_id = self.import_plan(
-                normalized["ship_model"],
-                normalized["plan_name"],
-                normalized,
+                normalized["ship_model"], normalized["plan_name"], normalized
             )
-            change_summary = (
-                f"{diff['added_count']} added, "
-                f"{diff['removed_count']} removed, "
-                f"{diff['changed_count']} changed"
-                if diff["current_version"] is not None
-                else "new plan"
+        except (ValueError, TypeError) as error:
+            log("error", f"Ship Upgrade Manager plan confirmation failed: {error}")
+            self._enter_import_state(
+                IMPORT_STATE_DIFF, error=("plugin.sum.errApply", {"detail": str(error)})
             )
-            self._set_status(
-                f"Applied '{normalized['plan_name']}' for {normalized['ship_model']} "
-                f"({len(normalized['steps'])} modules; {change_summary})."
-            )
-            log("info", f"Applied Ship Upgrade Manager plan {plan_id} from settings")
-        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
-            self._set_status(f"Apply error: {error}")
-            log("error", f"Ship Upgrade Manager plan apply failed: {error}")
+            return
+        with self.get_db() as db:
+            row = db.execute(
+                "SELECT plan_version FROM plans WHERE id = ?", (plan_id,)
+            ).fetchone()
+            sessions = db.execute(
+                "SELECT COUNT(*) FROM active_session WHERE plan_id = ?", (plan_id,)
+            ).fetchone()[0]
+        record = {
+            "plan_id": plan_id,
+            "plan_name": normalized["plan_name"],
+            "ship_model": normalized["ship_model"],
+            "version": row["plan_version"] if row else 1,
+            "modules": len(normalized["steps"]),
+            "sessions": sessions,
+            "diff_html": pending["rendered"],
+        }
+        self._save_last_import(record)
+        self._last_import = record
+        self._publish_status()
+        self._enter_import_state(IMPORT_STATE_IMPORTED)
+        log("info", f"Confirmed Ship Upgrade Manager plan {plan_id} version {record['version']}")
 
-    def _set_diff_status(self, status: str) -> None:
-        self.settings["diff_status"] = status
-        if self.helper is not None:
-            self.helper._plugin_manager.update_plugin_setting(
-                self.plugin_manifest.guid, "diff_status", status
+    def _delete_plan_by_id(self, plan_id: str) -> None:
+        try:
+            plan = self.get_plan(plan_id)
+            with self.get_db() as db:
+                db.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
+        except ValueError as error:
+            log("error", f"Ship Upgrade Manager plan deletion failed: {error}")
+            self._set_message_field(
+                "plans", "delete_status", "plugin.sum.errDelete", {"detail": str(error)}
             )
+            return
+        if self._last_import and self._last_import.get("plan_id") == plan_id:
+            self._clear_last_import()
+            self.settings["import_status"] = "plugin.sum.noImportYet"
+            self._enter_import_state(IMPORT_STATE_IDLE)
+        self._set_message_field(
+            "plans", "delete_status", "plugin.sum.msg.deleted", {"plan": plan["plan_name"]}
+        )
+        self._publish_status()
 
     @staticmethod
     def _format_plan_diff(diff: dict[str, Any]) -> str:
@@ -498,14 +664,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f"<p>Version {diff['current_version']} → {diff['next_version']}</p>"
             + (body or "<p>No module changes.</p>")
         )
-
-    def _set_status(self, status: str) -> None:
-        self._publish_status()
-        self.settings["import_status"] = status
-        if self.helper is not None:
-            self.helper._plugin_manager.update_plugin_setting(
-                self.plugin_manifest.guid, "import_status", status
-            )
 
     def _on_event(self, event: Event, _context: dict[str, Any]) -> None:
         if not isinstance(event, GameEvent):
@@ -793,6 +951,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     completion_percent REAL NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS plugin_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_plan_applications_ship
                     ON plan_applications(ship_instance_id);
                 """
@@ -993,7 +1156,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def delete_plan(self, plan_name: str) -> bool:
         """Delete a plan and its applications/session through foreign keys."""
         if not isinstance(plan_name, str) or not plan_name.strip():
-            raise ValueError("plan_to_delete is required")
+            raise ValueError("plan_name is required")
         with self.get_db() as db:
             plan = db.execute(
                 "SELECT id FROM plans WHERE plan_name = ?", (plan_name.strip(),)
@@ -1001,6 +1164,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if plan is None:
                 raise ValueError(f"Unknown plan: {plan_name}")
             db.execute("DELETE FROM plans WHERE id = ?", (plan["id"],))
+        if self._last_import and self._last_import.get("plan_id") == plan["id"]:
+            self._clear_last_import()
+            self.settings["import_status"] = "plugin.sum.noImportYet"
+            self._enter_import_state(IMPORT_STATE_IDLE)
+        self._set_message_field(
+            "plans", "delete_status", "plugin.sum.msg.deleted", {"plan": plan_name.strip()}
+        )
         self._publish_status()
         return True
 
@@ -1372,67 +1542,38 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 db.execute("DELETE FROM step_history WHERE plan_session_id = ?", (session["id"],))
 
     def _publish_status(self) -> None:
+        self._set_plan_rows(self._make_plan_rows())
+
         with self.get_db() as db:
-            plan_count = db.execute("SELECT COUNT(*) FROM plans").fetchone()[0]
-            sessions = db.execute(
+            session = db.execute(
                 """
                 SELECT p.plan_name, s.ship_custom_name, s.ship_instance_id,
-                       s.current_step
+                       s.current_step, s.completed_steps, s.plan_id
                 FROM active_session s
                 JOIN plans p ON p.id = s.plan_id
                 ORDER BY s.last_activity DESC
                 LIMIT 1
                 """
-            ).fetchall()
+            ).fetchone()
 
-        status = f"{plan_count} plan(s) available."
-        plan_filter = str(self.settings.get("plan_filter", "")).strip().lower()
-        self._last_plan_filter = plan_filter
-        available_plans = self._format_available_plans(plan_filter)
-        if not sessions:
-            session_summary = "No active session."
-        else:
-            session = sessions[0]
-            ship = session["ship_custom_name"] or session["ship_instance_id"]
-            session_summary = (
-                f"{session['plan_name']} on {ship}; "
-                f"current step {session['current_step']}."
-            )
-
-        self.settings["import_status"] = status
-        self.settings["session_summary"] = session_summary
-        self.settings["available_plans"] = available_plans
-        if self.helper is not None:
-            manager = self.helper._plugin_manager
-            manager.update_plugin_setting(self.plugin_manifest.guid, "import_status", status)
-            manager.update_plugin_setting(
-                self.plugin_manifest.guid, "session_summary", session_summary
-            )
-            manager.update_plugin_setting(
-                self.plugin_manifest.guid, "available_plans", available_plans
-            )
-
-    def _format_available_plans(self, plan_filter: str = "") -> str:
-        plans = [
-            plan for plan in self.list_plans()
-            if not plan_filter
-            or plan_filter in plan["plan_name"].lower()
-            or plan_filter in plan["ship_model"].lower()
-        ]
-        if not plans:
-            return "No plans match the current filter." if plan_filter else "No plans imported."
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for plan in plans:
-            grouped.setdefault(plan["ship_model"], []).append(plan)
-        return "".join(
-            f"<details open><summary>{ship_model} ({len(ship_plans)})</summary>"
-            + "".join(
-                f"<div><strong>{plan['plan_name']}</strong> · v{plan['plan_version']} "
-                f"· {self._plan_module_count(plan['id'])} modules</div>"
-                for plan in ship_plans
-            )
-            + "</details>"
-            for ship_model, ship_plans in sorted(grouped.items())
+        if session is None:
+            self._set_message_field("session", "session_summary", "plugin.sum.noSession")
+            return
+        total = self._plan_module_count(session["plan_id"])
+        completed = len(json.loads(session["completed_steps"] or "[]"))
+        percent = round((completed / total) * 100) if total else 0
+        ship = session["ship_custom_name"] or session["ship_instance_id"]
+        self._set_message_field(
+            "session",
+            "session_summary",
+            "plugin.sum.msg.sessionActive",
+            {
+                "plan": session["plan_name"],
+                "ship": ship,
+                "step": session["current_step"],
+                "total": total,
+                "pct": percent,
+            },
         )
 
     def _plan_module_count(self, plan_id: str) -> int:
