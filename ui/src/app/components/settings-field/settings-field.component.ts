@@ -57,7 +57,11 @@ export class SettingsFieldComponent {
      */
     @Output() valueChange = new EventEmitter<any>();
     @Output() buttonClick = new EventEmitter<void>();
-    @Output() listAction = new EventEmitter<{ action: string; rowKey: string }>();
+    @Output() listAction = new EventEmitter<{ action: string; rowKey: string; value?: string }>();
+
+    editingRowKey: string | null = null;
+    editingAction: ListAction | null = null;
+    editValue = "";
 
     resolve(
         value: string | null | undefined,
@@ -79,7 +83,29 @@ export class SettingsFieldComponent {
     }
 
     onListAction(action: ListAction, row: ListRow): void {
+        if (action.inline_edit) {
+            this.editingAction = action;
+            this.editingRowKey = row.key;
+            this.editValue = row.title;
+            return;
+        }
         this.listAction.emit({ action: action.action, rowKey: row.key });
+    }
+
+    confirmRowEdit(row: ListRow): void {
+        const action = this.editingAction;
+        this.editingRowKey = null;
+        this.editingAction = null;
+        if (!action) {
+            return;
+        }
+        this.listAction.emit({ action: action.action, rowKey: row.key, value: this.editValue });
+    }
+
+    cancelRowEdit(): void {
+        this.editingRowKey = null;
+        this.editingAction = null;
+        this.editValue = "";
     }
 
     rowsWithGroups(items: ListRow[] | null | undefined): { row: ListRow; header?: string; count?: number }[] {

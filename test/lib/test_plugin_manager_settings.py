@@ -81,7 +81,7 @@ def test_settings_button_refreshes_plugin_paragraph_values(monkeypatch):
         lambda event, **_payload: emitted.append(event),
     )
 
-    def click(_key: str) -> None:
+    def click(_key: str, _value: str | None = None) -> None:
         plugin.settings["status"] = "clicked"
 
     plugin.on_settings_button = click

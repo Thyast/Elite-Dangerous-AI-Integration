@@ -82,8 +82,11 @@ class PluginBase(ABC):
         """
         pass
 
-    def on_settings_button(self, key: str):
-        """Handle a click on a button declared in this plugin's settings UI."""
+    def on_settings_button(self, key: str, value: str | None = None):
+        """Handle a click on a button declared in this plugin's settings UI.
+
+        Row actions of list fields pass an optional value (e.g. the new title
+        of an inline-edited row)."""
         pass
 
     def on_settings_changed(self) -> None:

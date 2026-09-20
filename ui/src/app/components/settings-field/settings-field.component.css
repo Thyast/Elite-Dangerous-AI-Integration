@@ -165,6 +165,27 @@ mat-slide-toggle {
     color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
 }
 
+.list-row.editing {
+    align-items: center;
+}
+
+.rename-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.3));
+    border-radius: 4px;
+    color: inherit;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 0.95em;
+}
+
+.rename-input:focus {
+    outline: none;
+    border-color: var(--color-primary-blue, #4fc3f7);
+}
+
 .row-progress {
     margin: 0 12px 12px 12px;
     padding: 10px 12px;

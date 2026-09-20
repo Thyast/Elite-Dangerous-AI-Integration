@@ -159,9 +159,9 @@ export class PluginSettingsComponent implements OnInit, OnDestroy {
     };
   }
 
-  createButtonClickFn(pluginGuid: string): (fieldKey: string) => void {
-    return (fieldKey: string) => {
-      this.configService.clickPluginSettingsButton(pluginGuid, fieldKey).catch((error) => {
+  createButtonClickFn(pluginGuid: string): (fieldKey: string, value?: string) => void {
+    return (fieldKey: string, value?: string) => {
+      this.configService.clickPluginSettingsButton(pluginGuid, fieldKey, value).catch((error) => {
         console.error("Error handling plugin settings button click:", error);
         this.snackBar.open("Error handling plugin button click", "OK", { duration: 5000 });
       });

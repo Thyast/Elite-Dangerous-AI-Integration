@@ -89,6 +89,7 @@ export interface ListAction {
     icon?: string;
     label?: string;
     danger?: boolean;
+    inline_edit?: boolean;
 }
 
 export interface ListRowProgress {

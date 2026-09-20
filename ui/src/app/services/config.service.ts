@@ -28,6 +28,7 @@ export interface PluginSettingsButtonMessage extends BaseCommand {
     type: "plugin_settings_button";
     plugin_guid: string;
     key: string;
+    value?: string;
 }
 
 export interface RefreshSystemInfoMessage extends BaseCommand {
@@ -334,12 +335,13 @@ export class ConfigService {
         await this.tauriService.send_command(message);
     }
 
-    public async clickPluginSettingsButton(pluginGuid: string, key: string): Promise<void> {
+    public async clickPluginSettingsButton(pluginGuid: string, key: string, value?: string): Promise<void> {
         const message: PluginSettingsButtonMessage = {
             type: "plugin_settings_button",
             timestamp: new Date().toISOString(),
             plugin_guid: pluginGuid,
             key,
+            ...(value !== undefined ? { value } : {}),
         };
         await this.tauriService.send_command(message);
     }

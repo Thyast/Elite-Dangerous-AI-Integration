@@ -1,6 +1,7 @@
 {
   "common": {
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "confirm": "Confirmer"
   },
   "plugin": {
     "sum": {
@@ -21,7 +22,9 @@
         "confirm": "Confirmer l'import",
         "modify": "Modifier les données",
         "newImport": "Nouvel import",
-        "delete": "Supprimer ce plan"
+        "delete": "Supprimer ce plan",
+        "rename": "Renommer ce plan",
+        "startSession": "Activer ce plan"
       },
       "noImportYet": "Aucun import effectué.",
       "idleHint": "Le formulaire d'import n'apparaît qu'au besoin — rien n'est affiché par défaut.",
@@ -54,8 +57,13 @@
         "imported": "Plan « {{plan}} » importé ({{modules}} modules ; {{changes}}).",
         "deleted": "Plan « {{plan}} » supprimé.",
         "deletedNotFound": "Plan « {{plan}} » introuvable — le nom doit correspondre exactement.",
-        "sessionActive": "{{plan}} — {{ship}} · étape {{step}}/{{total}} · {{pct}}% complété"
-      }
+        "sessionActive": "{{plan}} — {{ship}} · étape {{step}}/{{total}} · {{pct}}% complété",
+        "renamed": "Plan renommé « {{name}} ».",
+        "sessionStarted": "Session démarrée pour « {{plan}} »."
+      },
+      "errRename": "Échec du renommage : {{detail}}",
+      "errStart": "Impossible de démarrer la session : {{detail}}",
+      "errNoShip": "Aucun vaisseau détecté via le journal pour le moment."
     }
   }
 }

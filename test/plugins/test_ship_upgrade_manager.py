@@ -395,14 +395,19 @@ def test_plan_rows_expose_delete_action_and_delete_by_row(tmp_path: Path):
 
     plans_field = plugin._field("plans", "available_plans")
     assert [row["key"] for row in plans_field["items"]] == [plan_id]
-    assert plans_field["row_actions"][0]["action"] == "delete_plan"
-    assert plans_field["row_actions"][0]["label"] == "plugin.sum.btn.delete"
+    actions = {action["action"]: action for action in plans_field["row_actions"]}
+    assert set(actions) == {"rename_plan", "start_plan_session", "delete_plan"}
+    assert actions["rename_plan"]["icon"] == "edit"
+    assert actions["rename_plan"]["inline_edit"] is True
+    assert actions["start_plan_session"]["icon"] == "play_arrow"
+    assert actions["delete_plan"]["danger"] is True
+    assert actions["delete_plan"]["label"] == "plugin.sum.btn.delete"
 
     plugin.on_settings_button(f"delete_plan:{plan_id}")
 
     assert plugin.list_plans() == []
-    assert plugin._field("plans", "delete_status")["content"] == "plugin.sum.msg.deleted"
-    assert plugin._field("plans", "delete_status")["params"]["plan"] == "PvE"
+    assert plugin._field("plans", "plans_status")["content"] == "plugin.sum.msg.deleted"
+    assert plugin._field("plans", "plans_status")["params"]["plan"] == "PvE"
 
 
 def test_delete_unknown_plan_row_reports_error(tmp_path: Path):
@@ -410,7 +415,7 @@ def test_delete_unknown_plan_row_reports_error(tmp_path: Path):
 
     plugin.on_settings_button("delete_plan:unknown-id")
 
-    field = plugin._field("plans", "delete_status")
+    field = plugin._field("plans", "plans_status")
     assert field["content"] == "plugin.sum.errDelete"
     assert "detail" in field["params"]
 
@@ -586,6 +591,55 @@ def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
 
     progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
     assert progress[0]["paused"] is True
+
+
+def test_rename_plan_via_row_action(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plan_id = plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}]})
+
+    plugin.on_settings_button(f"rename_plan:{plan_id}", "PvE Advanced")
+
+    assert [plan["plan_name"] for plan in plugin.list_plans()] == ["PvE Advanced"]
+    assert plugin.get_plan(plan_id)["id"] == plan_id
+    status = plugin._field("plans", "plans_status")
+    assert status["content"] == "plugin.sum.msg.renamed"
+    assert status["params"]["name"] == "PvE Advanced"
+
+    plugin.on_settings_button(f"rename_plan:{plan_id}", "PvE")
+    assert plugin.list_plans()[0]["plan_name"] == "PvE"
+
+
+def test_rename_plan_to_existing_name_reports_error(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    first = plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser"}]})
+    plugin.import_plan("Python", "Combat", {"steps": [{"id": "cannon"}]})
+
+    plugin.on_settings_button(f"rename_plan:{first}", "Combat")
+
+    status = plugin._field("plans", "plans_status")
+    assert status["content"] == "plugin.sum.errRename"
+    assert "already exists" in status["params"]["detail"]
+    assert {plan["plan_name"] for plan in plugin.list_plans()} == {"Mining", "Combat"}
+
+
+def test_activate_plan_starts_session_for_current_ship(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plan_id = plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}]})
+
+    plugin.on_settings_button(f"start_plan_session:{plan_id}")
+
+    status = plugin._field("plans", "plans_status")
+    assert status["content"] == "plugin.sum.errNoShip"
+
+    plugin._current_ship_id = "SHIP-9"
+    plugin.on_settings_button(f"start_plan_session:{plan_id}")
+
+    session = plugin.get_session()
+    assert session is not None
+    assert session["ship_instance_id"] == "SHIP-9"
+    status = plugin._field("plans", "plans_status")
+    assert status["content"] == "plugin.sum.msg.sessionStarted"
+    assert status["params"]["plan"] == "PvE"
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):

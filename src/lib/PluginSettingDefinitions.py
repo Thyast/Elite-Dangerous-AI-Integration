@@ -68,12 +68,14 @@ class ListAction(TypedDict):
     """Defines an action button rendered on every row of a list field.
 
     Clicking it invokes the plugin's settings-button hook with the key
-    ``<action>:<row key>``.
+    ``<action>:<row key>``. With ``inline_edit`` the row title becomes an
+    editable input and the edited value is passed as the hook value.
     """
     action: str
     icon: NotRequired[str]
     label: NotRequired[str]
     danger: NotRequired[bool]
+    inline_edit: NotRequired[bool]
 
 class ListRowProgress(TypedDict, total=False):
     """Active session progress shown under a plan row."""

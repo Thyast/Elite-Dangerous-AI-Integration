@@ -45,7 +45,7 @@ export class SettingsGridComponent {
      */
     @Input() setValue!: (fieldKey: string, value: any) => void;
 
-    @Input() onButtonClick?: (fieldKey: string) => void;
+    @Input() onButtonClick?: (fieldKey: string, value?: string) => void;
     
     /**
      * Optional: Header level for the grid label (default: h3).
@@ -74,7 +74,7 @@ export class SettingsGridComponent {
         this.onButtonClick?.(field.key);
     }
 
-    handleListAction(event: { action: string; rowKey: string }): void {
-        this.onButtonClick?.(`${event.action}:${event.rowKey}`);
+    handleListAction(event: { action: string; rowKey: string; value?: string }): void {
+        this.onButtonClick?.(`${event.action}:${event.rowKey}`, event.value);
     }
 }

@@ -1,6 +1,7 @@
 {
   "common": {
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "confirm": "Confirm"
   },
   "plugin": {
     "sum": {
@@ -21,7 +22,9 @@
         "confirm": "Confirm import",
         "modify": "Modify data",
         "newImport": "New import",
-        "delete": "Delete this plan"
+        "delete": "Delete this plan",
+        "rename": "Rename this plan",
+        "startSession": "Activate this plan"
       },
       "noImportYet": "No import yet.",
       "idleHint": "The import form only appears when needed — nothing is shown by default.",
@@ -54,8 +57,13 @@
         "imported": "Plan \"{{plan}}\" imported ({{modules}} modules; {{changes}}).",
         "deleted": "Plan \"{{plan}}\" deleted.",
         "deletedNotFound": "Plan \"{{plan}}\" not found — the name must match exactly.",
-        "sessionActive": "{{plan}} — {{ship}} · step {{step}}/{{total}} · {{pct}}% completed"
-      }
+        "sessionActive": "{{plan}} — {{ship}} · step {{step}}/{{total}} · {{pct}}% completed",
+        "renamed": "Plan renamed to \"{{name}}\".",
+        "sessionStarted": "Session started for \"{{plan}}\"."
+      },
+      "errRename": "Rename failed: {{detail}}",
+      "errStart": "Could not start the session: {{detail}}",
+      "errNoShip": "No ship detected from the journal yet."
     }
   }
 }

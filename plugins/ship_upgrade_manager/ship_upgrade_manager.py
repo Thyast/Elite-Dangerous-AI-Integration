@@ -112,6 +112,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def __init__(self, plugin_manifest: PluginManifest):
         super().__init__(plugin_manifest)
         self.helper: PluginHelper | None = None
+        self._current_ship_id = ""
         self._pending_diff: dict[str, Any] | None = None
         self._last_plan_filter = ""
         self._initialize_database()
@@ -270,6 +271,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "items": self._make_plan_rows(),
             "row_actions": [
                 {
+                    "action": "rename_plan",
+                    "icon": "edit",
+                    "label": "plugin.sum.btn.rename",
+                    "inline_edit": True,
+                },
+                {
+                    "action": "start_plan_session",
+                    "icon": "play_arrow",
+                    "label": "plugin.sum.btn.startSession",
+                },
+                {
                     "action": "delete_plan",
                     "icon": "delete",
                     "label": "plugin.sum.btn.delete",
@@ -277,7 +289,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 }
             ],
         })
-        delete_status = self._paragraph("delete_status", str(self.settings.get("delete_status", "") or ""))
+        delete_status = self._paragraph("plans_status", str(self.settings.get("plans_status", "") or ""))
         return [plan_filter, plans_list, delete_status]
 
     def _session_fields(self) -> list[SettingBase]:
@@ -511,7 +523,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if plan_filter != getattr(self, "_last_plan_filter", ""):
             self._publish_status()
 
-    def on_settings_button(self, key: str) -> None:
+    def on_settings_button(self, key: str, value: str | None = None) -> None:
         if key == "import_plan":
             self._pending_diff = None
             self._enter_import_state(IMPORT_STATE_DATA)
@@ -529,6 +541,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self.settings["plan_input"] = ""
             self._pending_diff = None
             self._enter_import_state(IMPORT_STATE_DATA)
+        elif key.startswith("rename_plan:"):
+            self._rename_plan_from_settings(key.split(":", 1)[1], value or "")
+        elif key.startswith("start_plan_session:"):
+            self._start_plan_session_from_settings(key.split(":", 1)[1])
         elif key.startswith("delete_plan:"):
             self._delete_plan_by_id(key.split(":", 1)[1])
         else:
@@ -698,16 +714,77 @@ class ShipUpgradeManagerPlugin(PluginBase):
         except ValueError as error:
             log("error", f"Ship Upgrade Manager plan deletion failed: {error}")
             self._set_message_field(
-                "plans", "delete_status", "plugin.sum.errDelete", {"detail": str(error)}
+                "plans", "plans_status", "plugin.sum.errDelete", {"detail": str(error)}
             )
             return
         if self._last_import and self._last_import.get("plan_id") == plan_id:
             self._clear_last_import()
             self._enter_import_state(IMPORT_STATE_IDLE)
         self._set_message_field(
-            "plans", "delete_status", "plugin.sum.msg.deleted", {"plan": plan["plan_name"]}
+            "plans", "plans_status", "plugin.sum.msg.deleted", {"plan": plan["plan_name"]}
         )
         self._publish_status()
+
+    def _rename_plan_from_settings(self, plan_id: str, new_name: str) -> None:
+        try:
+            self.rename_plan(plan_id, new_name)
+        except ValueError as error:
+            log("error", f"Ship Upgrade Manager plan rename failed: {error}")
+            self._set_message_field(
+                "plans", "plans_status", "plugin.sum.errRename", {"detail": str(error)}
+            )
+
+    def _start_plan_session_from_settings(self, plan_id: str) -> None:
+        ship_id = self._current_ship_id
+        if not ship_id:
+            self._set_message_field("plans", "plans_status", "plugin.sum.errNoShip")
+            return
+        try:
+            plan = self.get_plan(plan_id)
+            self.start_session(plan["plan_name"], ship_id)
+        except ValueError as error:
+            log("error", f"Ship Upgrade Manager session start failed: {error}")
+            self._set_message_field(
+                "plans", "plans_status", "plugin.sum.errStart", {"detail": str(error)}
+            )
+            return
+        self._set_message_field(
+            "plans",
+            "plans_status",
+            "plugin.sum.msg.sessionStarted",
+            {"plan": plan["plan_name"]},
+        )
+
+    def rename_plan(self, plan_id: str, new_name: str) -> bool:
+        """Rename a plan in place, keeping its stable plan id."""
+        if not isinstance(new_name, str) or not new_name.strip():
+            raise ValueError("a new plan name is required")
+        with self.get_db() as db:
+            row = db.execute(
+                "SELECT plan_name FROM plans WHERE id = ?", (plan_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Unknown plan: {plan_id}")
+            try:
+                db.execute(
+                    "UPDATE plans SET plan_name = ? WHERE id = ?",
+                    (new_name.strip(), plan_id),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError(
+                    f"A plan named '{new_name.strip()}' already exists for this ship"
+                ) from error
+        old_name = row["plan_name"]
+        if self._last_import and self._last_import.get("plan_id") == plan_id:
+            self._last_import["plan_name"] = new_name.strip()
+            self._save_last_import(self._last_import)
+            self._enter_import_state(self._import_state)
+        self._set_message_field(
+            "plans", "plans_status", "plugin.sum.msg.renamed", {"name": new_name.strip()}
+        )
+        log("info", f"Renamed Ship Upgrade Manager plan {plan_id} from {old_name}")
+        self._publish_status()
+        return True
 
     @staticmethod
     def _format_plan_diff(diff: dict[str, Any]) -> str:
@@ -761,6 +838,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
             or event.content.get("Ship")
             or ""
         )
+        if ship_id:
+            self._current_ship_id = ship_id
         modules = self._event_modules(event.content)
         with self.get_db() as db:
             rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
@@ -1246,7 +1325,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._clear_last_import()
             self._enter_import_state(IMPORT_STATE_IDLE)
         self._set_message_field(
-            "plans", "delete_status", "plugin.sum.msg.deleted", {"plan": plan_name.strip()}
+            "plans", "plans_status", "plugin.sum.msg.deleted", {"plan": plan_name.strip()}
         )
         self._publish_status()
         return True
