@@ -8,7 +8,7 @@
             <mat-expansion-panel-header>
                 <mat-panel-title>
                     <mat-icon class="tab-icon">{{ plugin_settings_config[1].icon }}</mat-icon>
-                    {{ plugin_settings_config[1].label }}
+                    {{ resolve(plugin_settings_config[1].label) }}
                 </mat-panel-title>
             </mat-expansion-panel-header>
             @if (config) {

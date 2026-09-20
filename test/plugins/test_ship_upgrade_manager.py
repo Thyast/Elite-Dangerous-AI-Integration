@@ -342,9 +342,27 @@ def test_import_tunnel_cancel_returns_to_idle_and_clears_input(tmp_path: Path):
 
     assert plugin._import_state == "idle"
     assert plugin.settings["plan_input"] == ""
-    keys = [field["key"] for field in plugin._grid("import")["fields"]]
-    assert "import_plan" in keys
-    assert "plan_input" not in keys
+    grid_keys = [grid["key"] for grid in plugin.settings_config["grids"]]
+    assert "import" not in grid_keys
+    plans_grid = next(g for g in plugin.settings_config["grids"] if g["key"] == "plans")
+    assert plans_grid["header_action"]["key"] == "import_plan"
+
+
+def test_import_entry_point_moves_between_header_and_tunnel(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+
+    grid_keys = [grid["key"] for grid in plugin.settings_config["grids"]]
+    assert "import" not in grid_keys
+    plans_grid = next(g for g in plugin.settings_config["grids"] if g["key"] == "plans")
+    assert plans_grid["header_action"]["key"] == "import_plan"
+    assert plans_grid["header_action"]["label"] == "plugin.sum.btn.import"
+
+    plugin.on_settings_button("import_plan")
+
+    grid_keys = [grid["key"] for grid in plugin.settings_config["grids"]]
+    assert grid_keys[0] == "import"
+    plans_grid = next(g for g in plugin.settings_config["grids"] if g["key"] == "plans")
+    assert "header_action" not in plans_grid
 
 
 def test_import_tunnel_before_chat_start_imports_from_config_state(tmp_path: Path):
@@ -416,7 +434,8 @@ def test_delete_last_imported_plan_resets_import_state(tmp_path: Path):
 
     assert plugin._import_state == "idle"
     assert plugin._last_import is None
-    assert plugin._field("import", "import_status")["content"] == "plugin.sum.noImportYet"
+    grid_keys = [grid["key"] for grid in plugin.settings_config["grids"]]
+    assert "import" not in grid_keys
 
 
 def test_last_import_persists_across_plugin_restart(tmp_path: Path):

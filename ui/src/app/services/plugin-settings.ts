@@ -7,11 +7,18 @@ export interface PluginSettings {
     grids: SettingsGrid[];
 }
 
+export interface GridHeaderAction {
+    key: string;
+    label?: string;
+    icon?: string;
+}
+
 export interface SettingsGrid {
     key: string;
     label: string;
     collapsible?: boolean;
     default_collapsed?: boolean;
+    header_action?: GridHeaderAction;
     fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting)[];
 }
 

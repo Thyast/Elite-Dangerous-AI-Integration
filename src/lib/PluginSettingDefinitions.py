@@ -80,6 +80,12 @@ class ListSetting(SettingBase):
     items: list[ListRow]
     row_actions: NotRequired[list[ListAction]]
 
+class GridHeaderAction(TypedDict):
+    """Defines an action button rendered next to a grid header."""
+    key: str
+    icon: NotRequired[str]
+    label: NotRequired[str]
+
 class SettingsGrid(TypedDict):
     """Defines a grid of settings for a plugin."""
     key: str
@@ -87,6 +93,7 @@ class SettingsGrid(TypedDict):
     fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting]
     collapsible: NotRequired[bool]
     default_collapsed: NotRequired[bool]
+    header_action: NotRequired[GridHeaderAction]
 
 class PluginSettings(TypedDict):
     """Used to define the settings for a plugin."""

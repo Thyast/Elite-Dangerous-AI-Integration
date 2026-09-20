@@ -5,6 +5,8 @@ import { SettingsGrid, SettingBase } from "../../services/plugin-settings";
 import { TranslateService } from "@ngx-translate/core";
 import { resolveSettingText } from "../../services/setting-text";
 import { MatExpansionModule } from "@angular/material/expansion";
+import { MatButtonModule } from "@angular/material/button";
+import { MatIconModule } from "@angular/material/icon";
 
 /**
  * A reusable component for rendering a settings grid with a label and fields.
@@ -17,6 +19,8 @@ import { MatExpansionModule } from "@angular/material/expansion";
         CommonModule,
         SettingsFieldComponent,
         MatExpansionModule,
+        MatButtonModule,
+        MatIconModule,
     ],
     templateUrl: "./settings-grid.component.html",
     styleUrl: "./settings-grid.component.css",

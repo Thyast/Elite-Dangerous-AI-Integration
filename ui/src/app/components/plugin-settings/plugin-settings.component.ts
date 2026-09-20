@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from "@angular/core";
+import { Component, OnDestroy, OnInit, inject } from "@angular/core";
 import { MatCardModule } from "@angular/material/card";
 import { MatTabsModule } from "@angular/material/tabs";
 import { MatIconModule } from "@angular/material/icon";
@@ -28,6 +28,8 @@ import {
   SettingsGrid,
 } from "../../services/plugin-settings";
 import { SettingsGridComponent } from "../settings-grid/settings-grid.component";
+import { TranslateService } from "@ngx-translate/core";
+import { resolveSettingText } from "../../services/setting-text";
 
 @Component({
   selector: "app-plugin-settings",
@@ -56,12 +58,17 @@ import { SettingsGridComponent } from "../settings-grid/settings-grid.component"
   styleUrls: ["../settings-menu/settings-menu.component.scss"],
 })
 export class PluginSettingsComponent implements OnInit, OnDestroy {
+  private readonly translate = inject(TranslateService);
   config: Config | null = null;
   private configSubscription?: Subscription;
   private plugin_settings_message_subscription?: Subscription;
 
   // Plugin settings
   plugin_settings_configs: [string, PluginSettings][] = [];
+
+  resolve(value: string | null | undefined): string {
+    return resolveSettingText(this.translate, value);
+  }
 
   constructor(
     private configService: ConfigService,

@@ -1,6 +1,6 @@
 @if (grid.collapsible) {
 <mat-expansion-panel [expanded]="!grid.default_collapsed">
-    <mat-expansion-panel-header>{{ grid.label }}</mat-expansion-panel-header>
+    <mat-expansion-panel-header>{{ resolve(grid.label) }}</mat-expansion-panel-header>
     <div [class]="gridClass">
         @for (field of grid.fields; track field.key) {
             <app-settings-field
@@ -8,24 +8,35 @@
                 [value]="getFieldValue(field)"
                 [buttonEnabled]="onButtonClick !== undefined"
                 (valueChange)="onFieldChange(field, $event)"
-                (buttonClick)="handleButtonClick(field)">
+                (buttonClick)="handleButtonClick(field)"
+                (listAction)="handleListAction($event)">
             </app-settings-field>
         }
     </div>
 </mat-expansion-panel>
 } @else {
 <div [class]="gridClass">
-    @switch (headerLevel) {
-        @case ('h2') {
-            <h2>{{ resolve(grid.label) }}</h2>
+    <div class="grid-header">
+        @switch (headerLevel) {
+            @case ('h2') {
+                <h2>{{ resolve(grid.label) }}</h2>
+            }
+            @case ('h3') {
+                <h3>{{ resolve(grid.label) }}</h3>
+            }
+            @case ('h4') {
+                <h4>{{ resolve(grid.label) }}</h4>
+            }
         }
-        @case ('h3') {
-            <h3>{{ resolve(grid.label) }}</h3>
+        @if (grid.header_action && onButtonClick !== undefined) {
+            <button mat-icon-button type="button"
+                    class="grid-header-action"
+                    [attr.aria-label]="resolve(grid.header_action.label)"
+                    (click)="onButtonClick(grid.header_action.key)">
+                <mat-icon>{{ grid.header_action.icon }}</mat-icon>
+            </button>
         }
-        @case ('h4') {
-            <h4>{{ resolve(grid.label) }}</h4>
-        }
-    }
+    </div>
     @for (field of grid.fields; track field.key) {
         <app-settings-field
             [field]="field"

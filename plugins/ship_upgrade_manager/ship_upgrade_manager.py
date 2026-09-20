@@ -110,24 +110,45 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "key": self.plugin_manifest.guid,
             "label": "plugin.sum.label",
             "icon": "rocket_launch",
-            "grids": [
-                {
-                    "key": "import",
-                    "label": "plugin.sum.grid.import",
-                    "fields": self._import_fields(),
-                },
-                {
-                    "key": "plans",
-                    "label": "plugin.sum.grid.plans",
-                    "fields": self._plans_fields(),
-                },
-                {
-                    "key": "session",
-                    "label": "plugin.sum.grid.session",
-                    "fields": self._session_fields(),
-                },
-            ],
+            "grids": self._build_grids(),
         }
+
+    def _build_grids(self, error: tuple[str, dict[str, str | int | float]] | None = None) -> list[SettingsGrid]:
+        grids: list[SettingsGrid] = []
+        if self._import_state != IMPORT_STATE_IDLE:
+            grids.append({
+                "key": "import",
+                "label": "plugin.sum.grid.import",
+                "fields": self._import_fields(error),
+            })
+        plans_grid: SettingsGrid = {
+            "key": "plans",
+            "label": "plugin.sum.grid.plans",
+            "fields": self._plans_fields(),
+            "header_action": {
+                "key": "import_plan",
+                "icon": "add",
+                "label": "plugin.sum.btn.import",
+            },
+        }
+        grids.append(plans_grid)
+        grids.append({
+            "key": "session",
+            "label": "plugin.sum.grid.session",
+            "fields": self._session_fields(),
+        })
+        # The import entry point lives in the plans grid header; it is
+        # redundant while the tunnel itself is open.
+        if self._import_state != IMPORT_STATE_IDLE:
+            plans_grid.pop("header_action", None)
+        return grids
+
+    def _sync_grids(self, error: tuple[str, dict[str, str | int | float]] | None = None) -> None:
+        self.settings_config["grids"] = self._build_grids(error)
+        for grid in self.settings_config["grids"]:
+            for field in grid["fields"]:
+                if field["type"] in {"paragraph", "error"}:
+                    self.settings[field["key"]] = field.get("content", "")
 
     def _base_field(self, key: str, type_: str, label: str | None = None) -> SettingBase:
         return {
@@ -162,6 +183,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
         error: tuple[str, dict[str, str | int | float]] | None = None,
     ) -> list[SettingBase]:
         state = self._import_state
+        if state == IMPORT_STATE_IDLE:
+            # The import entry point lives in the plans grid header action;
+            # the tunnel grid itself only exists while a flow is open.
+            return []
         if state == IMPORT_STATE_DATA:
             textarea: TextAreaSetting = self._base_field("plan_input", "textarea", "plugin.sum.planDataLabel")  # type: ignore[assignment]
             textarea.update({
@@ -207,13 +232,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 self._button("new_import", "plugin.sum.btn.newImport"),
             ]
         else:
-            fields = [
-                self._button("import_plan", "plugin.sum.btn.import"),
-                self._paragraph(
-                    "import_status",
-                    str(self.settings.get("import_status", "") or "plugin.sum.noImportYet"),
-                ),
-            ]
+            fields = []
         if error is not None:
             fields.append(self._paragraph("import_error", error[0], params=error[1]))
         return fields
@@ -267,11 +286,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         error: tuple[str, dict[str, str | int | float]] | None = None,
     ) -> None:
         self._import_state = state
-        grid = self._grid("import")
-        grid["fields"] = self._import_fields(error)
-        for field in grid["fields"]:
-            if field["type"] in {"paragraph", "error"}:
-                self.settings[field["key"]] = field.get("content", "")
+        self._sync_grids(error)
 
     def _make_plan_rows(self) -> list[ListRow]:
         filter_value = str(self.settings.get("plan_filter", "")).strip().lower()
@@ -342,15 +357,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if last_import is None:
             if self._import_state == IMPORT_STATE_IMPORTED:
                 self._import_state = IMPORT_STATE_IDLE
-                self.settings["import_status"] = "plugin.sum.noImportYet"
         elif self._import_state in {IMPORT_STATE_IDLE, IMPORT_STATE_IMPORTED}:
             self._import_state = IMPORT_STATE_IMPORTED
         else:
             return
-        self._grid("import")["fields"] = self._import_fields()
-        for field in self._grid("import")["fields"]:
-            if field["type"] in {"paragraph", "error"}:
-                self.settings[field["key"]] = field.get("content", "")
+        self._sync_grids()
 
     def on_chat_start(self, helper: PluginHelper) -> None:
         self.helper = helper
@@ -626,7 +637,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return
         if self._last_import and self._last_import.get("plan_id") == plan_id:
             self._clear_last_import()
-            self.settings["import_status"] = "plugin.sum.noImportYet"
             self._enter_import_state(IMPORT_STATE_IDLE)
         self._set_message_field(
             "plans", "delete_status", "plugin.sum.msg.deleted", {"plan": plan["plan_name"]}
@@ -1166,7 +1176,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             db.execute("DELETE FROM plans WHERE id = ?", (plan["id"],))
         if self._last_import and self._last_import.get("plan_id") == plan["id"]:
             self._clear_last_import()
-            self.settings["import_status"] = "plugin.sum.noImportYet"
             self._enter_import_state(IMPORT_STATE_IDLE)
         self._set_message_field(
             "plans", "delete_status", "plugin.sum.msg.deleted", {"plan": plan_name.strip()}

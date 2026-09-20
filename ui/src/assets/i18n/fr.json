@@ -7,7 +7,7 @@
       "label": "Ship Upgrade Manager",
       "grid": {
         "import": "Import de plan",
-        "plans": "Plans importés",
+        "plans": "Plans",
         "session": "Session active (modules)"
       },
       "step": {
