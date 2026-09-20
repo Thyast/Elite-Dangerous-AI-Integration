@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from lib.PluginBase import PluginManifest
+from lib.Event import GameEvent
 from plugins.ship_upgrade_manager.ship_upgrade_manager import (
     ShipUpgradeManagerPlugin,
 )
@@ -87,11 +88,69 @@ def test_session_history_is_archived_when_stopped_or_replaced(tmp_path: Path):
     assert history[0]["completion_percent"] == 50
 
     plugin.start_session("PvE", "SHIP-2")
+    plugin.stop_session()
     plugin.start_session("PvE", "SHIP-3")
+    plugin.stop_session()
     assert [item["ship_instance_id"] for item in plugin.list_session_history()] == [
+        "SHIP-3",
         "SHIP-2",
         "SHIP-1",
     ]
+
+
+def test_multiple_plans_and_ships_have_independent_sessions(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser"}]})
+    plugin.import_plan("Python", "Combat", {"steps": [{"id": "cannon"}]})
+
+    mining = plugin.start_session("Mining", "SHIP-1")
+    combat = plugin.start_session("Combat", "SHIP-2")
+
+    assert len(plugin.list_sessions()) == 2
+    assert plugin.complete_step("laser", session_id=mining["id"])["completed_steps"] == ["laser"]
+    assert plugin.get_session(combat["id"])["completed_steps"] == []
+
+
+def test_events_complete_all_matching_sessions_for_the_same_ship(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "Mining A", {"steps": [{"id": "laser", "item": "laser"}]})
+    plugin.import_plan("Python", "Mining B", {"steps": [{"id": "laser", "item": "laser"}]})
+    plugin.start_session("Mining A", "SHIP-1")
+    plugin.start_session("Mining B", "SHIP-1")
+
+    plugin._on_event(
+        GameEvent(
+            content={
+                "event": "ModuleBuy",
+                "ShipID": "SHIP-1",
+                "Slot": "Hardpoint1",
+                "BuyItem": "laser",
+            },
+            historic=False,
+        ),
+        {},
+    )
+
+    assert all(
+        session["completed_steps"] == ["laser"] for session in plugin.list_sessions()
+    )
+
+
+def test_plan_update_migrates_all_matching_sessions(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser", "item": "laser"}]})
+    first = plugin.start_session("Mining", "SHIP-1")
+    second = plugin.start_session("Mining", "SHIP-2")
+    plugin.complete_step("laser", session_id=first["id"])
+
+    plugin.import_plan(
+        "Python",
+        "Mining",
+        {"steps": [{"id": "laser", "item": "different-laser"}]},
+    )
+
+    assert plugin.get_session(first["id"])["completed_steps"] == []
+    assert plugin.get_session(second["id"])["completed_steps"] == []
 
 
 def test_reimport_only_increments_version_when_source_changes(tmp_path: Path):
@@ -264,15 +323,23 @@ def test_settings_apply_changes_reports_invalid_input(tmp_path: Path):
     assert plugin.settings["import_status"].startswith("Apply error:")
 
 
-def test_settings_button_before_chat_start_is_ignored_without_exception():
+def test_settings_button_before_chat_start_imports_from_config_state(tmp_path: Path):
     plugin = ShipUpgradeManagerPlugin(
         PluginManifest(
             '{"guid":"not-started-test-guid","name":"Ship Upgrade","version":"1.0.0"}'
         )
     )
+    plugin.settings["plan_input"] = json.dumps(
+        {
+            "ship_model": "Python",
+            "plan_name": "Config plan",
+            "steps": [{"id": "fsd", "item": "int_hyperdrive_size5_class5"}],
+        }
+    )
 
     plugin.on_settings_button("import_plan")
-    plugin.on_settings_button("apply_changes")
+
+    assert plugin.list_plans()[0]["plan_name"] == "Config plan"
 
 
 def test_loadout_and_module_events_auto_complete_matching_modules(tmp_path: Path):

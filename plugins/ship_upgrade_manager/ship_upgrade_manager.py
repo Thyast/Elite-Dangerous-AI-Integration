@@ -1,6 +1,7 @@
 import hashlib
 from html import escape
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -55,10 +56,11 @@ class StartSessionParams(BaseModel):
 class CompleteStepParams(BaseModel):
     step_id: str = Field(description="Identifier of the completed upgrade module")
     notes: str = Field(default="", description="Optional completion notes")
+    session_id: str | None = Field(default=None, description="Optional session id")
 
 
 class SessionActionParams(BaseModel):
-    pass
+    session_id: str | None = Field(default=None, description="Optional session id")
 
 
 class PlanChangeParams(BaseModel):
@@ -192,6 +194,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 },
             ],
         }
+        self._initialize_database()
 
     def on_chat_start(self, helper: PluginHelper) -> None:
         self.helper = helper
@@ -215,28 +218,28 @@ class ShipUpgradeManagerPlugin(PluginBase):
             name="ship_upgrade_pause_session",
             description="Pause the active ship upgrade session",
             parameters=SessionActionParams,
-            method=lambda _args, _context: self._session_pause_action(),
+            method=lambda args, context: self._session_pause_action(args.session_id, context),
             action_type="ship",
         )
         helper.register_action(
             name="ship_upgrade_resume_session",
             description="Resume the active ship upgrade session",
             parameters=SessionActionParams,
-            method=lambda _args, _context: self._session_resume_action(),
+            method=lambda args, context: self._session_resume_action(args.session_id, context),
             action_type="ship",
         )
         helper.register_action(
             name="ship_upgrade_stop_session",
             description="Stop the active ship upgrade session",
             parameters=SessionActionParams,
-            method=lambda _args, _context: self._session_stop_action(),
+            method=lambda args, context: self._session_stop_action(args.session_id, context),
             action_type="ship",
         )
         helper.register_action(
             name="ship_upgrade_next_step",
             description="Describe the next module of the active ship upgrade session",
             parameters=SessionActionParams,
-            method=lambda _args, _context: self._next_step_action(),
+            method=lambda args, context: self._next_step_action(args.session_id, context),
             action_type="ship",
         )
         helper.register_action(
@@ -273,13 +276,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._publish_status()
 
     def on_settings_button(self, key: str) -> None:
-        if self.helper is None:
-            log(
-                "warning",
-                f"Ignoring Ship Upgrade Manager settings button '{key}' "
-                "before chat start",
-            )
-            return
         if key == "import_plan":
             self._import_from_settings()
         elif key == "preview_diff":
@@ -311,28 +307,30 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
 
     def _complete_step_action(
-        self, args: CompleteStepParams, _context: dict[str, Any]
+        self, args: CompleteStepParams, context: dict[str, Any]
     ) -> str:
-        session = self.complete_step(args.step_id, args.notes)
+        session = self.complete_step(
+            args.step_id, args.notes, args.session_id, context
+        )
         return (
             f"Completed {args.step_id}. "
             f"Progress: {len(session['completed_steps'])}/{session['total_steps']}."
         )
 
-    def _session_pause_action(self) -> str:
-        self.set_session_paused(True)
+    def _session_pause_action(self, session_id=None, context=None) -> str:
+        self.set_session_paused(True, session_id, context)
         return "Ship upgrade session paused."
 
-    def _session_resume_action(self) -> str:
-        self.set_session_paused(False)
+    def _session_resume_action(self, session_id=None, context=None) -> str:
+        self.set_session_paused(False, session_id, context)
         return "Ship upgrade session resumed."
 
-    def _session_stop_action(self) -> str:
-        self.stop_session()
+    def _session_stop_action(self, session_id=None, context=None) -> str:
+        self.stop_session(session_id, context)
         return "Ship upgrade session stopped."
 
-    def _next_step_action(self) -> str:
-        session = self.get_session()
+    def _next_step_action(self, session_id=None, context=None) -> str:
+        session = self.get_session(session_id, context)
         if session is None:
             return "There is no active ship upgrade session."
         remaining = [
@@ -522,9 +520,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "ModuleRetrieve",
         }:
             return
-        session = self.get_session()
-        if session is None or session["paused"]:
-            return
         ship_id = str(
             event.content.get("ShipID")
             or event.content.get("ShipIdent")
@@ -532,20 +527,35 @@ class ShipUpgradeManagerPlugin(PluginBase):
             or event.content.get("Ship")
             or ""
         )
-        if ship_id and ship_id not in {
-            str(session["ship_instance_id"]),
-            str(session.get("ship_custom_name") or ""),
-        }:
-            return
         modules = self._event_modules(event.content)
-        for step in session["steps"]:
-            if step["id"] in session["completed_steps"]:
+        with self.get_db() as db:
+            rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
+        if not ship_id and len({str(row["ship_instance_id"]) for row in rows}) > 1:
+            log(
+                "warning",
+                "Skipping ship upgrade detection because the event has no ship identifier "
+                "and multiple ships have active sessions",
+            )
+            return
+        for row in rows:
+            session = self.get_session(row["id"])
+            if session is None or session["paused"]:
                 continue
-            if any(self._module_matches_step(step, module) for module in modules):
-                try:
-                    self.complete_step(step["id"], "Detected from Loadout event")
-                except ValueError as error:
-                    log("warning", f"Could not auto-complete ship upgrade step: {error}")
+            if ship_id and ship_id not in {
+                str(session["ship_instance_id"]),
+                str(session.get("ship_custom_name") or ""),
+            }:
+                continue
+            for step in session["steps"]:
+                if step["id"] in session["completed_steps"]:
+                    continue
+                if any(self._module_matches_step(step, module) for module in modules):
+                    try:
+                        self.complete_step(
+                            step["id"], "Detected from Loadout event", session["id"]
+                        )
+                    except ValueError as error:
+                        log("warning", f"Could not auto-complete ship upgrade step: {error}")
 
     @staticmethod
     def _event_modules(content: dict[str, Any]) -> list[dict[str, Any]]:
@@ -646,9 +656,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
         ]
 
     def get_db_path(self) -> Path:
-        if self.helper is None:
-            raise RuntimeError("Ship Upgrade Manager is not started")
-        return Path(self.helper.get_plugin_data_path(self.plugin_manifest)) / "ship_upgrade_manager.db"
+        if self.helper is not None:
+            data_path = self.helper.get_plugin_data_path(self.plugin_manifest)
+        else:
+            data_path = os.path.abspath(
+                os.path.join(
+                    PluginHelper.PLUGIN_DATA_PATH,
+                    self.plugin_manifest.guid,
+                )
+            )
+            os.makedirs(data_path, exist_ok=True)
+        return Path(data_path) / "ship_upgrade_manager.db"
 
     @contextmanager
     def get_db(self) -> Iterator[sqlite3.Connection]:
@@ -666,6 +684,56 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def _initialize_database(self) -> None:
         with self.get_db() as db:
+            # The first released schema used a singleton row (id='active').  Rebuild
+            # it in place so old databases retain their session and history while
+            # allowing arbitrary session ids.
+            legacy = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='active_session'"
+            ).fetchone()
+            if legacy and legacy["sql"] and "CHECK (ID = 'ACTIVE')" in legacy["sql"].upper():
+                legacy_columns = {
+                    row["name"]
+                    for row in db.execute("PRAGMA table_info(active_session)").fetchall()
+                }
+                paused_column = "paused" if "paused" in legacy_columns else "0"
+                db.execute("PRAGMA foreign_keys = OFF")
+                db.executescript(
+                    """
+                    CREATE TABLE active_session_v2 (
+                        id TEXT PRIMARY KEY,
+                        plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+                        ship_instance_id TEXT NOT NULL,
+                        ship_custom_name TEXT,
+                        current_step INTEGER NOT NULL DEFAULT 0,
+                        completed_steps TEXT NOT NULL DEFAULT '[]',
+                        session_start TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        last_activity TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        plan_version_at_session_start INTEGER NOT NULL,
+                        paused INTEGER NOT NULL DEFAULT 0
+                    );
+                    INSERT INTO active_session_v2
+                        SELECT id, plan_id, ship_instance_id, ship_custom_name,
+                               current_step, completed_steps, session_start,
+                               last_activity, plan_version_at_session_start,
+                               {paused_column}
+                        FROM active_session;
+                    CREATE TABLE step_history_v2 (
+                        id TEXT PRIMARY KEY,
+                        plan_session_id TEXT NOT NULL,
+                        step_id TEXT NOT NULL,
+                        completed_at TEXT NOT NULL,
+                        plan_version_at_completion INTEGER NOT NULL,
+                        notes TEXT,
+                        UNIQUE(plan_session_id, step_id)
+                    );
+                    INSERT INTO step_history_v2 SELECT * FROM step_history;
+                    DROP TABLE step_history;
+                    DROP TABLE active_session;
+                    ALTER TABLE active_session_v2 RENAME TO active_session;
+                    ALTER TABLE step_history_v2 RENAME TO step_history;
+                    """.format(paused_column=paused_column)
+                )
+                db.execute("PRAGMA foreign_keys = ON")
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS plans (
@@ -691,7 +759,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 );
 
                 CREATE TABLE IF NOT EXISTS active_session (
-                    id TEXT PRIMARY KEY CHECK (id = 'active'),
+                    id TEXT PRIMARY KEY,
                     plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
                     ship_instance_id TEXT NOT NULL,
                     ship_custom_name TEXT,
@@ -705,7 +773,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
                 CREATE TABLE IF NOT EXISTS step_history (
                     id TEXT PRIMARY KEY,
-                    plan_session_id TEXT NOT NULL REFERENCES active_session(id) ON DELETE CASCADE,
+                    plan_session_id TEXT NOT NULL,
                     step_id TEXT NOT NULL,
                     completed_at TEXT NOT NULL,
                     plan_version_at_completion INTEGER NOT NULL,
@@ -946,7 +1014,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             raise ValueError("plan_name and ship_instance_id are required")
 
         with self.get_db() as db:
-            self._archive_active_session(db, datetime.now(timezone.utc).isoformat())
             plan = db.execute(
                 "SELECT * FROM plans WHERE plan_name = ? ORDER BY last_modified DESC LIMIT 1",
                 (plan_name,),
@@ -955,13 +1022,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 raise ValueError(f"Unknown plan: {plan_name}")
             steps = self._plan_steps(plan["source_json"])
             now = datetime.now(timezone.utc).isoformat()
+            session_id = hashlib.sha256(
+                f"{plan['id']}\0{ship_instance_id}".encode()
+            ).hexdigest()
+            existing = db.execute(
+                "SELECT id FROM active_session WHERE id = ?", (session_id,)
+            ).fetchone()
+            if existing:
+                self._archive_active_session(
+                    db, now, session_id=session_id
+                )
             db.execute(
                 """
                 INSERT INTO active_session
                     (id, plan_id, ship_instance_id, ship_custom_name,
                      completed_steps, session_start, last_activity,
                      plan_version_at_session_start, paused)
-                VALUES ('active', ?, ?, ?, '[]', ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 0)
                 ON CONFLICT(id) DO UPDATE SET
                     plan_id = excluded.plan_id,
                     ship_instance_id = excluded.ship_instance_id,
@@ -974,6 +1051,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     paused = 0
                 """,
                 (
+                    session_id,
                     plan["id"],
                     ship_instance_id,
                     ship_custom_name or None,
@@ -1002,19 +1080,29 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 ),
             )
         self._publish_status()
-        return self.get_session() or {}
+        return self.get_session(session_id) or {}
 
-    def get_session(self) -> dict[str, Any] | None:
+    def get_session(
+        self, session_id: str | None = None, context: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        session_id = session_id or (context or {}).get("session_id")
         with self.get_db() as db:
-            row = db.execute(
-                """
+            query = """
                 SELECT s.*, p.plan_name, p.ship_model, p.plan_version,
                        p.source_json
                 FROM active_session s
                 JOIN plans p ON p.id = s.plan_id
-                WHERE s.id = 'active'
-                """
-            ).fetchone()
+            """
+            if session_id:
+                query += " WHERE s.id = ?"
+                params: tuple[Any, ...] = (session_id,)
+            elif context and context.get("ship_instance_id"):
+                query += " WHERE s.ship_instance_id = ? ORDER BY s.last_activity DESC LIMIT 1"
+                params = (str(context["ship_instance_id"]),)
+            else:
+                query += " ORDER BY s.last_activity DESC LIMIT 1"
+                params = ()
+            row = db.execute(query, params).fetchone()
         if row is None:
             return None
         session = dict(row)
@@ -1024,10 +1112,26 @@ class ShipUpgradeManagerPlugin(PluginBase):
         session["total_steps"] = len(session["steps"])
         return session
 
-    def complete_step(self, step_id: str, notes: str = "") -> dict[str, Any]:
+    def list_sessions(self) -> list[dict[str, Any]]:
+        """Return all active sessions, ordered by most recently active."""
+        with self.get_db() as db:
+            rows = db.execute(
+                "SELECT id FROM active_session ORDER BY last_activity DESC"
+            ).fetchall()
+        sessions = []
+        for row in rows:
+            session = self.get_session(row["id"])
+            if session:
+                sessions.append(session)
+        return sessions
+
+    def complete_step(
+        self, step_id: str, notes: str = "", session_id: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not step_id.strip():
             raise ValueError("step_id is required")
-        session = self.get_session()
+        session = self.get_session(session_id, context)
         if session is None:
             raise ValueError("No active upgrade session")
         if session["paused"]:
@@ -1053,23 +1157,24 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 """
                 UPDATE active_session
                 SET current_step = ?, completed_steps = ?, last_activity = ?
-                WHERE id = 'active'
+                WHERE id = ?
                 """,
-                (current_step, json.dumps(completed), now),
+                (current_step, json.dumps(completed), now, session["id"]),
             )
             db.execute(
                 """
                 INSERT INTO step_history
                     (id, plan_session_id, step_id, completed_at,
                      plan_version_at_completion, notes)
-                VALUES (?, 'active', ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(plan_session_id, step_id) DO UPDATE SET
                     completed_at = excluded.completed_at,
                     plan_version_at_completion = excluded.plan_version_at_completion,
                     notes = excluded.notes
                 """,
                 (
-                    f"active:{step_id}",
+                    f"{session['id']}:{step_id}",
+                    session["id"],
                     step_id,
                     now,
                     session["plan_version"],
@@ -1077,23 +1182,32 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 ),
             )
         self._publish_status()
-        return self.get_session() or {}
+        return self.get_session(session["id"]) or {}
 
-    def set_session_paused(self, paused: bool) -> dict[str, Any]:
-        if self.get_session() is None:
+    def set_session_paused(
+        self, paused: bool, session_id: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        session = self.get_session(session_id, context)
+        if session is None:
             raise ValueError("No active upgrade session")
         with self.get_db() as db:
             db.execute(
-                "UPDATE active_session SET paused = ?, last_activity = ? WHERE id = 'active'",
-                (int(paused), datetime.now(timezone.utc).isoformat()),
+                "UPDATE active_session SET paused = ?, last_activity = ? WHERE id = ?",
+                (int(paused), datetime.now(timezone.utc).isoformat(), session["id"]),
             )
         self._publish_status()
-        return self.get_session() or {}
+        return self.get_session(session["id"]) or {}
 
-    def stop_session(self) -> None:
+    def stop_session(self, session_id: str | None = None,
+                     context: dict[str, Any] | None = None) -> None:
         with self.get_db() as db:
-            self._archive_active_session(db, datetime.now(timezone.utc).isoformat())
-            db.execute("DELETE FROM active_session WHERE id = 'active'")
+            session = self.get_session(session_id, context)
+            if session:
+                self._archive_active_session(
+                    db, datetime.now(timezone.utc).isoformat(), session_id=session["id"]
+                )
+                db.execute("DELETE FROM active_session WHERE id = ?", (session["id"],))
         self._publish_status()
 
     def list_session_history(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -1118,15 +1232,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return history
 
     def _archive_active_session(
-        self, db: sqlite3.Connection, session_end: str
+        self, db: sqlite3.Connection, session_end: str, session_id: str | None = None
     ) -> None:
+        where = "WHERE s.id = ?" if session_id else ""
+        params = (session_id,) if session_id else ()
         row = db.execute(
-            """
+            f"""
             SELECT s.*, p.plan_name, p.source_json
             FROM active_session s
             JOIN plans p ON p.id = s.plan_id
-            WHERE s.id = 'active'
-            """
+            {where}
+            """, params
         ).fetchone()
         if row is None:
             return
@@ -1223,73 +1339,60 @@ class ShipUpgradeManagerPlugin(PluginBase):
         new_version: int,
         now: str,
     ) -> None:
-        session = db.execute(
-            "SELECT completed_steps FROM active_session "
-            "WHERE id = 'active' AND plan_id = ?",
+        sessions = db.execute(
+            "SELECT id, completed_steps FROM active_session WHERE plan_id = ?",
             (plan_id,),
-        ).fetchone()
-        if session is None:
-            return
-
-        completed = json.loads(session["completed_steps"] or "[]")
+        ).fetchall()
         old_by_id = {step["id"]: step for step in old_steps}
         new_by_id = {step["id"]: step for step in new_steps}
-        migrated = [
-            step_id
-            for step_id in completed
-            if step_id in new_by_id
-            and step_id in old_by_id
-            and self._step_signature(old_by_id[step_id])
-            == self._step_signature(new_by_id[step_id])
-        ]
-        current_step = next(
-            (
-                index
-                for index, step in enumerate(new_steps)
-                if step["id"] not in migrated
-            ),
-            len(new_steps),
-        )
-        db.execute(
-            """
-            UPDATE active_session
-            SET completed_steps = ?, current_step = ?,
-                plan_version_at_session_start = ?, last_activity = ?
-            WHERE id = 'active'
-            """,
-            (json.dumps(migrated), current_step, new_version, now),
-        )
-        db.execute(
-            "DELETE FROM step_history WHERE plan_session_id = 'active' "
-            "AND step_id NOT IN ({})".format(
-                ",".join("?" for _ in migrated) or "''"
-            ),
-            migrated,
-        )
+        for session in sessions:
+            completed = json.loads(session["completed_steps"] or "[]")
+            migrated = [
+                step_id for step_id in completed
+                if step_id in new_by_id and step_id in old_by_id
+                and self._step_signature(old_by_id[step_id])
+                == self._step_signature(new_by_id[step_id])
+            ]
+            current_step = next(
+                (index for index, step in enumerate(new_steps)
+                 if step["id"] not in migrated), len(new_steps)
+            )
+            db.execute(
+                """UPDATE active_session SET completed_steps = ?, current_step = ?,
+                   plan_version_at_session_start = ?, last_activity = ? WHERE id = ?""",
+                (json.dumps(migrated), current_step, new_version, now, session["id"]),
+            )
+            if migrated:
+                placeholders = ",".join("?" for _ in migrated)
+                db.execute(
+                    f"DELETE FROM step_history WHERE plan_session_id = ? AND step_id NOT IN ({placeholders})",
+                    (session["id"], *migrated),
+                )
+            else:
+                db.execute("DELETE FROM step_history WHERE plan_session_id = ?", (session["id"],))
 
     def _publish_status(self) -> None:
-        if self.helper is None:
-            return
-
         with self.get_db() as db:
             plan_count = db.execute("SELECT COUNT(*) FROM plans").fetchone()[0]
-            session = db.execute(
+            sessions = db.execute(
                 """
                 SELECT p.plan_name, s.ship_custom_name, s.ship_instance_id,
                        s.current_step
                 FROM active_session s
                 JOIN plans p ON p.id = s.plan_id
-                WHERE s.id = 'active'
+                ORDER BY s.last_activity DESC
+                LIMIT 1
                 """
-            ).fetchone()
+            ).fetchall()
 
         status = f"{plan_count} plan(s) available."
         plan_filter = str(self.settings.get("plan_filter", "")).strip().lower()
         self._last_plan_filter = plan_filter
         available_plans = self._format_available_plans(plan_filter)
-        if session is None:
+        if not sessions:
             session_summary = "No active session."
         else:
+            session = sessions[0]
             ship = session["ship_custom_name"] or session["ship_instance_id"]
             session_summary = (
                 f"{session['plan_name']} on {ship}; "
@@ -1298,14 +1401,16 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
         self.settings["import_status"] = status
         self.settings["session_summary"] = session_summary
-        manager = self.helper._plugin_manager
-        manager.update_plugin_setting(self.plugin_manifest.guid, "import_status", status)
-        manager.update_plugin_setting(
-            self.plugin_manifest.guid, "session_summary", session_summary
-        )
-        manager.update_plugin_setting(
-            self.plugin_manifest.guid, "available_plans", available_plans
-        )
+        self.settings["available_plans"] = available_plans
+        if self.helper is not None:
+            manager = self.helper._plugin_manager
+            manager.update_plugin_setting(self.plugin_manifest.guid, "import_status", status)
+            manager.update_plugin_setting(
+                self.plugin_manifest.guid, "session_summary", session_summary
+            )
+            manager.update_plugin_setting(
+                self.plugin_manifest.guid, "available_plans", available_plans
+            )
 
     def _format_available_plans(self, plan_filter: str = "") -> str:
         plans = [
