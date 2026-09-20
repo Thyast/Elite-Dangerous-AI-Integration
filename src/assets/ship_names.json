@@ -1,0 +1,4 @@
+{
+  "_comment": "Maps internal ship identifiers to their public display names. Add one entry when a new ship is introduced; identifiers without an entry fall back to a readable form derived from the internal id.",
+  "smallcombat01_nx": "Kestrel MkII"
+}

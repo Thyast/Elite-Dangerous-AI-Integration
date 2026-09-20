@@ -9,6 +9,7 @@ import { MatOptionModule } from "@angular/material/core";
 import { MatButtonModule } from "@angular/material/button";
 import { TranslateService } from "@ngx-translate/core";
 import { MatIconModule } from "@angular/material/icon";
+import { MatProgressBarModule } from "@angular/material/progress-bar";
 import { SettingBase, ListAction, ListRow } from "../../services/plugin-settings";
 import { resolveSettingText } from "../../services/setting-text";
 
@@ -29,6 +30,7 @@ import { resolveSettingText } from "../../services/setting-text";
         MatOptionModule,
         MatButtonModule,
         MatIconModule,
+        MatProgressBarModule,
     ],
     templateUrl: "./settings-field.component.html",
     styleUrl: "./settings-field.component.css",
@@ -47,6 +49,8 @@ export class SettingsFieldComponent {
     @Input() value: any;
 
     @Input() buttonEnabled: boolean = true;
+
+    private readonly collapsedGroups = new Set<string>();
 
     /**
      * Emitted when the field value changes.
@@ -78,14 +82,52 @@ export class SettingsFieldComponent {
         this.listAction.emit({ action: action.action, rowKey: row.key });
     }
 
-    rowsWithGroups(items: ListRow[] | null | undefined): { row: ListRow; header?: string }[] {
-        const entries: { row: ListRow; header?: string }[] = [];
+    rowsWithGroups(items: ListRow[] | null | undefined): { row: ListRow; header?: string; count?: number }[] {
+        const counts = new Map<string, number>();
+        for (const row of items ?? []) {
+            if (row.group) {
+                counts.set(row.group, (counts.get(row.group) ?? 0) + 1);
+            }
+        }
+        const entries: { row: ListRow; header?: string; count?: number }[] = [];
         let lastGroup: string | undefined = undefined;
         for (const row of items ?? []) {
             const header = row.group && row.group !== lastGroup ? row.group : undefined;
             lastGroup = row.group ?? lastGroup;
-            entries.push({ row, header });
+            entries.push({
+                row,
+                header,
+                count: header !== undefined ? counts.get(row.group as string) : undefined,
+            });
         }
         return entries;
+    }
+
+    toggleGroup(group: string): void {
+        if (this.collapsedGroups.has(group)) {
+            this.collapsedGroups.delete(group);
+        } else {
+            this.collapsedGroups.add(group);
+        }
+    }
+
+    isGroupCollapsed(group: string | undefined): boolean {
+        return group !== undefined && this.collapsedGroups.has(group);
+    }
+
+    groupCountLabel(entry: { header?: string; count?: number }): string {
+        if (entry.header === undefined || entry.count === undefined) {
+            return "";
+        }
+        const key = entry.count === 1 ? "plugin.sum.groupOne" : "plugin.sum.groupMany";
+        return this.resolve(key, { count: entry.count });
+    }
+
+    progressModulesLabel(progress: { completed?: number; total?: number; pct?: number }): string {
+        return this.resolve("plugin.sum.progress.modules", {
+            completed: progress.completed ?? 0,
+            total: progress.total ?? 0,
+            pct: progress.pct ?? 0,
+        });
     }
 }

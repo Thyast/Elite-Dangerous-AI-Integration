@@ -65,6 +65,10 @@ class PluginBase(ABC):
         """
 
         self.plugin_manifest = plugin_manifest
+        # Instance-level dict: the class annotation holds a mutable default
+        # that would otherwise be shared by every plugin instance until the
+        # manager assigns the persisted settings.
+        self.settings: dict[str, Any] = {}
         
     def on_chat_start(self, helper: 'PluginHelper'):
         """

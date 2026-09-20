@@ -2,6 +2,7 @@ import hashlib
 from html import escape
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from lib.Event import Event, GameEvent, ProjectedEvent
 from lib.EventManager import Projection
 from lib.Logger import log
+from lib.Config import get_asset_path
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginHelper import PluginHelper
 from lib.PluginSettingDefinitions import (
@@ -39,6 +41,22 @@ IMPORT_STATE_DIFF = "diff"
 IMPORT_STATE_IMPORTED = "imported"
 
 LAST_IMPORT_META_KEY = "last_import"
+
+
+def _load_ship_names() -> dict[str, str]:
+    """Public display names for internal ship identifiers (see ship_names.json)."""
+    try:
+        with open(get_asset_path("ship_names.json"), encoding="utf-8") as handle:
+            return {
+                key: value
+                for key, value in json.load(handle).items()
+                if not key.startswith("_")
+            }
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+SHIP_NAMES = _load_ship_names()
 
 
 class ShipUpgradeState(BaseModel):
@@ -287,6 +305,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._import_state = state
         self._sync_grids(error)
 
+    def _ship_display_name(self, internal: str) -> str:
+        if internal in SHIP_NAMES:
+            return SHIP_NAMES[internal]
+        return internal.replace("_", " ").strip().title()
+
     def _make_plan_rows(self) -> list[ListRow]:
         filter_value = str(self.settings.get("plan_filter", "")).strip().lower()
         self._last_plan_filter = filter_value
@@ -296,16 +319,61 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if not filter_value
             or filter_value in plan["plan_name"].lower()
             or filter_value in plan["ship_model"].lower()
+            or filter_value in self._ship_display_name(plan["ship_model"]).lower()
         ]
         return [
             {
                 "key": plan["id"],
                 "title": plan["plan_name"],
-                "group": plan["ship_model"],
+                "group": self._ship_display_name(plan["ship_model"]),
                 "meta": f"v{plan['plan_version']} · {self._plan_module_count(plan['id'])} modules",
+                "progress": self._plan_progress(plan["id"], plan["ship_model"]),
             }
             for plan in plans
         ]
+
+    def _plan_progress(self, plan_id: str, ship_model: str) -> list[dict[str, Any]]:
+        with self.get_db() as db:
+            plan_row = db.execute(
+                "SELECT source_json FROM plans WHERE id = ?", (plan_id,)
+            ).fetchone()
+            sessions = db.execute(
+                """
+                SELECT ship_custom_name, ship_instance_id, completed_steps, paused, last_activity
+                FROM active_session WHERE plan_id = ? ORDER BY last_activity DESC
+                """,
+                (plan_id,),
+            ).fetchall()
+        if plan_row is None or not sessions:
+            return []
+        steps = self._plan_steps(plan_row["source_json"])
+        total = len(steps)
+        progress: list[dict[str, Any]] = []
+        for session in sessions:
+            completed = json.loads(session["completed_steps"] or "[]")
+            completed_set = set(completed)
+            next_step = next((step for step in steps if step["id"] not in completed_set), None)
+            entry: dict[str, Any] = {
+                "ship": session["ship_custom_name"] or session["ship_instance_id"],
+                "ship_model": ship_model,
+                "paused": bool(session["paused"]),
+                "completed": len(completed),
+                "total": total,
+                "pct": round((len(completed) / total) * 100) if total else 0,
+            }
+            if next_step is not None:
+                entry["next_label"] = str(
+                    next_step.get("label") or next_step.get("item") or next_step.get("id", "")
+                )
+                engineering = next_step.get("engineering") or {}
+                grade = engineering.get("Level")
+                if grade is not None:
+                    entry["next_grade"] = grade
+                blueprint = str(engineering.get("BlueprintName", "")).split("_")[-1]
+                if blueprint and blueprint.lower() != "none":
+                    entry["next_engineering"] = re.sub(r"(?<!^)(?=[A-Z])", " ", blueprint)
+            progress.append(entry)
+        return progress
 
     def _set_plan_rows(self, rows: list[ListRow]) -> None:
         field: ListSetting = self._field("plans", "available_plans")  # type: ignore[assignment]

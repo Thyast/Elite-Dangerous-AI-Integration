@@ -65,11 +65,35 @@ mat-slide-toggle {
 }
 
 .list-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin: 12px 0 4px 0;
-    font-size: 0.8em;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    padding: 4px 8px;
+    border: none;
+    background: transparent;
+    color: var(--color-primary-blue, #4fc3f7);
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+}
+
+.list-group:hover {
+    background: rgba(79, 195, 247, 0.08);
+}
+
+.list-group-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+    flex: none;
+}
+
+.list-group-count {
     color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+    font-weight: 400;
 }
 
 .list-row {
@@ -112,4 +136,61 @@ mat-slide-toggle {
 .list-empty {
     margin: 0;
     color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}
+
+.row-progress {
+    margin: 0 12px 12px 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.2));
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+.progress-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.progress-ship {
+    font-weight: 500;
+}
+
+.progress-ship-model {
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}
+
+.progress-badge {
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--color-primary-blue, #4fc3f7);
+    border: 1px solid var(--color-primary-blue, #4fc3f7);
+}
+
+.progress-badge.paused {
+    color: var(--color-warning-orange, #ff9800);
+    border-color: var(--color-warning-orange, #ff9800);
+}
+
+.progress-stats {
+    margin-top: 8px;
+    font-size: 0.9em;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}
+
+.progress-next {
+    margin-top: 8px;
+}
+
+.progress-next-label {
+    font-weight: 600;
+    display: block;
+}
+
+.progress-next-module {
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.72));
 }

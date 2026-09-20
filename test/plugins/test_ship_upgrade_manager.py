@@ -534,6 +534,60 @@ def test_plan_filter_applies_through_config_updates(tmp_path: Path, monkeypatch)
     assert "plugin_settings_configs" in emitted
 
 
+def test_plan_rows_use_public_ship_names_and_match_display_name(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("smallcombat01_nx", "Kestrel Build", {"steps": [{"id": "fsd"}]})
+    plugin.import_plan("weird_unknown_ship", "Fallback Build", {"steps": [{"id": "fsd"}]})
+
+    plugin._publish_status()
+
+    rows = plugin._field("plans", "available_plans")["items"]
+    groups = {row["title"]: row["group"] for row in rows}
+    assert groups["Kestrel Build"] == "Kestrel MkII"
+    assert groups["Fallback Build"] == "Weird Unknown Ship"
+
+    plugin.settings["plan_filter"] = "kestrel"
+    plugin.on_settings_changed()
+    rows = plugin._field("plans", "available_plans")["items"]
+    assert [row["title"] for row in rows] == ["Kestrel Build"]
+
+
+def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "fsd", "item": "int_hyperdrive_size5_class5"},
+                {
+                    "id": "shield",
+                    "item": "int_shieldgenerator_size5_class5",
+                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                },
+            ]
+        },
+    )
+    plugin.start_session("PvE", "SHIP-1", "Mina")
+    plugin.complete_step("fsd")
+
+    rows = plugin._field("plans", "available_plans")["items"]
+    progress = rows[0]["progress"]
+    assert progress[0]["ship"] == "Mina"
+    assert progress[0]["completed"] == 1
+    assert progress[0]["total"] == 2
+    assert progress[0]["pct"] == 50
+    assert progress[0]["paused"] is False
+    assert progress[0]["next_label"] == "int_shieldgenerator_size5_class5"
+    assert progress[0]["next_grade"] == 5
+    assert progress[0]["next_engineering"] == "Reinforced"
+
+    plugin.set_session_paused(True)
+
+    progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
+    assert progress[0]["paused"] is True
+
+
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})

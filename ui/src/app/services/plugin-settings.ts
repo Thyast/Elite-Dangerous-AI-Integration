@@ -89,11 +89,24 @@ export interface ListAction {
     danger?: boolean;
 }
 
+export interface ListRowProgress {
+    ship?: string;
+    ship_model?: string;
+    paused?: boolean;
+    completed?: number;
+    total?: number;
+    pct?: number;
+    next_label?: string;
+    next_grade?: number | string;
+    next_engineering?: string;
+}
+
 export interface ListRow {
     key: string;
     title: string;
     meta?: string;
     group?: string;
+    progress?: ListRowProgress[];
 }
 
 export interface ListSetting extends SettingBase {}

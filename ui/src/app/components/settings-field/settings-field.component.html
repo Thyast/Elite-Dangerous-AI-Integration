@@ -102,26 +102,48 @@
             }
             @for (entry of rowsWithGroups(field.items); track entry.row.key) {
                 @if (entry.header) {
-                    <div class="list-group">{{ entry.header }}</div>
+                    <button class="list-group" type="button" (click)="toggleGroup(entry.header)">
+                        <mat-icon class="list-group-icon">{{ isGroupCollapsed(entry.header) ? 'keyboard_arrow_right' : 'keyboard_arrow_down' }}</mat-icon>
+                        <span>{{ entry.header }}</span>
+                        <span class="list-group-count">{{ groupCountLabel(entry) }}</span>
+                    </button>
                 }
-                <div class="list-row">
-                    <div class="list-row-text">
-                        <span class="list-row-title">{{ entry.row.title }}</span>
-                        @if (entry.row.meta) {
-                            <span class="list-row-meta">{{ entry.row.meta }}</span>
-                        }
+                @if (!isGroupCollapsed(entry.header)) {
+                    <div class="list-row">
+                        <div class="list-row-text">
+                            <span class="list-row-title">{{ entry.row.title }}</span>
+                            @if (entry.row.meta) {
+                                <span class="list-row-meta">{{ entry.row.meta }}</span>
+                            }
+                        </div>
+                        <div class="list-row-actions">
+                            @for (action of field.row_actions; track action.action) {
+                                <button mat-icon-button type="button"
+                                        [attr.aria-label]="resolve(action.label)"
+                                        [class.danger]="action.danger"
+                                        (click)="onListAction(action, entry.row)">
+                                    <mat-icon>{{ action.icon }}</mat-icon>
+                                </button>
+                            }
+                        </div>
                     </div>
-                    <div class="list-row-actions">
-                        @for (action of field.row_actions; track action.action) {
-                            <button mat-icon-button type="button"
-                                    [attr.aria-label]="resolve(action.label)"
-                                    [class.danger]="action.danger"
-                                    (click)="onListAction(action, entry.row)">
-                                <mat-icon>{{ action.icon }}</mat-icon>
-                            </button>
-                        }
-                    </div>
-                </div>
+                    @for (progress of entry.row.progress ?? []; track $index) {
+                        <div class="row-progress">
+                            <div class="progress-head">
+                                <span class="progress-ship">{{ progress.ship }}<span class="progress-ship-model"> · {{ progress.ship_model || entry.row.group }}</span></span>
+                                <span class="progress-badge" [class.paused]="progress.paused">{{ progress.paused ? resolve('plugin.sum.progress.paused') : resolve('plugin.sum.progress.inProgress') }}</span>
+                            </div>
+                            <mat-progress-bar [value]="progress.pct ?? 0"></mat-progress-bar>
+                            <div class="progress-stats">{{ progressModulesLabel(progress) }}</div>
+                            @if (progress.next_label) {
+                                <div class="progress-next">
+                                    <span class="progress-next-label">{{ resolve('plugin.sum.progress.nextModule') }}</span>
+                                    <span class="progress-next-module">{{ progress.next_label }}@if (progress.next_grade) {<span> · Grade {{ progress.next_grade }}</span>}@if (progress.next_engineering) {<span> · {{ progress.next_engineering }}</span>}</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
             } @empty {
                 <p class="list-empty">{{ resolve(field.placeholder) }}</p>
             }

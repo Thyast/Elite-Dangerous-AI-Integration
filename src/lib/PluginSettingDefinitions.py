@@ -69,6 +69,18 @@ class ListAction(TypedDict):
     label: NotRequired[str]
     danger: NotRequired[bool]
 
+class ListRowProgress(TypedDict, total=False):
+    """Active session progress shown under a plan row."""
+    ship: str
+    ship_model: str
+    paused: bool
+    completed: int
+    total: int
+    pct: int
+    next_label: str
+    next_grade: int | str
+    next_engineering: str
+
 class ListRow(TypedDict):
     """Defines one row of a list field. Rows sharing the same group value are
     rendered under a common group header."""
@@ -76,6 +88,7 @@ class ListRow(TypedDict):
     title: str
     meta: NotRequired[str]
     group: NotRequired[str]
+    progress: NotRequired[list[ListRowProgress]]
 
 class ListSetting(SettingBase):
     """Used to display a list of rows, each carrying optional actions."""

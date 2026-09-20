@@ -39,7 +39,15 @@
       "noSession": "Aucune session active.",
       "search": "Rechercher",
       "session": "Session",
-      "searchPlaceholder": "Nom ou type de vaisseau",
+      "searchPlaceholder": "Rechercher par nom ou vaisseau",
+      "groupOne": "{{count}} plan",
+      "groupMany": "{{count}} plans",
+      "progress": {
+        "inProgress": "En cours",
+        "paused": "En pause",
+        "modules": "{{completed}} / {{total}} modules installés · {{pct}}%",
+        "nextModule": "Prochain module :"
+      },
       "msg": {
         "diffBanner": "Diff calculé contre {{plan}} — version {{from}} → {{to}}",
         "doneBanner": "Plan importé — {{plan}} · v{{version}} · {{modules}} modules · {{sessions}} session(s) active(s) migrée(s)",

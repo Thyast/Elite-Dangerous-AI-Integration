@@ -39,7 +39,15 @@
       "noSession": "No active session.",
       "search": "Search",
       "session": "Session",
-      "searchPlaceholder": "Name or ship type",
+      "searchPlaceholder": "Search by name or ship",
+      "groupOne": "{{count}} plan",
+      "groupMany": "{{count}} plans",
+      "progress": {
+        "inProgress": "In progress",
+        "paused": "Paused",
+        "modules": "{{completed}} / {{total}} modules installed · {{pct}}%",
+        "nextModule": "Next module:"
+      },
       "msg": {
         "diffBanner": "Diff computed against {{plan}} — version {{from}} → {{to}}",
         "doneBanner": "Plan imported — {{plan}} · v{{version}} · {{modules}} modules · {{sessions}} active session(s) migrated",
