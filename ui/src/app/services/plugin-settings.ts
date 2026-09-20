@@ -93,6 +93,7 @@ export interface ListRow {
     key: string;
     title: string;
     meta?: string;
+    group?: string;
 }
 
 export interface ListSetting extends SettingBase {}

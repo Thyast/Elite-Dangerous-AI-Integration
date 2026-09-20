@@ -70,10 +70,12 @@ class ListAction(TypedDict):
     danger: NotRequired[bool]
 
 class ListRow(TypedDict):
-    """Defines one row of a list field."""
+    """Defines one row of a list field. Rows sharing the same group value are
+    rendered under a common group header."""
     key: str
     title: str
     meta: NotRequired[str]
+    group: NotRequired[str]
 
 class ListSetting(SettingBase):
     """Used to display a list of rows, each carrying optional actions."""

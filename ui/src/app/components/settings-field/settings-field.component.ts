@@ -77,4 +77,15 @@ export class SettingsFieldComponent {
     onListAction(action: ListAction, row: ListRow): void {
         this.listAction.emit({ action: action.action, rowKey: row.key });
     }
+
+    rowsWithGroups(items: ListRow[] | null | undefined): { row: ListRow; header?: string }[] {
+        const entries: { row: ListRow; header?: string }[] = [];
+        let lastGroup: string | undefined = undefined;
+        for (const row of items ?? []) {
+            const header = row.group && row.group !== lastGroup ? row.group : undefined;
+            lastGroup = row.group ?? lastGroup;
+            entries.push({ row, header });
+        }
+        return entries;
+    }
 }

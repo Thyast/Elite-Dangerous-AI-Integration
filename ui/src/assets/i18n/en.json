@@ -21,7 +21,6 @@
         "confirm": "Confirm import",
         "modify": "Modify data",
         "newImport": "New import",
-        "refresh": "Refresh",
         "delete": "Delete this plan"
       },
       "noImportYet": "No import yet.",
@@ -37,12 +36,10 @@
       "errApply": "Import failed: {{detail}}",
       "errDelete": "Deletion failed: {{detail}}",
       "noPlans": "No plans imported.",
-      "noDeleteYet": "Use the trash icon next to a plan to delete it.",
       "noSession": "No active session.",
       "search": "Search",
       "session": "Session",
       "searchPlaceholder": "Name or ship type",
-      "availablePlans": "Available plans",
       "msg": {
         "diffBanner": "Diff computed against {{plan}} — version {{from}} → {{to}}",
         "doneBanner": "Plan imported — {{plan}} · v{{version}} · {{modules}} modules · {{sessions}} active session(s) migrated",

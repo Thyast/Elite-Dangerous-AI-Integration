@@ -21,7 +21,6 @@
         "confirm": "Confirmer l'import",
         "modify": "Modifier les données",
         "newImport": "Nouvel import",
-        "refresh": "Rafraîchir",
         "delete": "Supprimer ce plan"
       },
       "noImportYet": "Aucun import effectué.",
@@ -37,12 +36,10 @@
       "errApply": "Échec de l'import : {{detail}}",
       "errDelete": "Échec de la suppression : {{detail}}",
       "noPlans": "Aucun plan importé.",
-      "noDeleteYet": "Utilisez l'icône poubelle à côté d'un plan pour le supprimer.",
       "noSession": "Aucune session active.",
       "search": "Rechercher",
       "session": "Session",
       "searchPlaceholder": "Nom ou type de vaisseau",
-      "availablePlans": "Plans disponibles",
       "msg": {
         "diffBanner": "Diff calculé contre {{plan}} — version {{from}} → {{to}}",
         "doneBanner": "Plan importé — {{plan}} · v{{version}} · {{modules}} modules · {{sessions}} session(s) active(s) migrée(s)",

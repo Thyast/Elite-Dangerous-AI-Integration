@@ -64,6 +64,14 @@ mat-slide-toggle {
     font-weight: 500;
 }
 
+.list-group {
+    margin: 12px 0 4px 0;
+    font-size: 0.8em;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+}
+
 .list-row {
     display: flex;
     justify-content: space-between;

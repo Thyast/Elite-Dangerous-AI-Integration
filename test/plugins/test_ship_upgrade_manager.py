@@ -478,25 +478,35 @@ def test_last_import_persists_across_plugin_restart(tmp_path: Path):
     assert "int_shieldgenerator_size5_class5" in restarted._field("import", "last_changes")["content"]
 
 
-def test_plan_filter_filters_rows_on_refresh(tmp_path: Path):
+def test_plan_filter_filters_rows_live_and_groups_by_ship(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser"}]})
     plugin.import_plan("Python", "Combat", {"steps": [{"id": "cannon"}]})
-    plugin.settings["plan_filter"] = "mining"
+    plugin.import_plan("Krait", "Haul", {"steps": [{"id": "cargo"}]})
 
-    plugin.on_settings_button("refresh_plans")
+    # Simulate the settings update path for the search field.
+    plugin.settings["plan_filter"] = "python"
+    plugin.on_settings_changed()
 
     rows = plugin._field("plans", "available_plans")["items"]
-    assert [row["title"] for row in rows] == ["Mining"]
+    assert [(row["title"], row["group"]) for row in rows] == [
+        ("Combat", "Python"),
+        ("Mining", "Python"),
+    ]
+
+    plugin.settings["plan_filter"] = ""
+    plugin.on_settings_changed()
+
+    rows = plugin._field("plans", "available_plans")["items"]
+    assert [row["group"] for row in rows] == ["Krait", "Python", "Python"]
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})
     plugin.start_session("PvE", "SHIP-1")
+    # complete_step publishes the status itself.
     plugin.complete_step("fsd")
-
-    plugin.on_settings_button("refresh_plans")
 
     summary = plugin._field("session", "session_summary")
     assert summary["content"] == "plugin.sum.msg.sessionActive"

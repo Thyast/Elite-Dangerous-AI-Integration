@@ -246,7 +246,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "min_length": 0,
             "hidden": False,
         })
-        plans_list: ListSetting = self._base_field("available_plans", "list", "plugin.sum.availablePlans")  # type: ignore[assignment]
+        plans_list: ListSetting = self._base_field("available_plans", "list", None)  # type: ignore[assignment]
         plans_list.update({
             "placeholder": "plugin.sum.noPlans",
             "items": self._make_plan_rows(),
@@ -259,9 +259,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 }
             ],
         })
-        refresh: ButtonSetting = self._button("refresh_plans", "plugin.sum.btn.refresh")
-        delete_status = self._paragraph("delete_status", str(self.settings.get("delete_status", "") or "plugin.sum.noDeleteYet"))
-        return [plan_filter, plans_list, refresh, delete_status]
+        delete_status = self._paragraph("delete_status", str(self.settings.get("delete_status", "") or ""))
+        return [plan_filter, plans_list, delete_status]
 
     def _session_fields(self) -> list[SettingBase]:
         return [
@@ -302,7 +301,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
             {
                 "key": plan["id"],
                 "title": plan["plan_name"],
-                "meta": f"v{plan['plan_version']} · {self._plan_module_count(plan['id'])} modules · {plan['ship_model']}",
+                "group": plan["ship_model"],
+                "meta": f"v{plan['plan_version']} · {self._plan_module_count(plan['id'])} modules",
             }
             for plan in plans
         ]
@@ -461,8 +461,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self.settings["plan_input"] = ""
             self._pending_diff = None
             self._enter_import_state(IMPORT_STATE_DATA)
-        elif key == "refresh_plans":
-            self._publish_status()
         elif key.startswith("delete_plan:"):
             self._delete_plan_by_id(key.split(":", 1)[1])
         else:
@@ -1012,6 +1010,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     """,
                     (plan_id, ship_model, plan_name, source_json, source_hash, now, now),
                 )
+                self._publish_status()
                 return plan_id
 
             if existing["source_hash"] == source_hash:
@@ -1032,6 +1031,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._migrate_active_session(
                 db, existing["id"], old_steps, new_steps, new_version, now
             )
+            self._publish_status()
             return existing["id"]
 
     def diff_plan(
@@ -1567,22 +1567,38 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
         if session is None:
             self._set_message_field("session", "session_summary", "plugin.sum.noSession")
+        else:
+            total = self._plan_module_count(session["plan_id"])
+            completed = len(json.loads(session["completed_steps"] or "[]"))
+            percent = round((completed / total) * 100) if total else 0
+            ship = session["ship_custom_name"] or session["ship_instance_id"]
+            self._set_message_field(
+                "session",
+                "session_summary",
+                "plugin.sum.msg.sessionActive",
+                {
+                    "plan": session["plan_name"],
+                    "ship": ship,
+                    "step": session["current_step"],
+                    "total": total,
+                    "pct": percent,
+                },
+            )
+        self._republish()
+
+    def _republish(self) -> None:
+        """Push mutated field rows/paragraphs to the UI when the runtime is up.
+
+        The manager republishes the whole settings config; persisting the
+        summary key is only the trigger. In config state there is no manager
+        handle, and button hooks are republished by the manager itself.
+        """
+        if self.helper is None:
             return
-        total = self._plan_module_count(session["plan_id"])
-        completed = len(json.loads(session["completed_steps"] or "[]"))
-        percent = round((completed / total) * 100) if total else 0
-        ship = session["ship_custom_name"] or session["ship_instance_id"]
-        self._set_message_field(
-            "session",
+        self.helper._plugin_manager.update_plugin_setting(
+            self.plugin_manifest.guid,
             "session_summary",
-            "plugin.sum.msg.sessionActive",
-            {
-                "plan": session["plan_name"],
-                "ship": ship,
-                "step": session["current_step"],
-                "total": total,
-                "pct": percent,
-            },
+            self.settings.get("session_summary", ""),
         )
 
     def _plan_module_count(self, plan_id: str) -> int:

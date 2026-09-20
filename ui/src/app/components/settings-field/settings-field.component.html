@@ -100,12 +100,15 @@
             @if (resolve(field.label)) {
                 <h4>{{ resolve(field.label) }}</h4>
             }
-            @for (row of field.items; track row.key) {
+            @for (entry of rowsWithGroups(field.items); track entry.row.key) {
+                @if (entry.header) {
+                    <div class="list-group">{{ entry.header }}</div>
+                }
                 <div class="list-row">
                     <div class="list-row-text">
-                        <span class="list-row-title">{{ row.title }}</span>
-                        @if (row.meta) {
-                            <span class="list-row-meta">{{ row.meta }}</span>
+                        <span class="list-row-title">{{ entry.row.title }}</span>
+                        @if (entry.row.meta) {
+                            <span class="list-row-meta">{{ entry.row.meta }}</span>
                         }
                     </div>
                     <div class="list-row-actions">
@@ -113,7 +116,7 @@
                             <button mat-icon-button type="button"
                                     [attr.aria-label]="resolve(action.label)"
                                     [class.danger]="action.danger"
-                                    (click)="onListAction(action, row)">
+                                    (click)="onListAction(action, entry.row)">
                                 <mat-icon>{{ action.icon }}</mat-icon>
                             </button>
                         }
