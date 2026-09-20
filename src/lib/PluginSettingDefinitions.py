@@ -3,7 +3,7 @@ from typing import Literal, NotRequired, TypedDict
 class SettingBase(TypedDict):
     key: str
     label: str | None
-    type: Literal['paragraph', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'error']
+    type: Literal['paragraph', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'filter', 'error']
     readonly: bool
     placeholder: str | None
     params: NotRequired[dict[str, str | int | float]]
@@ -27,6 +27,12 @@ class TextSetting(SettingBase):
     default_value: str | None
     max_length: int | None
     min_length: int | None
+
+class FilterSetting(SettingBase):
+    """Used to display a compact live-filter input."""
+    default_value: NotRequired[str | None]
+    max_length: NotRequired[int | None]
+    min_length: NotRequired[int | None]
     hidden: bool
 
 class TextAreaSetting(SettingBase):
@@ -105,7 +111,7 @@ class SettingsGrid(TypedDict):
     """Defines a grid of settings for a plugin."""
     key: str
     label: str
-    fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting]
+    fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting | FilterSetting]
     collapsible: NotRequired[bool]
     default_collapsed: NotRequired[bool]
     header_action: NotRequired[GridHeaderAction]

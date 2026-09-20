@@ -81,6 +81,18 @@
                 [placeholder]="resolve(field.placeholder)"></textarea>
         </mat-form-field>
     }
+    @case ('filter') {
+        <mat-form-field appearance="outline" subscriptSizing="dynamic" class="filter-field">
+            <mat-icon matIconPrefix>search</mat-icon>
+            <input matInput type="text"
+                [ngModel]="value"
+                (ngModelChange)="onValueChange($event)"
+                [readonly]="field.readonly"
+                [placeholder]="resolve(field.placeholder)"
+                [attr.aria-label]="resolve(field.label)"
+                [maxlength]="field.max_length">
+        </mat-form-field>
+    }
     @case ('select') {
         <mat-form-field>
             <mat-label>{{ resolve(field.label) }}</mat-label>

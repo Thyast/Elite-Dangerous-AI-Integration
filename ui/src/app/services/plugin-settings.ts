@@ -19,13 +19,13 @@ export interface SettingsGrid {
     collapsible?: boolean;
     default_collapsed?: boolean;
     header_action?: GridHeaderAction;
-    fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting)[];
+    fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting | FilterSetting)[];
 }
 
 export interface SettingBase {
     key: string;
     label: string;
-    type: "paragraph" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "list" | "error";
+    type: "paragraph" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "list" | "filter" | "error";
     readonly: boolean | null;
     placeholder: string | null;
     icon?: string;
@@ -61,6 +61,8 @@ export interface SettingBase {
 export interface TextSetting extends SettingBase {
     default_value: string | null;
 }
+
+export interface FilterSetting extends SettingBase {}
 
 export interface TextAreaSetting extends SettingBase {
     default_value: string | string[] | null;

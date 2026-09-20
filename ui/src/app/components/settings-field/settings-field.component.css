@@ -64,6 +64,33 @@ mat-slide-toggle {
     font-weight: 500;
 }
 
+.filter-field {
+    width: 100%;
+    margin: 2px 0 10px;
+    font-size: 0.9em;
+    --mdc-outlined-text-field-container-shape: 6px;
+    --mdc-outlined-text-field-outline-color: var(--color-border, rgba(255, 255, 255, 0.25));
+    --mdc-outlined-text-field-hover-outline-color: var(--color-border, rgba(255, 255, 255, 0.35));
+    --mdc-outlined-text-field-focus-outline-color: var(--color-border, rgba(255, 255, 255, 0.45));
+}
+
+.filter-field .mat-mdc-text-field-wrapper {
+    padding: 0 10px;
+    min-height: 38px;
+}
+
+.filter-field .mat-mdc-form-field-flex {
+    align-items: center;
+}
+
+.filter-field mat-icon[matIconPrefix] {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    margin-right: 8px;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.5));
+}
+
 .list-group {
     display: flex;
     align-items: center;

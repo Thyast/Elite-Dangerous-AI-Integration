@@ -256,7 +256,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return fields
 
     def _plans_fields(self) -> list[SettingBase]:
-        plan_filter: TextSetting = self._base_field("plan_filter", "text", "plugin.sum.search")  # type: ignore[assignment]
+        plan_filter: TextSetting = self._base_field("plan_filter", "filter", "plugin.sum.search")  # type: ignore[assignment]
         plan_filter.update({
             "placeholder": "plugin.sum.searchPlaceholder",
             "default_value": "",
