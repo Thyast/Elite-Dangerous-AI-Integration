@@ -59,6 +59,28 @@ def _load_ship_names() -> dict[str, str]:
 SHIP_NAMES = _load_ship_names()
 
 
+def _load_module_families() -> list[tuple[str, str]]:
+    """Pretty module family names from the engineering catalogue, longest match first."""
+    try:
+        with open(
+            get_asset_path("engineering_modifications.json"), encoding="utf-8"
+        ) as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return []
+    families: dict[str, str] = {}
+    for blueprint in data.values():
+        if not isinstance(blueprint, dict):
+            continue
+        for family in blueprint.get("module_recipes") or {}:
+            key = re.sub(r"[^a-z0-9]", "", str(family).lower())
+            families.setdefault(key, str(family))
+    return sorted(families.items(), key=lambda pair: -len(pair[0]))
+
+
+MODULE_FAMILIES = _load_module_families()
+
+
 class ShipUpgradeState(BaseModel):
     plan_id: str | None = None
     plan_name: str | None = None
@@ -345,6 +367,25 @@ class ShipUpgradeManagerPlugin(PluginBase):
             for plan in plans
         ]
 
+    def _pretty_module_name(self, item: str) -> str:
+        """Readable name for an internal module id.
+
+        'int_shieldgenerator_size5_class5' resolves to 'Shield Generator ·
+        Size 5 · Class 5' when the family exists in the engineering catalogue;
+        unknown families fall back to a humanized form of the id."""
+        cleaned = self._normalize_module_id(item)
+        match = re.match(r"^(?:int_)?(.*?)(?:_size(\d+)_class(\d+))?$", cleaned)
+        if not match:
+            return cleaned.replace("_", " ").title()
+        family_key = re.sub(r"[^a-z0-9]", "", match.group(1))
+        family = next(
+            (pretty for key, pretty in MODULE_FAMILIES if key == family_key),
+            match.group(1).replace("_", " ").strip().title(),
+        )
+        if match.group(2) and match.group(3):
+            return f"{family} · Size {match.group(2)} · Class {match.group(3)}"
+        return family
+
     def _plan_progress(self, plan_id: str, ship_model: str) -> list[dict[str, Any]]:
         with self.get_db() as db:
             plan_row = db.execute(
@@ -379,14 +420,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "pct": round((len(completed) / total) * 100) if total else 0,
             }
             if next_step is not None:
-                entry["next_label"] = str(
-                    next_step.get("label") or next_step.get("item") or next_step.get("id", "")
-                )
+                next_item = next_step.get("item")
+                if next_item:
+                    entry["next_label"] = self._pretty_module_name(str(next_item))
+                else:
+                    entry["next_label"] = str(
+                        next_step.get("label") or next_step.get("id", "")
+                    )
                 engineering = next_step.get("engineering") or {}
-                grade = engineering.get("Level")
+                grade = engineering.get("Level") or engineering.get("level")
                 if grade is not None:
                     entry["next_grade"] = grade
-                blueprint = str(engineering.get("BlueprintName", "")).split("_")[-1]
+                blueprint = str(engineering.get("BlueprintName") or engineering.get("blueprint") or "").split("_")[-1]
                 if blueprint and blueprint.lower() != "none":
                     entry["next_engineering"] = re.sub(r"(?<!^)(?=[A-Z])", " ", blueprint)
             progress.append(entry)

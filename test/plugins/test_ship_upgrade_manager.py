@@ -596,9 +596,22 @@ def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
     assert progress[0]["total"] == 2
     assert progress[0]["pct"] == 50
     assert progress[0]["paused"] is False
-    assert progress[0]["next_label"] == "int_shieldgenerator_size5_class5"
+    assert progress[0]["next_label"] == "Shield Generator · Size 5 · Class 5"
     assert progress[0]["next_grade"] == 5
     assert progress[0]["next_engineering"] == "Reinforced"
+
+
+def test_next_module_label_falls_back_for_unknown_families(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "mr", "item": "int_modulereinforcement_size2_class1"}]},
+    )
+    plugin.start_session("PvE", "SHIP-1")
+
+    progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
+    assert progress[0]["next_label"] == "Modulereinforcement · Size 2 · Class 1"
 
     plugin.set_session_paused(True)
 
@@ -747,7 +760,7 @@ def test_session_start_baselines_steps_satisfied_by_current_loadout(
     assert progress[0]["completed"] == 2
     assert progress[0]["total"] == 3
     assert progress[0]["pct"] == 67
-    assert progress[0]["next_label"] == "int_hyperdrive_size5_class5"
+    assert progress[0]["next_label"] == "Hyperdrive · Size 5 · Class 5"
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):
