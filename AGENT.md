@@ -20,9 +20,12 @@ These files belong to the Ship Upgrade Manager work and should be reviewed
 before editing. The untracked `src/KeyboardLayoutExperiment.py` is unrelated
 pre-existing user work and must remain untouched.
 
-The agreed import flow redesign and i18n policy described in the
-"Planned Import Flow Redesign" and "Internationalization (i18n) Policy"
-sections below are pending implementation.
+The import flow redesign described in the "Import Flow (Implemented)"
+section below is implemented on this branch, on top of the i18n
+infrastructure branch `feat/i18n-app-ngx-translate`. The test baseline is
+155 Python tests in the global suite **plus** 31 tests in
+`test/plugins/test_ship_upgrade_manager.py`, which the global run does not
+collect (see Testing Expectations).
 
 The latest validated baseline is **155 passing Python tests**. Start with:
 
@@ -291,35 +294,29 @@ Keep backend settings keys and frontend setting types synchronized. When
 adding a setting field, update both the backend definition and the frontend
 type/rendering only when the field shape requires it.
 
-## Planned Import Flow Redesign
+## Import Flow (Implemented)
 
-The Ship Upgrade Manager settings were reviewed with the user on 2026-09-20
-and the following redesign was agreed. The interactive mockup
-`maquette-import-flow.html` (untracked, repository root) is the reference for
-the target behavior and can be deleted once implemented.
+The Ship Upgrade Manager settings were redesigned with the user on 2026-09-20
+and implemented on this branch. The interactive mockup
+`maquette-import-flow.html` (untracked, repository root) remains the visual
+reference and can be deleted once the UI is validated.
 
-The current "Status" grid is import-only and contains redundant buttons:
-`import_plan` and `apply_changes` perform the identical parse → diff → import
-operation. The `import_status` paragraph is also overwritten by
-`_publish_status()` with an inventory count, which is misleading.
+Structure:
 
-Target structure:
+1. Grid `import` ("plugin.sum.grid.import"): an import button when idle;
+   a data-entry state (textarea, analyze, cancel); a diff state (rendered
+   diff, confirm, modify, cancel); an imported state (keyed banner, the
+   applied diff kept visible for tracking, new-import entry point).
+   `import_status` only carries import result messages.
+2. Grid `plans` ("plugin.sum.grid.plans"): search, a `list` settings field
+   with one row per plan and a per-row trash action routed as
+   `delete_plan:<plan id>`, refresh, and a delete status paragraph. The
+   old `plan_to_delete` text field is gone.
+3. Grid `session` ("plugin.sum.grid.session"): unchanged summary.
 
-1. Grid `import` ("Import plan", renamed from `status`):
-   - Hidden by default except the import button.
-   - State 1 — data entry: textarea plus an analyze action (current
-     `preview_diff` repurposed) and cancel.
-   - State 2 — diff & confirmation: rendered diff plus a confirm action
-     (current `apply_changes` repurposed), a modify-data action returning to
-     state 1, and cancel.
-   - State 3 — imported: the confirmed diff remains visible for tracking,
-     with an applied summary and a new-import entry point.
-2. Grid `plans` ("Imported plans"): search, available plans, refresh, and
-   plan deletion through a trash icon on each plan row. The separate
-   `plan_to_delete` text field and its dedicated button are removed.
-3. Grid `session` ("Active session (modules)"): unchanged.
-4. `import_status` must only carry import result messages; the inventory
-   count belongs to the plans grid.
+The last applied import (banner params and diff HTML) persists in the
+plugin database (`plugin_meta` table) so the confirmed diff stays visible
+across restarts. Deleting the last imported plan resets the tunnel to idle.
 
 ## Internationalization (i18n) Policy
 
@@ -383,17 +380,21 @@ At minimum, add or update tests for:
 - Legacy singleton database migration.
 - Real journal field variants and localized module identifiers.
 - Every newly supported external plan format.
+- The import tunnel states (analyze, confirm, cancel, invalid input).
+- Per-row plan deletion through the list field.
 
-The established baseline after the current implementation is 155 passing
-Python tests. Run the complete suite after changing lifecycle, persistence,
-event routing, or parser code.
+The global suite (`python -m pytest -q`) reports 155 passing tests but does
+**not** collect `test/plugins/` because `pytest.ini` excludes any directory
+named `plugins` through `norecursedirs`. Always run the plugin tests
+explicitly (31 tests) in addition to the global suite. Do not "fix" this by
+renaming directories without a lead-dev decision.
 
 Useful targeted commands:
 
 ```powershell
 $env:PYTHONPATH='.'
-python -m pytest -q test/plugins/test_ship_upgrade_manager.py
-python -m pytest -q test/lib/test_plugin_manager_settings.py test/lib/test_ship_upgrade_plugin_registration.py
+python -m pytest -q test/plugins/ test/lib/test_plugin_manager_settings.py test/lib/test_ship_upgrade_plugin_registration.py
+python -m pytest -q
 ```
 
 For a frontend-only change, build the Angular application with the Node path
@@ -436,6 +437,12 @@ feature.
 
 ## Known Limitations
 
+- The rendered plan-diff HTML (section titles "Added", "Removed",
+  "Changed", the version line, and the new-plan stub) is still generated in
+  English by the backend. This is a documented deviation from the i18n
+  policy: keying rendered reports requires a backend-side translation
+  surface that does not exist yet. Tunnel chrome, labels, placeholders,
+  banners, and status messages are fully keyed.
 - The compact EDSY and Coriolis URL implementations are not universal decoders.
   Unknown or unsupported payloads must fail explicitly.
 - The status paragraph presents the most recently active session, while the
