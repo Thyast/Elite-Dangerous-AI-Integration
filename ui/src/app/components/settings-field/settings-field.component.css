@@ -65,30 +65,45 @@ mat-slide-toggle {
 }
 
 .filter-field {
-    width: 100%;
-    margin: 2px 0 10px;
-    font-size: 0.9em;
-    --mdc-outlined-text-field-container-shape: 6px;
-    --mdc-outlined-text-field-outline-color: var(--color-border, rgba(255, 255, 255, 0.25));
-    --mdc-outlined-text-field-hover-outline-color: var(--color-border, rgba(255, 255, 255, 0.35));
-    --mdc-outlined-text-field-focus-outline-color: var(--color-border, rgba(255, 255, 255, 0.45));
-}
-
-.filter-field .mat-mdc-text-field-wrapper {
-    padding: 0 10px;
-    min-height: 38px;
-}
-
-.filter-field .mat-mdc-form-field-flex {
+    display: flex;
     align-items: center;
+    gap: 8px;
+    margin: 2px 0 10px;
+    padding: 0 10px;
+    height: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    background: transparent;
+    transition: border-color .15s;
 }
 
-.filter-field mat-icon[matIconPrefix] {
-    font-size: 18px;
-    width: 18px;
-    height: 18px;
-    margin-right: 8px;
-    color: var(--color-text-secondary, rgba(255, 255, 255, 0.5));
+.filter-field:focus-within {
+    border-color: rgba(255, 255, 255, 0.38);
+}
+
+.filter-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    flex: none;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.filter-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: 0.9em;
+}
+
+.filter-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
 }
 
 .list-group {

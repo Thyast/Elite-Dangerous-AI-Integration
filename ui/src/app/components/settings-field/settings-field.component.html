@@ -82,16 +82,16 @@
         </mat-form-field>
     }
     @case ('filter') {
-        <mat-form-field appearance="outline" subscriptSizing="dynamic" class="filter-field">
-            <mat-icon matIconPrefix>search</mat-icon>
-            <input matInput type="text"
+        <div class="filter-field">
+            <mat-icon class="filter-icon">search</mat-icon>
+            <input type="text" class="filter-input"
                 [ngModel]="value"
                 (ngModelChange)="onValueChange($event)"
                 [readonly]="field.readonly"
                 [placeholder]="resolve(field.placeholder)"
                 [attr.aria-label]="resolve(field.label)"
                 [maxlength]="field.max_length">
-        </mat-form-field>
+        </div>
     }
     @case ('select') {
         <mat-form-field>
