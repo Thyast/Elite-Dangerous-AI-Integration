@@ -314,8 +314,26 @@ class PluginManager:
             return
         try:
             plugin.on_settings_button(key)
+            self._refresh_plugin_setting_contents(plugin)
+            emit_message(
+                "plugin_settings_configs",
+                plugin_settings_configs=self.plugin_settings_configs,
+                has_plugin_settings=(len(self.plugin_settings_configs) > 0),
+            )
         except Exception as e:
             log('error', f"Plugin settings button '{key}' raised an exception: {e}")
+
+    def _refresh_plugin_setting_contents(self, plugin: PluginBase) -> None:
+        """Reflect plugin-owned paragraph values after a settings action."""
+        settings_config = self.plugin_settings_configs.get(plugin.plugin_manifest.guid)
+        if settings_config is None:
+            return
+        for grid in settings_config.get("grids", []):
+            for field in grid.get("fields", []):
+                if field.get("type") in {"paragraph", "error"}:
+                    setting_key = field.get("key")
+                    if setting_key in plugin.settings:
+                        field["content"] = str(plugin.settings[setting_key])
 
     def on_chat_start(self, helper: 'PluginHelper'):
         """

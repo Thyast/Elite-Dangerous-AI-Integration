@@ -71,3 +71,24 @@ def test_update_plugin_setting_rejects_unknown_plugin():
 
     assert not manager.update_plugin_setting("missing-guid", "status", "ignored")
     assert manager.config["plugin_settings"] == {}
+
+
+def test_settings_button_refreshes_plugin_paragraph_values(monkeypatch):
+    manager, plugin = _manager()
+    emitted: list[str] = []
+    monkeypatch.setattr(
+        "lib.PluginManager.emit_message",
+        lambda event, **_payload: emitted.append(event),
+    )
+
+    def click(_key: str) -> None:
+        plugin.settings["status"] = "clicked"
+
+    plugin.on_settings_button = click
+    manager.on_settings_button(plugin.plugin_manifest.guid, "refresh")
+
+    assert (
+        manager.plugin_settings_configs[plugin.plugin_manifest.guid]["grids"][0]["fields"][0]["content"]
+        == "clicked"
+    )
+    assert emitted == ["plugin_settings_configs"]
