@@ -338,9 +338,10 @@ not acceptable:
   strings.
 - Backend messages surfaced in the UI (status paragraphs, error text) must
   follow the same rule.
-- The UI currently has no translation framework (no transloco/ngx-translate).
-  Implementing this policy requires introducing one, or the project's chosen
-  equivalent, with the import redesign.
+- Translations live in `ui/src/app/services/i18n-translations.ts` (EN + FR
+  tables served by an inline loader). Editing that file hot-reloads under
+  `ng serve`; never move translations back to JSON assets, which the dev
+  server only copies at startup.
 - Additive changes must not introduce new user-facing hardcoded strings.
 
 ## Development Environment
