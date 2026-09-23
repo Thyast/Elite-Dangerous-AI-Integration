@@ -174,7 +174,8 @@ class PluginManager:
         
         for module in self.plugin_list.values():
             log('debug', f"Registering Settings for {module.plugin_manifest.name}")
-            
+            module._manager = self
+
             # Register plugin settings config
             try:
                 if module.settings_config is not None:
@@ -312,6 +313,17 @@ class PluginManager:
                 has_plugin_settings=(len(self.plugin_settings_configs) > 0),
             )
         return True
+
+    def republish_settings(self) -> None:
+        """Broadcast the current settings configs without persisting anything.
+
+        Safe to call from background threads: emit_message serializes writes.
+        Used by plugins whose state changes outside the config-update paths."""
+        emit_message(
+            "plugin_settings_configs",
+            plugin_settings_configs=self.plugin_settings_configs,
+            has_plugin_settings=(len(self.plugin_settings_configs) > 0),
+        )
 
     def on_settings_button(self, plugin_guid: str, key: str, value: str | None = None):
         """Route a plugin settings button click to its owning plugin."""

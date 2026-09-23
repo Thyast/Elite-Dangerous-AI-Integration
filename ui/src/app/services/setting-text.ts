@@ -31,3 +31,20 @@ export function resolveSettingText(
     const translated = translate.instant(value, params);
     return typeof translated === "string" ? translated : value;
 }
+
+/**
+ * Resolves a module name key (e.g. "module.beamlaser") against the
+ * translations; when the key is unknown the provided fallback (the humanized
+ * backend name) is shown instead of the raw key.
+ */
+export function resolveModuleName(
+    translate: TranslateService,
+    key: string | null | undefined,
+    fallback: string,
+): string {
+    if (!key) {
+        return fallback;
+    }
+    const translated = translate.instant(key);
+    return typeof translated === "string" && translated !== key ? translated : fallback;
+}

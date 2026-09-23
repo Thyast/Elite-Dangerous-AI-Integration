@@ -69,6 +69,9 @@ class PluginBase(ABC):
         # that would otherwise be shared by every plugin instance until the
         # manager assigns the persisted settings.
         self.settings: dict[str, Any] = {}
+        # Set by the PluginManager when settings are registered; lets plugins
+        # broadcast UI updates even in config state (before the runtime runs).
+        self._manager = None
         
     def on_chat_start(self, helper: 'PluginHelper'):
         """

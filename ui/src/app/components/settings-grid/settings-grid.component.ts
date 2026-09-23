@@ -70,6 +70,46 @@ export class SettingsGridComponent {
         return resolveSettingText(this.translate, value);
     }
 
+    /** Buttons placed on consecutive rows share a single horizontal row;
+     * the first button of the grid is the primary (filled) one. */
+    fieldGroups(): (
+        | { kind: "buttons"; fields: SettingBase[] }
+        | { kind: "field"; field: SettingBase }
+    )[] {
+        const groups: (
+            | { kind: "buttons"; fields: SettingBase[] }
+            | { kind: "field"; field: SettingBase }
+        )[] = [];
+        let pendingButtons: SettingBase[] | null = null;
+        for (const field of this.grid?.fields ?? []) {
+            if (field.type === "button") {
+                if (!pendingButtons) {
+                    pendingButtons = [];
+                    groups.push({ kind: "buttons", fields: pendingButtons });
+                }
+                pendingButtons.push(field);
+            } else {
+                pendingButtons = null;
+                groups.push({ kind: "field", field });
+            }
+        }
+        return groups;
+    }
+
+    firstButtonKey(): string | null {
+        const button = (this.grid?.fields ?? []).find(
+            (field) => field.type === "button",
+        );
+        return button?.key ?? null;
+    }
+
+    handleEnterSubmit(): void {
+        const key = this.firstButtonKey();
+        if (key && this.onButtonClick) {
+            this.onButtonClick(key);
+        }
+    }
+
     handleButtonClick(field: SettingBase): void {
         this.onButtonClick?.(field.key);
     }

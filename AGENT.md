@@ -308,18 +308,23 @@ Structure:
    omitted entirely while idle. The header action disappears while the
    tunnel is open.
 2. Grid `import` ("plugin.sum.grid.import"): a data-entry state (textarea,
-   analyze, cancel); a diff state (rendered diff, confirm, modify, cancel);
-   an imported state (keyed banner, the applied diff kept visible for
-   tracking, new-import entry point).
+   an import action that stores the plan directly, cancel) and an imported
+   state (keyed banner with plan, version, modules and migrated sessions,
+   plus a new-import entry point). There is **no diff phase**: comparing a
+   plan against the current ship only makes sense once the app stores
+   per-ship data (deferred). Errors during parsing surface as a keyed
+   paragraph in the data state.
 3. Grid `plans` ("plugin.sum.grid.plans", displayed as "Plans"): search, a
-   `list` settings field with one row per plan and a per-row trash action
-   routed as `delete_plan:<plan id>`, refresh, and a delete status
-   paragraph.
-4. Grid `session` ("plugin.sum.grid.session"): unchanged summary.
+   `list` settings field with one row per plan and per-row actions (rename
+   with inline edit, activate session, delete through a trash icon routed
+   as `<action>:<plan id>`), and a status paragraph.
+4. Grid `session` ("plugin.sum.grid.session"): summary plus a per-step
+   module detail list diffing the plan target against the ship's current
+   loadout, grouped by outfitting category (pending rows highlighted).
 
-The last applied import (banner params and diff HTML) persists in the
-plugin database (`plugin_meta` table) so the confirmed diff stays visible
-across restarts. Deleting the last imported plan resets the tunnel to idle.
+The last import (banner params) persists in the plugin database
+(`plugin_meta` table). Deleting the last imported plan resets the tunnel
+to idle.
 
 Progress under each plan row reflects two criteria computed from the ship's
 current loadout (runtime snapshot of `Loadout`/`ModuleInfo` events, falling
@@ -448,12 +453,6 @@ feature.
 
 ## Known Limitations
 
-- The rendered plan-diff HTML (section titles "Added", "Removed",
-  "Changed", the version line, and the new-plan stub) is still generated in
-  English by the backend. This is a documented deviation from the i18n
-  policy: keying rendered reports requires a backend-side translation
-  surface that does not exist yet. Tunnel chrome, labels, placeholders,
-  banners, and status messages are fully keyed.
 - The compact EDSY and Coriolis URL implementations are not universal decoders.
   Unknown or unsupported payloads must fail explicitly.
 - The status paragraph presents the most recently active session, while the

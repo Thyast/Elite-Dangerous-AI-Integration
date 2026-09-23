@@ -95,13 +95,16 @@ class ListRow(TypedDict):
     key: str
     title: str
     meta: NotRequired[str]
+    params: NotRequired[dict[str, str | int | float]]
     group: NotRequired[str]
+    pending: NotRequired[bool]
     progress: NotRequired[list[ListRowProgress]]
 
 class ListSetting(SettingBase):
     """Used to display a list of rows, each carrying optional actions."""
     items: list[ListRow]
     row_actions: NotRequired[list[ListAction]]
+    unit: NotRequired[str]
 
 class GridHeaderAction(TypedDict):
     """Defines an action button rendered next to a grid header."""

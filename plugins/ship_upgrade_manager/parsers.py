@@ -8,6 +8,22 @@ class PlanParseError(ValueError):
     """Raised when an external loadout cannot be normalized."""
 
 
+def _slef_plan_name(header: dict[str, Any] | None) -> str | None:
+    """Build name ('bn') carried in the Coriolis/EDSY URL of a SLEF header."""
+    if not isinstance(header, dict):
+        return None
+    app_url = header.get("appURL")
+    if not isinstance(app_url, str) or not app_url:
+        return None
+    query = dict(
+        part.split("=", 1)
+        for part in urlparse(app_url).query.split("&")
+        if "=" in part
+    )
+    name = unquote(query.get("bn", ""))
+    return name or None
+
+
 def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
     """Parse a Coriolis, EDSY, Inara, or normalized plan export."""
     if isinstance(value, dict):
@@ -30,6 +46,7 @@ def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
         source.get("name"),
         source.get("title"),
         source.get("ShipName"),
+        _slef_plan_name(header),
         "Imported plan",
     )
     steps = _normalize_steps(source)

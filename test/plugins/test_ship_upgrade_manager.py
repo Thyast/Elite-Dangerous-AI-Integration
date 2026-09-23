@@ -29,6 +29,9 @@ class _PluginManager:
     def update_plugin_setting(self, *_args):
         return True
 
+    def republish_settings(self) -> None:
+        pass
+
 
 class _Helper:
     _plugin_manager = _PluginManager()
@@ -259,7 +262,7 @@ def _set_plan_input(plugin: ShipUpgradeManagerPlugin, payload: dict) -> None:
     plugin.settings["plan_input"] = json.dumps(payload)
 
 
-def test_import_tunnel_analyzes_and_renders_diff_before_import(tmp_path: Path):
+def test_import_tunnel_imports_directly(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan(
         "Python",
@@ -281,17 +284,13 @@ def test_import_tunnel_analyzes_and_renders_diff_before_import(tmp_path: Path):
     plugin.on_settings_button("import_plan")
     assert plugin._import_state == "data"
 
-    plugin.on_settings_button("analyze_plan")
+    plugin.on_settings_button("save_plan")
 
-    assert plugin._import_state == "diff"
-    diff_content = plugin._field("import", "diff_preview")["content"]
-    assert "Version 1" in diff_content
-    assert "new_fsd" in diff_content
-    assert "old_fsd" in diff_content
-    assert plugin.list_plans()[0]["plan_version"] == 1
+    assert plugin._import_state == "imported"
+    assert plugin.list_plans()[0]["plan_name"] == "PvE"
 
 
-def test_import_tunnel_confirm_imports_migrates_and_keeps_diff_visible(tmp_path: Path):
+def test_import_tunnel_imports_migrates_plan(tmp_path: Path):
     plugin = _plugin(tmp_path)
     # Import the baseline through the same normalization path the tunnel uses
     # so step signatures are comparable.
@@ -317,16 +316,12 @@ def test_import_tunnel_confirm_imports_migrates_and_keeps_diff_visible(tmp_path:
     )
 
     plugin.on_settings_button("import_plan")
-    plugin.on_settings_button("analyze_plan")
-    plugin.on_settings_button("confirm_import")
+    plugin.on_settings_button("save_plan")
 
     assert plugin._import_state == "imported"
     assert plugin.list_plans()[0]["plan_version"] == 2
     session = plugin.get_session()
     assert "fsd" in session["completed_steps"]
-    last_changes = plugin._field("import", "last_changes")["content"]
-    assert "Version 1" in last_changes
-    assert "new" in last_changes
     banner = plugin._field("import", "import_done")
     assert banner["content"] == "plugin.sum.msg.doneBanner"
     assert banner["params"]["plan"] == "PvE"
@@ -338,7 +333,7 @@ def test_import_tunnel_reports_invalid_input_and_stays_in_data_state(tmp_path: P
     plugin.on_settings_button("import_plan")
     plugin.settings["plan_input"] = "not json"
 
-    plugin.on_settings_button("analyze_plan")
+    plugin.on_settings_button("save_plan")
 
     assert plugin._import_state == "data"
     error_field = plugin._field("import", "import_error")
@@ -394,8 +389,7 @@ def test_import_tunnel_before_chat_start_imports_from_config_state(tmp_path: Pat
             "steps": [{"id": "fsd", "item": "int_hyperdrive_size5_class5"}],
         },
     )
-    plugin.on_settings_button("analyze_plan")
-    plugin.on_settings_button("confirm_import")
+    plugin.on_settings_button("save_plan")
 
     assert plugin.list_plans()[0]["plan_name"] == "Config plan"
     assert plugin._import_state == "imported"
@@ -444,8 +438,7 @@ def test_delete_last_imported_plan_resets_import_state(tmp_path: Path):
             "steps": [{"id": "fsd", "item": "int_hyperdrive_size5_class5"}],
         },
     )
-    plugin.on_settings_button("analyze_plan")
-    plugin.on_settings_button("confirm_import")
+    plugin.on_settings_button("save_plan")
     plan_id = plugin.list_plans()[0]["id"]
 
     plugin.on_settings_button(f"delete_plan:{plan_id}")
@@ -480,8 +473,7 @@ def test_last_import_persists_across_plugin_restart(tmp_path: Path):
         },
     )
     plugin.on_settings_button("import_plan")
-    plugin.on_settings_button("analyze_plan")
-    plugin.on_settings_button("confirm_import")
+    plugin.on_settings_button("save_plan")
 
     restarted = ShipUpgradeManagerPlugin(
         PluginManifest('{"guid":"test-guid","name":"Test","version":"1.0.0"}')
@@ -493,7 +485,6 @@ def test_last_import_persists_across_plugin_restart(tmp_path: Path):
     assert banner["content"] == "plugin.sum.msg.doneBanner"
     assert banner["params"]["plan"] == "PvE"
     assert banner["params"]["version"] == 2
-    assert "int_shieldgenerator_size5_class5" in restarted._field("import", "last_changes")["content"]
 
 
 def test_plan_filter_filters_rows_live_and_groups_by_ship(tmp_path: Path):
@@ -561,7 +552,7 @@ def test_plan_rows_use_public_ship_names_and_match_display_name(tmp_path: Path):
 
     rows = plugin._field("plans", "available_plans")["items"]
     groups = {row["title"]: row["group"] for row in rows}
-    assert groups["Kestrel Build"] == "Kestrel MkII"
+    assert groups["Kestrel Build"] == "Kestrel Mk II"
     assert groups["Fallback Build"] == "Weird Unknown Ship"
 
     plugin.settings["plan_filter"] = "kestrel"
@@ -600,7 +591,9 @@ def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
     assert progress[0]["eng_current"] == 0
     assert progress[0]["eng_pct"] == 0
     assert progress[0]["paused"] is False
-    assert progress[0]["next_label"] == "Shield Generator · Size 5 · Class 5"
+    assert progress[0]["next_label"] == "Shield Generator"
+    assert progress[0]["next_key"] == "module.shieldgenerator"
+    assert progress[0]["next_class"] == "5A"
     assert progress[0]["next_grade"] == 5
     assert progress[0]["next_engineering"] == "Reinforced"
 
@@ -615,7 +608,31 @@ def test_next_module_label_falls_back_for_unknown_families(tmp_path: Path):
     plugin.start_session("PvE", "SHIP-1")
 
     progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
-    assert progress[0]["next_label"] == "Modulereinforcement · Size 2 · Class 1"
+    assert progress[0]["next_label"] == "Modulereinforcement"
+    assert progress[0]["next_key"] == "module.modulereinforcement"
+    assert progress[0]["next_class"] == "2E"
+
+
+def test_utility_modules_group_separately_from_hardpoints(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "booster", "item": "hpt_shieldbooster_size0_class2"},
+                {"id": "heatsink", "item": "hpt_heatsinklauncher_turret_tiny"},
+                {"id": "laser", "item": "hpt_beamlaser_gimbal_large"},
+            ]
+        },
+    )
+    plugin.start_session("PvE", "SHIP-1")
+
+    rows = plugin._field("session", "session_modules")["items"]
+    by_title = {row.get("title_key", row["title"]): row for row in rows}
+    assert by_title["module.shieldbooster"]["group"] == "plugin.sum.category.utilityMounts"
+    assert by_title["module.heatsinklauncher"]["group"] == "plugin.sum.category.utilityMounts"
+    assert by_title["module.beamlaser"]["group"] == "plugin.sum.category.hardpoints"
 
     plugin.set_session_paused(True)
 
@@ -768,7 +785,8 @@ def test_session_start_baselines_steps_satisfied_by_current_loadout(
     assert progress[0]["eng_current"] == 8
     assert progress[0]["eng_target"] == 10
     assert progress[0]["eng_pct"] == 80
-    assert progress[0]["next_label"] == "Hyperdrive · Size 5 · Class 5"
+    assert progress[0]["next_label"] == "Hyperdrive"
+    assert progress[0]["next_class"] == "5A"
 
 
 def test_engineering_progress_requires_matching_blueprint(
@@ -820,6 +838,133 @@ def test_engineering_progress_requires_matching_blueprint(
     assert progress[0]["eng_target"] == 5
     assert progress[0]["eng_current"] == 0
     assert progress[0]["eng_pct"] == 0
+
+
+def test_session_module_rows_diff_target_vs_current_loadout(
+    tmp_path: Path, monkeypatch
+):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    modules = [
+        {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"},
+        {
+            "Slot": "ShieldGenerator",
+            "Item": "int_shieldgenerator_size5_class5",
+            "Engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 3},
+        },
+    ]
+    (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
+        json.dumps(
+            {"event": "Loadout", "Ship": "python", "ShipID": 7, "Modules": modules}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "pp", "item": "int_powerplant_size5_class5"},
+                {
+                    "id": "shield",
+                    "item": "int_shieldgenerator_size5_class5",
+                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                },
+                {
+                    "id": "cannon",
+                    "item": "int_cannon_fixed_medium_class2",
+                },
+            ]
+        },
+    )
+    plugin.start_session("PvE", "7")
+
+    rows = plugin._field("session", "session_modules")["items"]
+    by_title = {row.get("title_key", row["title"]): row for row in rows}
+    assert by_title["module.powerplant"]["meta"] == "plugin.sum.sessionStep.installed"
+    assert by_title["module.powerplant"]["pending"] is False
+    assert by_title["module.powerplant"]["group"] == "plugin.sum.category.coreInternal"
+    assert by_title["module.shieldgenerator"]["meta"] == "plugin.sum.sessionStep.targetProgress"
+    assert by_title["module.shieldgenerator"]["params"] == {
+        "blueprint": "Reinforced",
+        "target": 5,
+        "current": 3,
+    }
+    assert by_title["module.shieldgenerator"]["pending"] is True
+    assert by_title["module.shieldgenerator"]["group"] == "plugin.sum.category.optionalInternal"
+    assert by_title["module.cannon"]["meta"] == "plugin.sum.sessionStep.absent"
+    assert by_title["module.cannon"]["pending"] is True
+    assert by_title["module.cannon"]["group"] == "plugin.sum.category.optionalInternal"
+    group_order: list[str] = []
+    for row in rows:
+        group = str(row["group"])
+        if group not in group_order:
+            group_order.append(group)
+    assert group_order == [
+        "plugin.sum.category.coreInternal",
+        "plugin.sum.category.optionalInternal",
+    ]
+
+
+def test_journal_watcher_dispatches_entries_in_config_state(tmp_path: Path, monkeypatch):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    plugin._current_ship_id = "7"
+    # Back to config state (as after Run is stopped) so the watcher processes.
+    plugin._watch_active = True
+    watcher = sum_module._JournalWatcher(plugin)
+    line = json.dumps(
+        {
+            "event": "Loadout",
+            "Ship": "python",
+            "ShipID": 7,
+            "ShipName": "Mina",
+            "Modules": [
+                {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"},
+            ],
+        }
+    )
+
+    watcher._dispatch(line)
+
+    assert plugin._current_ship_name == "Mina"
+    assert plugin._current_loadout_modules[0]["Item"] == "int_powerplant_size5_class5"
+
+    # While the runtime runs, the watcher drops entries to avoid duplicates.
+    plugin._watch_active = False
+    watcher._dispatch(line.replace("Mina", "Other"))
+    assert plugin._current_ship_name == "Mina"
+
+
+def test_slef_kestrel_fixture_parses_full_engineering(tmp_path: Path):
+    fixture = Path(__file__).parent / "fixtures" / "kestrel_mkii_slef.json"
+    normalized = parse_plan_input(fixture.read_text(encoding="utf-8"))
+
+    assert normalized["plan_name"] == "Imported Kestrel Mk II"
+    assert normalized["ship_model"] == "smallcombat01_nx"
+    assert len(normalized["steps"]) == 26
+
+    engineering = {
+        step["item"].lower(): step["engineering"]
+        for step in normalized["steps"]
+    }
+    assert engineering["int_powerplant_size5_class5"]["BlueprintName"] == "PowerPlant_Armoured"
+    assert engineering["int_powerplant_size5_class5"]["Level"] == 5
+    assert engineering["int_hyperdrive_overcharge_size4_class5"]["Level"] == 5
+    # Cargo hatch and the guardian module carry no engineering.
+    assert engineering["modularcargobaydoor"] is None
+    assert engineering["int_guardianmodulereinforcement_size2_class1"] is None
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):

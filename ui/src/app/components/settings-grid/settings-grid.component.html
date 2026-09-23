@@ -2,15 +2,32 @@
 <mat-expansion-panel [expanded]="!grid.default_collapsed">
     <mat-expansion-panel-header>{{ resolve(grid.label) }}</mat-expansion-panel-header>
     <div [class]="gridClass">
-        @for (field of grid.fields; track field.key) {
-            <app-settings-field
-                [field]="field"
-                [value]="getFieldValue(field)"
-                [buttonEnabled]="onButtonClick !== undefined"
-                (valueChange)="onFieldChange(field, $event)"
-                (buttonClick)="handleButtonClick(field)"
-                (listAction)="handleListAction($event)">
-            </app-settings-field>
+        @for (group of fieldGroups(); track $index) {
+            @if (group.kind === "buttons") {
+                <div class="button-row">
+                    @for (field of group.fields; track field.key) {
+                        <app-settings-field
+                            [field]="field"
+                            [primary]="field.key === firstButtonKey()"
+                            [value]="getFieldValue(field)"
+                            [buttonEnabled]="onButtonClick !== undefined"
+                            (valueChange)="onFieldChange(field, $event)"
+                            (buttonClick)="handleButtonClick(field)"
+                            (listAction)="handleListAction($event)">
+                        </app-settings-field>
+                    }
+                </div>
+            } @else {
+                <app-settings-field
+                    [field]="group.field"
+                    [value]="getFieldValue(group.field)"
+                    [buttonEnabled]="onButtonClick !== undefined"
+                    (valueChange)="onFieldChange(group.field, $event)"
+                    (buttonClick)="handleButtonClick(group.field)"
+                    (listAction)="handleListAction($event)"
+                    (submitRequested)="handleEnterSubmit()">
+                </app-settings-field>
+            }
         }
     </div>
 </mat-expansion-panel>
@@ -37,15 +54,32 @@
             </button>
         }
     </div>
-    @for (field of grid.fields; track field.key) {
-        <app-settings-field
-            [field]="field"
-            [value]="getFieldValue(field)"
-            [buttonEnabled]="onButtonClick !== undefined"
-            (valueChange)="onFieldChange(field, $event)"
-            (buttonClick)="handleButtonClick(field)"
-            (listAction)="handleListAction($event)">
-        </app-settings-field>
+    @for (group of fieldGroups(); track $index) {
+        @if (group.kind === "buttons") {
+            <div class="button-row">
+                @for (field of group.fields; track field.key) {
+                    <app-settings-field
+                        [field]="field"
+                        [primary]="field.key === firstButtonKey()"
+                        [value]="getFieldValue(field)"
+                        [buttonEnabled]="onButtonClick !== undefined"
+                        (valueChange)="onFieldChange(field, $event)"
+                        (buttonClick)="handleButtonClick(field)"
+                        (listAction)="handleListAction($event)">
+                    </app-settings-field>
+                }
+            </div>
+        } @else {
+            <app-settings-field
+                [field]="group.field"
+                [value]="getFieldValue(group.field)"
+                [buttonEnabled]="onButtonClick !== undefined"
+                (valueChange)="onFieldChange(group.field, $event)"
+                (buttonClick)="handleButtonClick(group.field)"
+                (listAction)="handleListAction($event)"
+                (submitRequested)="handleEnterSubmit()">
+            </app-settings-field>
+        }
     }
 </div>
 }

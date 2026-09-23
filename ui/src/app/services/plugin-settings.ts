@@ -56,6 +56,7 @@ export interface SettingBase {
     // List
     items: ListRow[];
     row_actions: ListAction[];
+    unit?: 'plan' | 'module';
 }
 
 export interface TextSetting extends SettingBase {
@@ -103,6 +104,8 @@ export interface ListRowProgress {
     eng_target?: number;
     eng_pct?: number;
     next_label?: string;
+    next_key?: string;
+    next_class?: string;
     next_grade?: number | string;
     next_engineering?: string;
 }
@@ -110,12 +113,18 @@ export interface ListRowProgress {
 export interface ListRow {
     key: string;
     title: string;
+    title_key?: string;
+    grade?: string;
     meta?: string;
+    params?: { [name: string]: string | number };
     group?: string;
+    pending?: boolean;
     progress?: ListRowProgress[];
 }
 
-export interface ListSetting extends SettingBase {}
+export interface ListSetting extends SettingBase {
+    unit?: "plan" | "module";
+}
 
 export interface SelectSetting extends SettingBase {
     default_value: string | string[] | null;

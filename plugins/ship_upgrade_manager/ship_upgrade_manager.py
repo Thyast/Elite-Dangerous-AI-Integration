@@ -4,6 +4,8 @@ import json
 import os
 import re
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,7 +39,6 @@ PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
 
 IMPORT_STATE_IDLE = "idle"
 IMPORT_STATE_DATA = "data"
-IMPORT_STATE_DIFF = "diff"
 IMPORT_STATE_IMPORTED = "imported"
 
 LAST_IMPORT_META_KEY = "last_import"
@@ -79,6 +80,210 @@ def _load_module_families() -> list[tuple[str, str]]:
 
 
 MODULE_FAMILIES = _load_module_families()
+
+CORE_MODULE_FAMILIES = {
+    "powerplant",
+    "engine",
+    "hyperdrive",
+    "lifesupport",
+    "powerdistributor",
+    "radar",
+    "fueltank",
+}
+
+UTILITY_MODULE_FAMILIES = {
+    "shieldbooster",
+    "heatsinklauncher",
+    "chafflauncher",
+    "electroniccountermeasure",
+    "cargoscanner",
+    "manifestscanner",
+    "killwarrantscanner",
+    "cloudscanner",
+}
+
+CATEGORY_ORDER = [
+    "plugin.sum.category.coreInternal",
+    "plugin.sum.category.optionalInternal",
+    "plugin.sum.category.hardpoints",
+    "plugin.sum.category.utilityMounts",
+]
+
+
+def _blueprint_family_display(blueprint: str) -> str:
+    """'ShieldGenerator_Reinforced' -> 'Reinforced'."""
+    return re.sub(r"(?<!^)(?=[A-Z])", " ", blueprint.split("_")[-1])
+
+
+# Class (1-5) to E:D letter grade: 1=E, 2=D, 3=C, 4=B, 5=A.
+CLASS_LETTERS = {1: "E", 2: "D", 3: "C", 4: "B", 5: "A"}
+
+# Spec module families (normalized) — the i18n keys of the UI module
+# dictionary (module.<family>). Longest-prefix match wins over variants.
+SPEC_MODULE_FAMILIES = [
+    "shieldgeneratorstrong",
+    "shieldgeneratorfast",
+    "hyperdriveovercharge",
+    "enginefast",
+    "cargorackcorrosionresistant",
+    "miningseismicchargelauncher",
+    "miningsubsurfacedisplacement",
+    "miningabrasionblaster",
+    "guardiangausscannon",
+    "guardianplasmalauncher",
+    "guardianshardcannon",
+    "guardianfsdbooster",
+    "guardianhullreinforcement",
+    "guardianshieldreinforcement",
+    "thargoidempneutraliser",
+    "dockingcomputeradvanced",
+    "dockingcomputerstandard",
+    "detailedsurfacescanner",
+    "electroniccountermeasure",
+    "plasmanavigationalbeacon",
+    "pulsescandiscovery",
+    "hyperdriveinterdictor",
+    "atmulticannon",
+    "atmissiletile",
+    "basicmissilerack",
+    "dumbfirermissilerack",
+    "multicannonadvanced",
+    "slugshotadvanced",
+    "railgunburst",
+    "dronecontrolcollection",
+    "dronecontrolprospector",
+    "dronecontrolfueltransfer",
+    "dronecontrolrepair",
+    "dronecontroldecontamination",
+    "dronecontrolmultipurpose",
+    "remotereleaseflak",
+    "flakmortar",
+    "mininglaser",
+    "shieldcellbank",
+    "passengercabin",
+    "powerdistributor",
+    "pulselaserburst",
+    "plasmaaccelerator",
+    "heatsinklauncher",
+    "shieldbooster",
+    "chafflauncher",
+    "crimescanner",
+    "cloudscanner",
+    "cargoscanner",
+    "xenoscanner",
+    "torpedopylon",
+    "minelauncher",
+    "supercruiseassist",
+    "hullreinforcement",
+    "modulereinforcement",
+    "multicannon",
+    "powerplant",
+    "lifesupport",
+    "fuelscoop",
+    "fighterbay",
+    "buggybay",
+    "refinery",
+    "hyperdrive",
+    "railgun",
+    "slugshot",
+    "sensors",
+    "fueltank",
+    "beamlaser",
+    "pulselaser",
+    "cannon",
+    "engine",
+    "mkiiplasmashockautocannon",
+    "mkiiagileboostengine",
+    "guardianmodulereinforcement",
+    "smallcombat01nxarmourreactive",
+    "modularcargobaydoor",
+    "plasmashockautocannon",
+    "engineagile",
+]
+
+def _spec_module_key(family_key: str) -> str:
+    """Longest spec family that prefixes the id family, else the id family."""
+    return next(
+        (
+            name
+            for name in sorted(SPEC_MODULE_FAMILIES, key=len, reverse=True)
+            if family_key.startswith(name)
+        ),
+        family_key,
+    )
+
+
+class _JournalWatcher(threading.Thread):
+    """Tails the Elite journals while the runtime is not running.
+
+    Journal side effects only reach the plugin after the user presses Run;
+    this watcher lets the plugin track ship changes from C:N startup in
+    config state. While the runtime runs, the EventManager delivers the
+    same events and the watcher keeps tailing but drops the entries, so
+    there is never double processing."""
+
+    def __init__(self, plugin: "ShipUpgradeManagerPlugin"):
+        super().__init__(daemon=True, name="ship-upgrade-journal-watcher")
+        self.plugin = plugin
+        self._path = ""
+        self._offset = 0
+        self._remainder = ""
+
+    def run(self) -> None:
+        while True:
+            try:
+                self._poll()
+            except Exception as error:
+                log("warning", f"Ship Upgrade Manager journal watcher error: {error}")
+            time.sleep(1.0)
+
+    def _poll(self) -> None:
+        try:
+            journals_path = get_ed_journals_path({})
+            log_files = [
+                os.path.join(journals_path, name)
+                for name in os.listdir(journals_path)
+                if os.path.isfile(os.path.join(journals_path, name))
+                and name.startswith("Journal.")
+            ]
+        except (OSError, FileNotFoundError):
+            return
+        latest = max(log_files, key=os.path.getmtime) if log_files else ""
+        if not latest:
+            return
+        if latest != self._path:
+            # Start at the end of the newest file: the session baseline
+            # already reflects the historical state.
+            self._path = latest
+            self._offset = os.path.getsize(latest) if latest else 0
+            self._remainder = ""
+            return
+        size = os.path.getsize(latest)
+        if size < self._offset:
+            self._offset = 0
+            self._remainder = ""
+        if size == self._offset:
+            return
+        with open(latest, "rb") as handle:
+            handle.seek(self._offset)
+            chunk = handle.read()
+        self._offset += len(chunk)
+        lines = (self._remainder + chunk.decode("utf-8", errors="ignore")).split("\n")
+        self._remainder = lines.pop()
+        for line in lines:
+            self._dispatch(line)
+
+    def _dispatch(self, line: str) -> None:
+        line = line.strip()
+        if not line:
+            return
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(entry, dict) or not self.plugin._watch_active:
+            return
+        self.plugin._handle_ship_event(entry)
 
 
 class ShipUpgradeState(BaseModel):
@@ -137,12 +342,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._current_ship_id = ""
         self._current_ship_name = ""
         self._current_loadout_modules: list[dict[str, Any]] = []
-        self._pending_diff: dict[str, Any] | None = None
         self._last_plan_filter = ""
+        self._watch_active = True
         self._initialize_database()
         self._last_import = self._load_last_import()
         self._import_state = IMPORT_STATE_IMPORTED if self._last_import else IMPORT_STATE_IDLE
         self.settings_config = self._build_settings_config()
+        _JournalWatcher(self).start()
 
     # ------------------------------------------------------------------
     # Settings UI construction (import tunnel state machine)
@@ -240,18 +446,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             })
             fields: list[SettingBase] = [
                 textarea,
-                self._button("analyze_plan", "plugin.sum.btn.analyze"),
-                self._button("cancel_import", "common.cancel"),
-            ]
-        elif state == IMPORT_STATE_DIFF:
-            fields = [
-                self._paragraph(
-                    "diff_preview",
-                    str(self.settings.get("diff_preview", "")),
-                    label="plugin.sum.planChanges",
-                ),
-                self._button("confirm_import", "plugin.sum.btn.confirm"),
-                self._button("modify_data", "plugin.sum.btn.modify"),
+                self._button("save_plan", "plugin.sum.btn.import"),
                 self._button("cancel_import", "common.cancel"),
             ]
         elif state == IMPORT_STATE_IMPORTED:
@@ -266,11 +461,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
                         "modules": record.get("modules", 0),
                         "sessions": record.get("sessions", 0),
                     },
-                ),
-                self._paragraph(
-                    "last_changes",
-                    str(record.get("diff_html", "")),
-                    label="plugin.sum.lastChanges",
                 ),
                 self._button("new_import", "plugin.sum.btn.newImport"),
             ]
@@ -293,6 +483,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         plans_list.update({
             "placeholder": "plugin.sum.noPlans",
             "items": self._make_plan_rows(),
+            "unit": "plan",
             "row_actions": [
                 {
                     "action": "rename_plan",
@@ -317,13 +508,147 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return [plan_filter, plans_list, delete_status]
 
     def _session_fields(self) -> list[SettingBase]:
+        session_modules: ListSetting = self._base_field("session_modules", "list", None)  # type: ignore[assignment]
+        session_modules.update({
+            "placeholder": "plugin.sum.noSession",
+            "items": self._session_module_rows(),
+            "row_actions": [],
+            "unit": "module",
+        })
         return [
             self._paragraph(
                 "session_summary",
                 str(self.settings.get("session_summary", "") or "plugin.sum.noSession"),
                 label="plugin.sum.session",
-            )
+            ),
+            session_modules,
         ]
+
+    def _split_module_id(self, item: str) -> tuple[str, str | None, str | None]:
+        """Split an FD module id into (family, size, class).
+
+        Strips the int_/hpt_/hpt_cr_ prefix, then the _sizeN_classN tail when
+        present. Trailing variant words stay attached to the family."""
+        cleaned = self._normalize_module_id(item)
+        prefix = ""
+        for candidate in ("hpt_cr_", "hpt_", "int_"):
+            if cleaned.startswith(candidate):
+                prefix = candidate
+                break
+        head = cleaned[len(prefix):] if prefix else cleaned
+        size = module_class = None
+        variant = ""
+        parts = re.split(r"_size(\d+)_class(\d+)", head, maxsplit=1)
+        family = parts[0]
+        if len(parts) > 1:
+            size, module_class = parts[1], parts[2]
+            # Spec form `..._sizeN_classM_<variant>`: the trailing segment
+            # names the variant ("..._agile" -> Mk II Agile Boost).
+            leftover = parts[3] if len(parts) > 3 else ""
+            if leftover:
+                variant = leftover.lstrip("_")
+        else:
+            class_match = re.search(r"_class(\d+)$", head)
+            if class_match:
+                family = head[: class_match.start()]
+                module_class = class_match.group(1)
+        if variant:
+            family = f"{family}_{variant}"
+        return family, size, module_class
+
+    def _module_category(self, item: str) -> str:
+        """Outfitting-style category of a module, from its FD id."""
+        cleaned = self._normalize_module_id(item)
+        if cleaned.startswith("hpt_cr_"):
+            return "plugin.sum.category.utilityMounts"
+        family, _, _ = self._split_module_id(item)
+        if any(name in family for name in UTILITY_MODULE_FAMILIES):
+            return "plugin.sum.category.utilityMounts"
+        if cleaned.startswith("hpt_"):
+            return "plugin.sum.category.hardpoints"
+        if family in CORE_MODULE_FAMILIES:
+            return "plugin.sum.category.coreInternal"
+        return "plugin.sum.category.optionalInternal"
+
+    def _session_module_rows(self) -> list[ListRow]:
+        """Per-step detail of the most recently active session: target module
+        vs the module currently carried on the ship, grouped by outfitting
+        category."""
+        with self.get_db() as db:
+            session = db.execute(
+                """
+                SELECT s.id, s.completed_steps, s.ship_instance_id, p.source_json
+                FROM active_session s JOIN plans p ON p.id = s.plan_id
+                ORDER BY s.last_activity DESC LIMIT 1
+                """
+            ).fetchone()
+        if session is None:
+            return []
+        steps = self._plan_steps(session["source_json"])
+        loadout = self._loadout_for_ship(session["ship_instance_id"])
+        matches = self._match_steps(steps, loadout)
+        rows: list[ListRow] = []
+        for match in matches:
+            step = match["step"]
+            item = str(step.get("item") or step.get("id", ""))
+            title, title_key, title_grade = self._module_display(item)
+            required = step.get("engineering") or {}
+            required_level = required.get("Level") or required.get("level")
+            required_blueprint = str(
+                required.get("BlueprintName") or required.get("blueprint") or ""
+            )
+            target_params: dict[str, str | int | float] = {
+                "blueprint": _blueprint_family_display(required_blueprint),
+            }
+            if required_level is not None:
+                target_params["target"] = int(float(required_level))
+            if not match["installed"]:
+                meta = (
+                    "plugin.sum.sessionStep.targetAbsent"
+                    if required_level is not None
+                    else "plugin.sum.sessionStep.absent"
+                )
+                params: dict[str, str | int | float] | None = (
+                    target_params if required_level is not None else None
+                )
+            elif required_level is None:
+                meta = "plugin.sum.sessionStep.installed"
+                params = None
+            else:
+                current_level = match["eng_current"]
+                has_engineering = bool(match["eng_blueprint"]) and bool(current_level)
+                blueprint_ok = match["satisfied"] or (
+                    has_engineering
+                    and match["eng_blueprint"].lower().replace(" ", "")
+                    == re.sub(r"[^a-z0-9]", "", _blueprint_family_display(required_blueprint).lower())
+                )
+                target_params["current"] = current_level or 0
+                if match["satisfied"]:
+                    meta = "plugin.sum.sessionStep.targetDone"
+                    params = target_params
+                elif not has_engineering:
+                    meta = "plugin.sum.sessionStep.targetNotEngineered"
+                    params = target_params
+                elif not blueprint_ok:
+                    meta = "plugin.sum.sessionStep.targetOther"
+                    params = target_params
+                else:
+                    meta = "plugin.sum.sessionStep.targetProgress"
+                    params = target_params
+            row: ListRow = {
+                "key": str(step["id"]),
+                "title": title,
+                "title_key": title_key,
+                "grade": title_grade or "",
+                "group": self._module_category(item),
+                "meta": meta,
+                "params": params or {},
+                "pending": not match["satisfied"],
+            }
+            rows.append(row)
+        category_index = {key: index for index, key in enumerate(CATEGORY_ORDER)}
+        rows.sort(key=lambda row: (category_index.get(str(row.get("group")), 99), row["title"]))
+        return rows
 
     def _grid(self, key: str) -> SettingsGrid:
         return next(grid for grid in self.settings_config["grids"] if grid["key"] == key)
@@ -369,23 +694,31 @@ class ShipUpgradeManagerPlugin(PluginBase):
         ]
 
     def _pretty_module_name(self, item: str) -> str:
-        """Readable name for an internal module id.
+        """Humanized fallback name for an internal module id (no size/grade)."""
+        name, _key, _grade = self._module_display(item)
+        return name
 
-        'int_shieldgenerator_size5_class5' resolves to 'Shield Generator ·
-        Size 5 · Class 5' when the family exists in the engineering catalogue;
-        unknown families fall back to a humanized form of the id."""
-        cleaned = self._normalize_module_id(item)
-        match = re.match(r"^(?:int_)?(.*?)(?:_size(\d+)_class(\d+))?$", cleaned)
-        if not match:
-            return cleaned.replace("_", " ").title()
-        family_key = re.sub(r"[^a-z0-9]", "", match.group(1))
-        family = next(
-            (pretty for key, pretty in MODULE_FAMILIES if key == family_key),
-            match.group(1).replace("_", " ").strip().title(),
+    def _module_display(self, item: str) -> tuple[str, str, str | None]:
+        """Split an FD module id into display parts.
+
+        Returns (english fallback name, i18n key, size/class grade) where the
+        grade uses the E:D letter notation (1=E … 5=A, size 0 → letter only).
+        The i18n key ('module.<family>') is resolved by the UI against the
+        module dictionary; the english name is the fallback."""
+        family, size, module_class = self._split_module_id(item)
+        family_key = re.sub(r"[^a-z0-9]", "", family)
+        key = f"module.{_spec_module_key(family_key)}"
+        pretty = next(
+            (name for name_key, name in MODULE_FAMILIES if family_key.startswith(name_key)),
+            None,
         )
-        if match.group(2) and match.group(3):
-            return f"{family} · Size {match.group(2)} · Class {match.group(3)}"
-        return family
+        if pretty is None:
+            pretty = family.replace("_", " ").strip().title()
+        grade = None
+        if module_class:
+            letter = CLASS_LETTERS.get(int(module_class))
+            grade = f"{size}{letter}" if size and size != "0" else (letter or "?")
+        return pretty, key, grade
 
     def _loadout_for_ship(self, ship_instance_id: str) -> list[dict[str, Any]]:
         """Current modules of a ship: live runtime snapshot, else journal read."""
@@ -395,15 +728,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return self._current_loadout_modules
         return self._loadout_baseline_for_ship(ship_instance_id)
 
-    def _progress_metrics(
+    def _match_steps(
         self, steps: list[dict[str, Any]], modules: list[dict[str, Any]]
-    ) -> dict[str, int]:
-        """Two-criteria progress of a plan against the ship's current loadout.
+    ) -> list[dict[str, Any]]:
+        """One-to-one match of plan steps against the ship's loadout.
 
-        Modules: installed steps matched one-to-one against the loadout (slot
-        preferred when known). Engineering: for steps that require it, the sum
-        of target levels vs the sum of levels currently reached — a level only
-        counts when the blueprint matches the target (strict)."""
+        Each result carries the step, whether a matching module is installed,
+        the currently reached engineering level with its blueprint family, and
+        whether the step requirement is satisfied (strict blueprint rule)."""
         available: list[dict[str, Any]] = []
         for module in modules:
             item = self._normalize_module_id(str(module.get("Item") or ""))
@@ -423,16 +755,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 }
             )
         used = [False] * len(available)
-        modules_done = 0
-        eng_target = 0
-        eng_current = 0
+        results: list[dict[str, Any]] = []
         for step in steps:
-            required = step.get("engineering") or {}
-            required_level = required.get("Level") or required.get("level")
-            if required_level is not None:
-                # The target sums every engineering step of the plan, whether
-                # or not the module is installed yet.
-                eng_target += int(float(required_level))
             item = self._normalize_module_id(
                 str(step.get("item") or step.get("id") or "")
             )
@@ -461,24 +785,70 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     None,
                 )
             if candidate_index is None:
+                results.append({"step": step, "installed": False, "slot": "", "eng_current": None, "eng_blueprint": "", "satisfied": False})
                 continue
             used[candidate_index] = True
-            modules_done += 1
-            if required_level is None:
-                continue
-            required_level = float(required_level)
             candidate = available[candidate_index]
+            required = step.get("engineering") or {}
+            required_level = required.get("Level") or required.get("level")
             required_blueprint = str(
                 required.get("BlueprintName") or required.get("blueprint") or ""
             )
             level = candidate["level"]
-            if (
-                required_blueprint
-                and isinstance(level, (int, float))
-                and self._blueprint_key(candidate["blueprint"])
-                == self._blueprint_key(required_blueprint)
-            ):
-                eng_current += int(min(float(level), required_level))
+            current_level = int(level) if isinstance(level, (int, float)) else None
+            if required_level is None:
+                satisfied = True
+                eng_current = None
+            else:
+                blueprint_ok = required_blueprint and self._blueprint_key(
+                    candidate["blueprint"]
+                ) == self._blueprint_key(required_blueprint)
+                satisfied = bool(
+                    blueprint_ok
+                    and current_level is not None
+                    and current_level >= int(float(required_level))
+                )
+                eng_current = current_level if blueprint_ok else 0
+            blueprint_family = ""
+            if candidate["blueprint"]:
+                blueprint_family = re.sub(
+                    r"(?<!^)(?=[A-Z])", " ", candidate["blueprint"].split("_")[-1]
+                )
+            results.append(
+                {
+                    "step": step,
+                    "installed": True,
+                    "slot": candidate["slot"],
+                    "eng_current": eng_current,
+                    "eng_blueprint": blueprint_family,
+                    "satisfied": satisfied,
+                }
+            )
+        return results
+
+    def _progress_metrics(
+        self, steps: list[dict[str, Any]], modules: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        """Two-criteria progress of a plan against the ship's current loadout.
+
+        Modules: installed steps matched one-to-one against the loadout (slot
+        preferred when known). Engineering: for steps that require it, the sum
+        of target levels vs the sum of levels currently reached — a level only
+        counts when the blueprint matches the target (strict)."""
+        matches = self._match_steps(steps, modules)
+        modules_done = sum(1 for match in matches if match["installed"])
+        eng_target = 0
+        eng_current = 0
+        for match in matches:
+            required = match["step"].get("engineering") or {}
+            required_level = required.get("Level") or required.get("level")
+            if required_level is None:
+                continue
+            # The target sums every engineering step of the plan, whether or
+            # not the module is installed yet.
+            eng_target += int(float(required_level))
+            if match["eng_current"] is not None:
+                eng_current += match["eng_current"]
         total = len(steps)
         return {
             "modules_done": modules_done,
@@ -522,7 +892,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if next_step is not None:
                 next_item = next_step.get("item")
                 if next_item:
-                    entry["next_label"] = self._pretty_module_name(str(next_item))
+                    next_name, next_key, next_class = self._module_display(str(next_item))
+                    entry["next_label"] = next_name
+                    entry["next_key"] = next_key
+                    entry["next_class"] = next_class or ""
                 else:
                     entry["next_label"] = str(
                         next_step.get("label") or next_step.get("id", "")
@@ -595,6 +968,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def on_chat_start(self, helper: PluginHelper) -> None:
         self.helper = helper
+        self._watch_active = False
         self._initialize_database()
         self._reload_state_from_database()
         helper.register_projection(ShipUpgradeProjection())
@@ -667,6 +1041,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def on_chat_stop(self, helper: PluginHelper) -> None:
         self.helper = None
+        self._watch_active = True
 
     def on_settings_changed(self) -> None:
         plan_filter = self.settings.get("plan_filter", "")
@@ -675,21 +1050,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def on_settings_button(self, key: str, value: str | None = None) -> None:
         if key == "import_plan":
-            self._pending_diff = None
             self._enter_import_state(IMPORT_STATE_DATA)
-        elif key == "analyze_plan":
-            self._analyze_plan_input()
-        elif key == "confirm_import":
-            self._confirm_plan_import()
-        elif key == "modify_data":
-            self._enter_import_state(IMPORT_STATE_DATA)
+        elif key == "save_plan":
+            self._import_from_settings()
         elif key == "cancel_import":
             self.settings["plan_input"] = ""
-            self._pending_diff = None
             self._enter_import_state(IMPORT_STATE_IDLE)
         elif key == "new_import":
             self.settings["plan_input"] = ""
-            self._pending_diff = None
             self._enter_import_state(IMPORT_STATE_DATA)
         elif key.startswith("rename_plan:"):
             self._rename_plan_from_settings(key.split(":", 1)[1], value or "")
@@ -796,42 +1164,22 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f"{diff['removed_count']} removed, {diff['changed_count']} changed."
         )
 
-    def _analyze_plan_input(self) -> None:
+    def _import_from_settings(self) -> None:
+        """Parse the pasted plan data and store it directly.
+
+        The plan is filed under its ship model; no diff is computed here —
+        comparing a plan against the current ship only makes sense once the
+        app stores per-ship data (deferred)."""
         value = self.settings.get("plan_input", "")
         try:
             normalized = parse_plan_input(value)
-            diff = self.diff_plan(normalized["plan_name"], normalized)
-        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
-            log("error", f"Ship Upgrade Manager plan analysis failed: {error}")
-            self._enter_import_state(
-                IMPORT_STATE_DATA, error=("plugin.sum.errParse", {"detail": str(error)})
-            )
-            return
-        self._pending_diff = {
-            "normalized": normalized,
-            "diff": diff,
-            "rendered": self._format_plan_diff(diff),
-        }
-        self.settings["diff_preview"] = self._pending_diff["rendered"]
-        self._enter_import_state(IMPORT_STATE_DIFF)
-
-    def _confirm_plan_import(self) -> None:
-        pending = self._pending_diff
-        if pending is None:
-            self._enter_import_state(
-                IMPORT_STATE_DATA,
-                error=("plugin.sum.errParse", {"detail": "no analyzed plan"}),
-            )
-            return
-        normalized = pending["normalized"]
-        try:
             plan_id = self.import_plan(
                 normalized["ship_model"], normalized["plan_name"], normalized
             )
-        except (ValueError, TypeError) as error:
-            log("error", f"Ship Upgrade Manager plan confirmation failed: {error}")
+        except (PlanParseError, ValueError, TypeError, json.JSONDecodeError) as error:
+            log("error", f"Ship Upgrade Manager plan import failed: {error}")
             self._enter_import_state(
-                IMPORT_STATE_DIFF, error=("plugin.sum.errApply", {"detail": str(error)})
+                IMPORT_STATE_DATA, error=("plugin.sum.errParse", {"detail": str(error)})
             )
             return
         with self.get_db() as db:
@@ -848,13 +1196,12 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "version": row["plan_version"] if row else 1,
             "modules": len(normalized["steps"]),
             "sessions": sessions,
-            "diff_html": pending["rendered"],
         }
         self._save_last_import(record)
         self._last_import = record
         self._publish_status()
         self._enter_import_state(IMPORT_STATE_IMPORTED)
-        log("info", f"Confirmed Ship Upgrade Manager plan {plan_id} version {record['version']}")
+        log("info", f"Imported Ship Upgrade Manager plan {plan_id} version {record['version']}")
 
     def _delete_plan_by_id(self, plan_id: str) -> None:
         try:
@@ -983,42 +1330,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
         return True
 
-    @staticmethod
-    def _format_plan_diff(diff: dict[str, Any]) -> str:
-        if diff["current_version"] is None:
-            return "<p>New plan; all modules will be added.</p>"
-
-        def module_label(module: dict[str, Any]) -> str:
-            label = module.get("item") or module.get("label") or module.get("id", "")
-            slot = module.get("slot")
-            return escape(f"{label} ({slot})" if slot else str(label))
-
-        sections = [
-            ("Added", diff["added"], "added"),
-            ("Removed", diff["removed"], "removed"),
-        ]
-        body = "".join(
-            f"<p><strong>{title} ({len(modules)})</strong></p><ul>"
-            + "".join(f"<li>{module_label(module)}</li>" for module in modules)
-            + "</ul>"
-            for title, modules, _ in sections
-            if modules
-        )
-        changed_body = "".join(
-            f"<li>{module_label(item['before'])} → {module_label(item['after'])}</li>"
-            for item in diff["changed"]
-        )
-        if changed_body:
-            body += f"<p><strong>Changed ({len(diff['changed'])})</strong></p><ul>{changed_body}</ul>"
-        return (
-            f"<p>Version {diff['current_version']} → {diff['next_version']}</p>"
-            + (body or "<p>No module changes.</p>")
-        )
-
     def _on_event(self, event: Event, _context: dict[str, Any]) -> None:
         if not isinstance(event, GameEvent):
             return
-        event_name = event.content.get("event")
+        self._handle_ship_event(event.content)
+
+    def _handle_ship_event(self, content: dict[str, Any]) -> None:
+        event_name = content.get("event")
         if event_name not in {
             "Loadout",
             "ModuleInfo",
@@ -1029,26 +1347,26 @@ class ShipUpgradeManagerPlugin(PluginBase):
         }:
             return
         ship_id = str(
-            event.content.get("ShipID")
-            or event.content.get("ShipIdent")
-            or event.content.get("ShipName")
-            or event.content.get("Ship")
+            content.get("ShipID")
+            or content.get("ShipIdent")
+            or content.get("ShipName")
+            or content.get("Ship")
             or ""
         )
         if ship_id:
             self._current_ship_id = ship_id
-            ship_name = event.content.get("ShipName")
+            ship_name = content.get("ShipName")
             if isinstance(ship_name, str) and ship_name.strip():
                 self._current_ship_name = ship_name.strip()
         if event_name in {"Loadout", "ModuleInfo"} and (
             not ship_id or not self._current_ship_id or ship_id == self._current_ship_id
         ):
-            loadout_modules = event.content.get("Modules")
+            loadout_modules = content.get("Modules")
             if isinstance(loadout_modules, list):
                 self._current_loadout_modules = [
                     module for module in loadout_modules if isinstance(module, dict)
                 ]
-        modules = self._event_modules(event.content)
+        modules = self._event_modules(content)
         with self.get_db() as db:
             rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
         if not ship_id and len({str(row["ship_instance_id"]) for row in rows}) > 1:
@@ -2061,22 +2379,22 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     "pct": percent,
                 },
             )
+        module_rows_field: ListSetting = self._field("session", "session_modules")  # type: ignore[assignment]
+        module_rows_field["items"] = self._session_module_rows()
         self._republish()
 
     def _republish(self) -> None:
-        """Push mutated field rows/paragraphs to the UI when the runtime is up.
+        """Push mutated field rows/paragraphs to the UI.
 
-        The manager republishes the whole settings config; persisting the
-        summary key is only the trigger. In config state there is no manager
-        handle, and button hooks are republished by the manager itself.
-        """
-        if self.helper is None:
+        Broadcast-only (no config write), so it is safe from the journal
+        watcher thread. The manager backref is available in config state;
+        without it (no registration) there is nothing to update."""
+        manager = self._manager
+        if manager is None and self.helper is not None:
+            manager = self.helper._plugin_manager
+        if manager is None:
             return
-        self.helper._plugin_manager.update_plugin_setting(
-            self.plugin_manifest.guid,
-            "session_summary",
-            self.settings.get("session_summary", ""),
-        )
+        manager.republish_settings()
 
     def _plan_module_count(self, plan_id: str) -> int:
         with self.get_db() as db:
