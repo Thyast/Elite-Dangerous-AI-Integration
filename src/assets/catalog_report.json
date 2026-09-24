@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-24T15:19:50.067191+00:00",
+  "sources": [
+    {
+      "id": "coriolis-data",
+      "revision": "master",
+      "license": "MIT"
+    }
+  ],
+  "counts": {
+    "catalog_blueprints": 81,
+    "local_blueprint_names": 119,
+    "local_module_families": 54,
+    "materials_known": 138,
+    "unknown_material_names": 0,
+    "engineers_added_from_local_asset": 4167
+  },
+  "coverage": {
+    "local_families_with_catalog_bp": [
+      "armour",
+      "bulkheads",
+      "chafflauncher",
+      "collectorlimpetcontroller",
+      "detailedsurfacescanner",
+      "frameshiftdrive",
+      "frameshiftdriveinterdictor",
+      "frameshiftwakescanner",
+      "fuelscoop",
+      "fueltransferlimpetcontroller",
+      "hatchbreakerlimpetcontroller",
+      "heatsinklauncher",
+      "hullreinforcementpackage",
+      "killwarrantscanner",
+      "lifesupport",
+      "manifestscanner",
+      "pointdefence",
+      "powerdistributor",
+      "powerplant",
+      "prospectorlimpetcontroller",
+      "refinery",
+      "sensors",
+      "shieldbooster",
+      "shieldcellbank",
+      "shieldgenerator",
+      "thrusters"
+    ],
+    "local_families_without_catalog_bp": [
+      "autofieldmaintenanceunit",
+      "beamlaser",
+      "burstlaser",
+      "cannon",
+      "containmentmissile",
+      "electroniccountermeasure",
+      "fragmentcannon",
+      "guardianframeshiftdrivebooster",
+      "guardiangausscannon",
+      "guardianhybridpowerdistributor",
+      "guardianhybridpowerplant",
+      "guardianmodulereinforcementpackage",
+      "guardianplasmacharger",
+      "guardianshardcannon",
+      "guardianshieldreinforcementpackage",
+      "kinematicarmamentsweapons",
+      "manticoreweapons",
+      "minelauncher",
+      "missilerack",
+      "multicannon",
+      "packhoundmissilerack",
+      "plasmaaccelerator",
+      "pulselaser",
+      "railgun",
+      "seekermissilerack",
+      "suit",
+      "takadaweapons",
+      "torpedopylon"
+    ]
+  },
+  "unknown_materials": []
+}

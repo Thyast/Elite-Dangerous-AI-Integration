@@ -92,6 +92,9 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         "ship_upgrade_list_plans",
         "ship_upgrade_preview_changes",
         "ship_upgrade_apply_changes",
+        "ship_upgrade_build_advice",
+        "ship_upgrade_state",
+        "ship_upgrade_goal",
     }
 
     assert prompt_generator.status_generators[0]({}) == []

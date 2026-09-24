@@ -33,6 +33,7 @@ from lib.PluginSettingDefinitions import (
     TextSetting,
 )
 from .parsers import PlanParseError, parse_plan_input
+from .planner import analyze_build, build_advice, render_chain
 
 
 PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
@@ -327,6 +328,14 @@ class SessionActionParams(BaseModel):
     session_id: str | None = Field(default=None, description="Optional session id")
 
 
+class GoalParams(BaseModel):
+    plan_name: str = Field(description="Name of the plan to activate as the current build goal")
+
+
+class StateQueryParams(BaseModel):
+    ship: str | None = Field(default=None, description="Optional ship name or id to filter on")
+
+
 class PlanChangeParams(BaseModel):
     plan_input: str = Field(description="JSON loadout or supported plan URL")
 
@@ -341,14 +350,36 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self.helper: PluginHelper | None = None
         self._current_ship_id = ""
         self._current_ship_name = ""
+        self._current_fid = ""
+        self._current_position: tuple[float, float, float] | None = None
         self._current_loadout_modules: list[dict[str, Any]] = []
         self._last_plan_filter = ""
         self._watch_active = True
+        self._catalog: dict[str, Any] = {}
+        self._engineer_registry: dict[str, Any] = {}
+        self._load_catalog()
         self._initialize_database()
         self._last_import = self._load_last_import()
         self._import_state = IMPORT_STATE_IMPORTED if self._last_import else IMPORT_STATE_IDLE
         self.settings_config = self._build_settings_config()
         _JournalWatcher(self).start()
+
+    def _load_catalog(self) -> None:
+        """Load the versioned catalog and engineer registry (build-time assets)."""
+        try:
+            self._catalog = json.loads(
+                Path(get_asset_path("module_catalog.json")).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            log("warning", f"Ship Upgrade Manager catalog load failed: {error}")
+            self._catalog = {"engineering_blueprints": []}
+        try:
+            self._engineer_registry = json.loads(
+                Path(get_asset_path("ship_engineers.json")).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            log("warning", f"Ship Upgrade Manager engineer registry load failed: {error}")
+            self._engineer_registry = {}
 
     # ------------------------------------------------------------------
     # Settings UI construction (import tunnel state machine)
@@ -1035,6 +1066,34 @@ class ShipUpgradeManagerPlugin(PluginBase):
             method=self._apply_changes_action,
             action_type="ship",
         )
+        helper.register_action(
+            name="ship_upgrade_build_advice",
+            description=(
+                "Recommend the next action to complete the active upgrade plan: "
+                "module to buy, engineer to visit (with system and distance), "
+                "blueprint grade to apply"
+            ),
+            parameters=SessionActionParams,
+            method=self._build_advice_action,
+            action_type="ship",
+        )
+        helper.register_action(
+            name="ship_upgrade_state",
+            description=(
+                "Report the current upgrade plan state: which plan, on which ship, "
+                "progress, modules installed vs target, engineering remaining"
+            ),
+            parameters=StateQueryParams,
+            method=self._state_query_action,
+            action_type="ship",
+        )
+        helper.register_action(
+            name="ship_upgrade_goal",
+            description="Activate a plan as the current build goal and start a session",
+            parameters=GoalParams,
+            method=self._goal_declare_action,
+            action_type="ship",
+        )
         helper.register_sideeffect(self._on_event)
         helper.register_status_generator(self._status_generator)
         self._publish_status()
@@ -1103,6 +1162,24 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self.stop_session(session_id, context)
         return "Ship upgrade session stopped."
 
+    def _step_voice_label(self, step: dict[str, Any]) -> str:
+        """Readable spoken label for a plan step: spec name with grade, plus
+        the engineering target when the step requires one."""
+        item = step.get("item")
+        if item:
+            name, _key, grade = self._module_display(str(item))
+            label = f"{name} {grade}" if grade else name
+        else:
+            label = str(step.get("label") or step.get("id", ""))
+        engineering = step.get("engineering") or {}
+        blueprint = str(
+            engineering.get("BlueprintName") or engineering.get("blueprint") or ""
+        )
+        level = engineering.get("Level") or engineering.get("level")
+        if blueprint and level is not None:
+            label += f", then engineer it with {_blueprint_family_display(blueprint)} grade {int(float(level))}"
+        return label
+
     def _next_step_action(self, session_id=None, context=None) -> str:
         session = self.get_session(session_id, context)
         if session is None:
@@ -1116,7 +1193,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         step = remaining[0]
         return (
             f"Next module, {len(session['completed_steps']) + 1} of "
-            f"{session['total_steps']}: {step.get('label', step['id'])}."
+            f"{session['total_steps']}: {self._step_voice_label(step)}."
         )
 
     def _list_plans_action(self) -> str:
@@ -1127,6 +1204,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f"{plan['plan_name']} for {plan['ship_model']} version {plan['plan_version']}"
             for plan in plans
         )
+
+    def _build_advice_action(self, session_id=None, context=None) -> str:
+        """Full DAG chain rendered as a spoken sequence (spec §16.1)."""
+        session = self.get_session(session_id, context)
+        if session is None:
+            return "There is no active ship upgrade session."
+        target_steps = session["steps"]
+        loadout = self._loadout_for_ship(session["ship_instance_id"])
+        deltas = analyze_build(target_steps, loadout)
+        actions = build_advice(
+            deltas,
+            self._catalog,
+            self._engineer_registry,
+            current_position=self._current_position,
+            ship_name=session.get("ship_custom_name") or None,
+        )
+        return render_chain(actions)
 
     def _preview_changes_action(
         self, args: PlanChangeParams, _context: dict[str, Any]
@@ -1202,6 +1296,53 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
         self._enter_import_state(IMPORT_STATE_IMPORTED)
         log("info", f"Imported Ship Upgrade Manager plan {plan_id} version {record['version']}")
+
+    def _state_query_action(self, args: StateQueryParams, _context: dict[str, Any]) -> str:
+        """Detailed state report for the AI (spec intents.state.query)."""
+        session = self.get_session(None, {"ship_instance_id": args.ship} if args.ship else None)
+        if session is None:
+            ship = args.ship or "the current ship"
+            return f"No active ship upgrade session for {ship}."
+        progress = self._plan_progress_for_session(session)
+        parts = [
+            f"Plan {session['plan_name']} on {progress.get('ship', session['ship_custom_name'] or session['ship_instance_id'])}",
+            f"{progress.get('modules_done', 0)}/{progress.get('modules_total', 0)} modules installed ({progress.get('modules_pct', 0)}%)",
+        ]
+        if progress.get("eng_target"):
+            parts.append(
+                f"engineering {progress.get('eng_current', 0)}/{progress.get('eng_target')} grade levels ({progress.get('eng_pct', 0)}%)"
+            )
+        if progress.get("next_label"):
+            next_label = progress["next_label"]
+            next_class = progress.get("next_class", "")
+            parts.append(f"next module: {next_label} {next_class}".strip())
+        if session.get("paused"):
+            parts.append("session paused")
+        return ". ".join(parts) + "."
+
+    def _plan_progress_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        plan_id = session.get("plan_id") or ""
+        with self.get_db() as db:
+            row = db.execute("SELECT ship_model FROM plans WHERE id = ?", (plan_id,)).fetchone()
+        ship_model = row["ship_model"] if row else ""
+        progress_list = self._plan_progress(plan_id, ship_model)
+        return progress_list[0] if progress_list else {}
+
+    def _goal_declare_action(self, args: GoalParams, _context: dict[str, Any]) -> str:
+        """Activate a plan as the current build goal (spec intents.goal.declare)."""
+        ship_id = self._current_ship_id or self._detect_ship_from_journal().get("id", "")
+        if not ship_id:
+            return "No ship detected from the journal — cannot start a build goal."
+        try:
+            session = self.start_session(args.plan_name, ship_id, self._current_ship_name)
+        except ValueError as error:
+            return f"Cannot activate plan '{args.plan_name}': {error}"
+        return (
+            f"Build goal set: {session['plan_name']} on "
+            f"{session['ship_custom_name'] or session['ship_instance_id']} "
+            f"({session['total_steps']} steps, "
+            f"{len(session['completed_steps'])} already done)."
+        )
 
     def _delete_plan_by_id(self, plan_id: str) -> None:
         try:
@@ -1337,6 +1478,26 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def _handle_ship_event(self, content: dict[str, Any]) -> None:
         event_name = content.get("event")
+        if event_name == "LoadGame":
+            fid = content.get("FID")
+            if fid:
+                self._current_fid = str(fid)
+            return
+        if event_name in {"Location", "FSDJump", "CarrierJump"}:
+            star_pos = content.get("StarPos")
+            if isinstance(star_pos, list) and len(star_pos) == 3:
+                try:
+                    self._current_position = tuple(float(value) for value in star_pos)
+                except (TypeError, ValueError):
+                    pass
+            return
+        if event_name == "EngineerCraft":
+            # The Loadout event that follows carries the new Engineering
+            # state; log for the audit trail and let the watcher refresh.
+            blueprint = content.get("BlueprintName") or ""
+            level = content.get("Level")
+            log("info", f"EngineerCraft: {blueprint} grade {level}")
+            return
         if event_name not in {
             "Loadout",
             "ModuleInfo",
@@ -1486,12 +1647,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
             step for step in session["steps"]
             if step["id"] not in session["completed_steps"]
         ]
-        next_step = remaining[0].get("label", remaining[0]["id"]) if remaining else "complete"
+        next_step = (
+            self._step_voice_label(remaining[0]) if remaining else "complete"
+        )
+        ship = session["ship_custom_name"] or self._ship_display_name(
+            session.get("ship_model", "")
+        ) or session["ship_instance_id"]
         return [
             (
                 "Ship upgrade",
                 f"{session['plan_name']} on "
-                f"{session['ship_custom_name'] or session['ship_instance_id']}: "
+                f"{ship}: "
                 f"{len(session['completed_steps'])}/{session['total_steps']} complete; "
                 f"next: {next_step}",
             )

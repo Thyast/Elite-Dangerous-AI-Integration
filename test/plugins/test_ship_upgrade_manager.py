@@ -967,6 +967,65 @@ def test_slef_kestrel_fixture_parses_full_engineering(tmp_path: Path):
     assert engineering["int_guardianmodulereinforcement_size2_class1"] is None
 
 
+def test_next_step_action_uses_spec_name_and_engineering_target(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {
+            "steps": [
+                {"id": "fsd", "item": "int_hyperdrive_size4_class5"},
+                {
+                    "id": "shield",
+                    "item": "int_shieldgenerator_size5_class3_fast",
+                    "engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 5},
+                },
+            ]
+        },
+    )
+    plugin.start_session("PvE", "SHIP-1")
+    plugin.complete_step("fsd")
+
+    result = plugin._next_step_action()
+
+    assert "Shield Generator 5C" in result
+    assert "Thermic grade 5" in result
+    assert "2 of 2" in result
+
+
+def test_next_step_action_plain_module_has_no_engineering_clause(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "pp", "item": "int_powerplant_size5_class5"}]},
+    )
+    plugin.start_session("PvE", "SHIP-1")
+
+    result = plugin._next_step_action()
+
+    assert "Power Plant 5A" in result
+    assert "engineer" not in result
+
+
+def test_status_generator_uses_spec_name(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "PvE",
+        {"steps": [{"id": "pp", "item": "int_powerplant_size5_class5"}]},
+    )
+    plugin.start_session("PvE", "SHIP-1", "Mina")
+
+    entries = plugin._status_generator({})
+
+    assert len(entries) == 1
+    label, content = entries[0]
+    assert label == "Ship upgrade"
+    assert "Power Plant 5A" in content
+    assert "Mina" in content
+
+
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]})
