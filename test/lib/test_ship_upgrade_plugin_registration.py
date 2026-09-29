@@ -102,7 +102,22 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         "ship_upgrade_current_loadout",
         "ship_upgrade_state",
         "ship_upgrade_goal",
+        "ship_upgrade_missing_materials",
+        "ship_upgrade_material_shortfall",
+        "ship_upgrade_step_materials",
     }
+
+    materials_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_missing_materials"
+    )
+    assert materials_action["cache_prefill"]["quels sont les matériaux manquants"] == {}
+    assert materials_action["cache_prefill"]["quels sont les 5 matériaux qui manquent le plus"] == {"count": 5}
+    step_materials_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_step_materials"
+    )
+    assert "ai-je les matériaux pour la prochaine amélioration" in step_materials_action["cache_prefill"]
 
     next_step_action = next(
         action for action in action_manager.actions
@@ -112,6 +127,7 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
     next_step_prefills = next_step_action["cache_prefill"]
     assert "j'ai un plan actif, quel effet expérimental dois-je appliquer" in next_step_prefills
     assert "what experimental effect should i apply" in next_step_prefills
+    assert "programme l'amélioration suivante" in next_step_prefills
 
     advice_action = next(
         action for action in action_manager.actions

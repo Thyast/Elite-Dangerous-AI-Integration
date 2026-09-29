@@ -68,6 +68,50 @@ def test_analyze_build_detects_missing_and_grade_behind():
     assert by_slot["frameshiftdrive"].grades_needed == [3, 4, 5]
 
 
+def test_engineering_increments_follow_grade_level_and_quality():
+    """Grade N takes N increments (journal Quality +1/N each); an incomplete
+    current grade is finished first."""
+    from plugins.ship_upgrade_manager.planner import engineering_increments
+
+    target = [{"slot": "Armour", "item": "reactive_armour",
+               "engineering": {"BlueprintName": "Armour_Thermic", "Level": 5}}]
+
+    def increments(level, quality):
+        loadout = _loadout([{
+            "Slot": "Armour", "Item": "smallcombat01_nx_armour_reactive",
+            "Engineering": {"BlueprintName": "Armour_Thermic", "Level": level, "Quality": quality},
+        }])
+        return engineering_increments(analyze_build(target, loadout)[0])
+
+    assert increments(2, 1.0) == [(3, 3), (4, 4), (5, 5)]
+    assert increments(2, 0.5) == [(2, 1), (3, 3), (4, 4), (5, 5)]
+    assert increments(3, 0.3329) == [(3, 2), (4, 4), (5, 5)]
+    missing = analyze_build(target, _loadout([]))[0]
+    assert engineering_increments(missing) == [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
+
+
+def test_target_grade_counts_only_when_complete():
+    """Max effect needs the grade completed: G5 at Quality 0.8 still needs
+    one grade-5 increment; Quality 1.0 (or unknown) is installed."""
+    from plugins.ship_upgrade_manager.planner import engineering_increments, grade_reached
+
+    target = [{"slot": "Armour", "item": "reactive_armour",
+               "engineering": {"BlueprintName": "Armour_Thermic", "Level": 5}}]
+
+    def delta(engineering):
+        loadout = _loadout([{"Slot": "Armour", "Item": "smallcombat01_nx_armour_reactive",
+                             "Engineering": {"BlueprintName": "Armour_Thermic", **engineering}}])
+        return analyze_build(target, loadout)[0]
+
+    partial = delta({"Level": 5, "Quality": 0.8})
+    assert partial.status == "grade_behind"
+    assert engineering_increments(partial) == [(5, 1)]
+    assert delta({"Level": 5, "Quality": 1.0}).status == "installed"
+    assert delta({"Level": 5}).status == "installed"
+    assert grade_reached(5, 0.2, 4) is True
+    assert grade_reached(4, 1.0, 5) is False
+
+
 def test_analyze_build_flags_missing_module():
     target = [{"slot": "Slot01_Size5", "item": "Int_ShieldGenerator_Size5_Class3_Fast",
                "engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 5}}]

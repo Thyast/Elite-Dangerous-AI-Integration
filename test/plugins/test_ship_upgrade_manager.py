@@ -1192,6 +1192,477 @@ def test_status_generator_uses_spec_name(tmp_path: Path):
     assert "Mina" in content
 
 
+def _kestrel_armour_plan(plugin: ShipUpgradeManagerPlugin) -> None:
+    plugin.import_plan(
+        "smallcombat01_nx",
+        "Imported Kestrel Mk II",
+        {
+            "steps": [
+                {
+                    "id": "module_0",
+                    "slot": "Armour",
+                    "item": "smallcombat01_nx_armour_reactive",
+                    "engineering": {
+                        "BlueprintName": "Armour_Thermic",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_armour_chunky",
+                    },
+                },
+                {
+                    "id": "module_1",
+                    "slot": "PowerPlant",
+                    "item": "Int_Powerplant_Size5_Class5",
+                    "engineering": {
+                        "BlueprintName": "PowerPlant_Armoured",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_powerplant_cooled",
+                    },
+                },
+            ]
+        },
+    )
+
+
+def _kestrel_loadout(armour_level: int = 2) -> dict:
+    return {
+        "event": "Loadout",
+        "Ship": "smallcombat01_nx",
+        "ShipID": 15,
+        "Modules": [
+            {
+                "Slot": "Armour",
+                "Item": "smallcombat01_nx_armour_reactive",
+                "Engineering": {"BlueprintName": "Armour_Thermic", "Level": armour_level, "Quality": 0.5},
+            },
+            {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"},
+        ],
+    }
+
+
+def _armour_craft(level: int, apply_effect: bool = False) -> dict:
+    craft = {
+        "event": "EngineerCraft",
+        "Slot": "Armour",
+        "Module": "smallcombat01_nx_armour_reactive",
+        "Engineer": "Selene Jean",
+        "EngineerID": 300210,
+        "BlueprintName": "Armour_Thermic",
+        "Level": level,
+        "Quality": 1.0,
+        "ExperimentalEffect": "special_armour_chunky",
+        "ExperimentalEffect_Localised": "Deep Plating",
+    }
+    if apply_effect:
+        craft["ApplyExperimentalEffect"] = "special_armour_chunky"
+    return craft
+
+
+def test_engineer_craft_without_following_loadout_completes_step(tmp_path: Path):
+    """The game writes no Loadout after crafting: EngineerCraft must count."""
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+    plugin.start_session("Imported Kestrel Mk II", "15")
+    plugin._on_event(GameEvent(content=_kestrel_loadout(2), historic=False), {})
+    assert plugin.get_session()["completed_steps"] == []
+
+    plugin._on_event(GameEvent(content=_armour_craft(2, apply_effect=True), historic=False), {})
+    plugin._on_event(GameEvent(content=_armour_craft(4), historic=False), {})
+    assert plugin.get_session()["completed_steps"] == []
+
+    plugin._on_event(GameEvent(content=_armour_craft(5), historic=False), {})
+    assert plugin.get_session()["completed_steps"] == ["module_0"]
+    armour = next(m for m in plugin._current_loadout_modules if m["Slot"] == "Armour")
+    assert armour["Engineering"]["Level"] == 5
+    assert armour["Engineering"]["ExperimentalEffect"] == "special_armour_chunky"
+    assert "Power Plant" in plugin._next_step_action()
+
+
+def test_journal_baseline_applies_engineer_crafts_after_last_loadout(
+    tmp_path: Path, monkeypatch
+):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    lines = [
+        _kestrel_loadout(2),
+        _armour_craft(2, apply_effect=True),
+        _armour_craft(5),
+    ]
+    (journal_dir / "Journal.2026-09-29T191357.01.log").write_text(
+        "\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+    session = plugin.start_session("Imported Kestrel Mk II", "15")
+
+    assert session["completed_steps"] == ["module_0"]
+
+
+def test_journal_baseline_ignores_crafts_made_on_another_ship(
+    tmp_path: Path, monkeypatch
+):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    other_ship = {**_kestrel_loadout(2), "ShipID": 99}
+    lines = [_kestrel_loadout(2), other_ship, _armour_craft(5)]
+    (journal_dir / "Journal.2026-09-29T191357.01.log").write_text(
+        "\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+
+    assert plugin.start_session("Imported Kestrel Mk II", "15")["completed_steps"] == []
+
+
+def test_baseline_requires_planned_experimental_effect(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    step = {
+        "id": "armour",
+        "item": "smallcombat01_nx_armour_reactive",
+        "engineering": {
+            "BlueprintName": "Armour_Thermic",
+            "Level": 5,
+            "ExperimentalEffect": "special_armour_chunky",
+        },
+    }
+    without_effect = [{
+        "Slot": "Armour",
+        "Item": "smallcombat01_nx_armour_reactive",
+        "Engineering": {"BlueprintName": "Armour_Thermic", "Level": 5},
+    }]
+    with_effect = [{
+        "Slot": "Armour",
+        "Item": "smallcombat01_nx_armour_reactive",
+        "Engineering": {
+            "BlueprintName": "Armour_Thermic",
+            "Level": 5,
+            "ExperimentalEffect": "special_armour_chunky",
+        },
+    }]
+
+    assert plugin._steps_satisfied_by_loadout([step], without_effect) == []
+    assert plugin._steps_satisfied_by_loadout([step], with_effect) == ["armour"]
+
+
+def test_module_info_keeps_known_engineering(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin._on_event(GameEvent(content=_kestrel_loadout(5), historic=False), {})
+    plugin._on_event(
+        GameEvent(
+            content={
+                "event": "ModuleInfo",
+                "Modules": [
+                    {"Slot": "Armour", "Item": "smallcombat01_nx_armour_reactive"},
+                    {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"},
+                ],
+            },
+            historic=False,
+        ),
+        {},
+    )
+    armour = next(m for m in plugin._current_loadout_modules if m["Slot"] == "Armour")
+    assert armour["Engineering"]["Level"] == 5
+
+
+class _MaterialsEventManager:
+    def __init__(self, materials: dict | None):
+        self.materials = materials
+
+    def get_current_state(self):
+        return [], ({"Materials": self.materials} if self.materials is not None else {})
+
+
+def _materials_state(raw=None, manufactured=None, encoded=None) -> dict:
+    def entries(counts):
+        return [{"Name": name, "Count": count} for name, count in (counts or {}).items()]
+
+    return {
+        "Raw": entries(raw),
+        "Manufactured": entries(manufactured),
+        "Encoded": entries(encoded),
+        "LastUpdated": "2026-09-29T10:00:00Z",
+    }
+
+
+# Kestrel plan vs armour at Thermic grade 2, Quality 0.5 (Deep Plating
+# already applied). Grade N costs N increments of its recipe, so the armour
+# needs 1 increment of G2 then 3 x G3, 4 x G4, 5 x G5 (matches the real
+# journal EngineerCraft sequence); the power plant needs G1..G5 in full plus
+# Thermal Spread. 20 material types; with this stock 19 are missing
+# (84 units): Vanadium 9, Tungsten 9, then 5 each of Carbon, Compound
+# Shielding, Core Dynamics Composites, Grid Resistors, Heat Vanes, ...
+_KESTREL_STOCK = {"raw": {"vanadium": 1}, "manufactured": {"heatexchangers": 30}}
+
+
+def _kestrel_materials_plugin(
+    tmp_path: Path, materials: dict | None, deep_plating_applied: bool = True
+) -> ShipUpgradeManagerPlugin:
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+    plugin.start_session("Imported Kestrel Mk II", "15")
+    loadout = _kestrel_loadout(2)
+    if deep_plating_applied:
+        loadout["Modules"][0]["Engineering"]["ExperimentalEffect"] = "special_armour_chunky"
+    plugin._on_event(GameEvent(content=loadout, historic=False), {})
+    plugin.helper._event_manager = _MaterialsEventManager(materials)
+    return plugin
+
+
+def test_missing_materials_summary_counts_types_and_gives_top_three_only(tmp_path: Path):
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import MissingMaterialsParams
+
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._missing_materials_action(MissingMaterialsParams(), {})
+
+    assert "19 material types still need to be collected" in reply
+    assert "(84 units in total)" in reply
+    assert "Vanadium: 9 missing; Tungsten: 9 missing; Carbon: 5 missing." in reply
+    assert "Grid Resistors" not in reply
+    assert "Heat Exchangers" not in reply
+
+
+def test_top_missing_materials_lists_count_with_collection_plan(tmp_path: Path):
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import MissingMaterialsParams
+
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._missing_materials_action(MissingMaterialsParams(count=7), {})
+
+    assert "The 7 most missing materials" in reply
+    assert "1. Vanadium (Raw grade 2): missing 9 (need 10, have 1)" in reply
+    assert "2. Tungsten" in reply
+    assert "6. Grid Resistors (Manufactured grade 1, family Capacitors): missing 5" in reply
+    # Only surplus stock beyond the plan's own need is traded (30 - 3),
+    # 6 Heat Exchangers per Heat Vane; the rest must be collected.
+    assert (
+        "7. Heat Vanes (Manufactured grade 4, family Heat): missing 5 (need 5, have 0); "
+        "trade surplus stock at a manufactured material trader: "
+        "24 Heat Exchangers (grade 3) for 4; collect 1 more from"
+    ) in reply
+    assert "8." not in reply
+
+
+def test_material_shortfall_reports_quantity_for_named_material(tmp_path: Path):
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import MaterialQueryParams
+
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._material_shortfall_action(MaterialQueryParams(material="vanadium"), {})
+    assert "Vanadium (Raw grade 2): missing 9 (need 10, have 1)" in reply
+    assert "Power Plant 5A" in reply
+
+    fuzzy = plugin._material_shortfall_action(MaterialQueryParams(material="heat vane"), {})
+    assert "Heat Vanes" in fuzzy and "missing 5" in fuzzy
+
+    enough = plugin._material_shortfall_action(MaterialQueryParams(material="Heat Exchangers"), {})
+    assert "You have enough Heat Exchangers" in enough
+
+    unused = plugin._material_shortfall_action(MaterialQueryParams(material="Iron"), {})
+    assert "Iron is not needed by the remaining upgrades" in unused
+
+
+def test_next_step_warns_automatically_about_missing_materials(tmp_path: Path):
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._next_step_action()
+
+    assert "Reactive Surface Composite" in reply
+    assert "Warning: materials are missing for this upgrade, 10 types" in reply
+    assert "Molybdenum (missing 5)" in reply
+    assert "and 7 more" in reply
+
+
+def test_next_step_confirms_materials_when_stock_is_sufficient(tmp_path: Path):
+    # Exactly the ingredients of the journal sequence G2 (Quality 0.5) -> G5.
+    stock = {
+        "raw": {"nickel": 1, "vanadium": 3, "tungsten": 4, "molybdenum": 5},
+        "manufactured": {
+            "heatdispersionplate": 1, "heatexchangers": 3, "salvagedalloys": 3,
+            "galvanisingalloys": 4, "heatvanes": 4, "phasealloys": 5,
+            "protoheatradiators": 5,
+        },
+    }
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**stock))
+
+    reply = plugin._next_step_action()
+
+    assert "you have everything needed for this engineering" in reply
+
+    stock["raw"]["molybdenum"] = 4
+    plugin.helper._event_manager = _MaterialsEventManager(_materials_state(**stock))
+    assert "Molybdenum (missing 1)" in plugin._next_step_action()
+
+
+def test_next_step_reports_unchecked_stock_without_inventory(tmp_path: Path):
+    plugin = _kestrel_materials_plugin(tmp_path, None)
+
+    reply = plugin._next_step_action()
+
+    assert "Material stock could not be checked" in reply
+
+
+def test_step_materials_details_for_named_module(tmp_path: Path):
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import StepMaterialsParams
+
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._step_materials_action(StepMaterialsParams(module="power plant"), {})
+
+    assert "Materials for Power Plant 5A" in reply
+    assert "Grid Resistors: need 5, have 0, missing 5" in reply
+    assert "Vanadium: need 7, have 1, missing 6" in reply
+    assert "Proprietary Composites: need 4" in reply
+    assert "12 material types are missing." in reply
+
+    next_reply = plugin._step_materials_action(StepMaterialsParams(), {})
+    assert "Materials for Reactive Surface Composite" in next_reply
+    assert "Heat Exchangers: need 3, have 30." in next_reply
+    assert "Vanadium: need 3, have 1, missing 2" in next_reply
+    # The unfinished grade 2 increment (Quality 0.5) is counted.
+    assert "Nickel: need 1, have 0, missing 1" in next_reply
+    assert "Compact Composites" not in next_reply
+
+
+def test_step_materials_counts_experimental_effect_not_yet_applied(tmp_path: Path):
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import StepMaterialsParams
+
+    plugin = _kestrel_materials_plugin(
+        tmp_path, _materials_state(**_KESTREL_STOCK), deep_plating_applied=False
+    )
+
+    reply = plugin._step_materials_action(StepMaterialsParams(), {})
+
+    # Deep Plating is applied once: 5 Compact Composites, 3 Mechanical
+    # Equipment, 2 Molybdenum (+5 Molybdenum for the 5 grade-5 increments).
+    assert "Compact Composites: need 5, have 0, missing 5" in reply
+    assert "Mechanical Equipment: need 3, have 0, missing 3" in reply
+    assert "Molybdenum: need 7, have 0, missing 7" in reply
+
+
+def test_incomplete_target_grade_does_not_complete_step(tmp_path: Path):
+    """G5 reached at Quality 0.8 has no max effect yet: the step stays open,
+    progress counts completed grades only and one G5 increment is needed."""
+    from plugins.ship_upgrade_manager.ship_upgrade_manager import StepMaterialsParams
+
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+    partial = {**_armour_craft(5), "Quality": 0.8}
+    plugin._on_event(GameEvent(content=partial, historic=False), {})
+
+    assert plugin.get_session()["completed_steps"] == []
+    armour_step = plugin.get_session()["steps"][0]
+    assert plugin._steps_satisfied_by_loadout([armour_step], plugin._current_loadout_modules) == []
+    assert plugin._progress_metrics([armour_step], plugin._current_loadout_modules)["eng_current"] == 4
+
+    reply = plugin._step_materials_action(StepMaterialsParams(), {})
+    assert "Phase Alloys: need 1" in reply
+    assert "Molybdenum: need 1" in reply
+    assert "Heat Vanes" not in reply
+
+    plugin._on_event(GameEvent(content=_armour_craft(5), historic=False), {})
+    assert plugin.get_session()["completed_steps"] == ["module_0"]
+
+
+def test_build_advice_marks_grades_with_missing_materials(tmp_path: Path):
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._build_advice_action()
+
+    assert "armour_thermic, grade 2 (materials missing)" in reply
+    assert "armour_thermic, grade 5 (5 increments) (materials missing)" in reply
+    assert "Materials: 19 material types are missing (84 units)" in reply
+
+
+def test_material_plan_trades_down_surplus_and_flags_storage_cap():
+    from plugins.ship_upgrade_manager.materials import (
+        MaterialReference,
+        MaterialTotal,
+        acquisition_plan,
+        inventory_from_state,
+        shortfalls,
+    )
+
+    reference = MaterialReference(
+        {"Raw": [{"Name": "carbon"}, {"Name": "vanadium"}]},
+        {"carbon": "Carbon", "vanadium": "Vanadium"},
+        {"Raw": {1: {1: ["carbon"], 2: ["vanadium"], "source": "Somewhere"}}},
+    )
+    totals = {"carbon": MaterialTotal("carbon", 400, ["pp"])}
+    inventory = {"vanadium": 10}
+
+    [row] = shortfalls(totals, inventory, reference)
+    plan = acquisition_plan(row, inventory, totals, reference)
+
+    assert "10 Vanadium (grade 2) for 30" in plan
+    assert "collect 370 more from known farming spot for its family: Somewhere" in plan
+    assert "storage is capped at 300" in plan
+    assert inventory_from_state({"Raw": [{"Name": "carbon", "Count": 0}]}) is None
+
+
+@pytest.mark.parametrize(
+    "session_id", ["Kestrel Mk II", "15", "smallcombat01_nx", "Imported Kestrel Mk II", "current"]
+)
+def test_ai_session_labels_resolve_to_active_session(tmp_path: Path, session_id: str):
+    """The AI passes plan/ship labels, never the internal session hash."""
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+    plugin.start_session("Imported Kestrel Mk II", "15")
+
+    reply = plugin._next_step_action(session_id)
+
+    assert "no active" not in reply.lower()
+    assert "1 of 2" in reply
+
+
+def test_state_query_resolves_ship_model(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+    plugin.start_session("Imported Kestrel Mk II", "15")
+
+    class Args:
+        ship = "smallcombat01_nx"
+
+    reply = plugin._state_query_action(Args(), {})
+
+    assert "No active" not in reply
+    assert "Imported Kestrel Mk II" in reply
+
+
+def test_session_label_picks_matching_ship_among_several(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "Mining", {"steps": [{"id": "laser"}]})
+    plugin.import_plan("Vulture", "Combat", {"steps": [{"id": "shield"}]})
+    mining = plugin.start_session("Mining", "SHIP-1", "Digger")
+    combat = plugin.start_session("Combat", "SHIP-2", "Hawk")
+
+    assert plugin.get_session("Digger")["id"] == mining["id"]
+    assert plugin.get_session("combat")["id"] == combat["id"]
+    assert plugin.get_session("unknown ship") is None
+
+
+def test_goal_action_keeps_existing_session_progress(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    _kestrel_armour_plan(plugin)
+    plugin.start_session("Imported Kestrel Mk II", "15")
+    plugin.complete_step("module_0")
+    plugin._current_ship_id = "15"
+
+    class Args:
+        plan_name = "Imported Kestrel Mk II"
+
+    reply = plugin._goal_declare_action(Args(), {})
+
+    assert "already active" in reply
+    assert plugin.get_session()["completed_steps"] == ["module_0"]
+
+
 def test_build_advice_works_from_imported_plan_without_active_session(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.helper = None

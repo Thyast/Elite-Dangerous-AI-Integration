@@ -34,7 +34,17 @@ from lib.PluginSettingDefinitions import (
     TextSetting,
 )
 from .parsers import PlanParseError, parse_plan_input
-from .planner import analyze_build, build_advice, canonical_item, render_chain
+from .planner import analyze_build, build_advice, canonical_item, grade_reached, render_chain
+from .materials import (
+    MaterialReference,
+    StepNeed,
+    acquisition_plan,
+    aggregate_needs,
+    inventory_from_state,
+    material_status,
+    shortfalls,
+    step_need,
+)
 
 
 PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
@@ -168,6 +178,48 @@ def _engineering_catalog_display_name(
     if not identifier:
         return ""
     return _engineering_catalog_names(filename, id_field).get(identifier, identifier)
+
+
+@lru_cache(maxsize=1)
+def _specials_catalog() -> dict[str, Any]:
+    """Experimental effects with their material recipe (assets/specials.json)."""
+    catalog_path = Path(__file__).resolve().parent / "assets" / "specials.json"
+    try:
+        with catalog_path.open(encoding="utf-8") as handle:
+            catalog = json.load(handle)
+    except (OSError, json.JSONDecodeError) as error:
+        log("warning", f"Ship Upgrade Manager specials catalog load failed: {error}")
+        return {}
+    return catalog if isinstance(catalog, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _material_reference() -> MaterialReference:
+    """Material names, grades, families and sources shared with material_finder."""
+    from lib.actions.data import (
+        display_names,
+        ship_encoded_materials_map,
+        ship_manufactured_materials_map,
+        ship_raw_materials_map,
+    )
+
+    with open(get_asset_path("materials.json"), encoding="utf-8") as handle:
+        template = json.load(handle)
+    return MaterialReference(
+        template,
+        display_names,
+        {
+            "Raw": ship_raw_materials_map,
+            "Manufactured": ship_manufactured_materials_map,
+            "Encoded": ship_encoded_materials_map,
+        },
+    )
+
+
+MATERIALS_UNAVAILABLE = (
+    "Your material inventory has not been reported by the game yet, so "
+    "stock cannot be compared with the upgrade needs."
+)
 
 
 # Class (1-5) to E:D letter grade: 1=E, 2=D, 3=C, 4=B, 5=A.
@@ -410,6 +462,35 @@ class BuildAdviceParams(BaseModel):
 
 class PlanChangeParams(BaseModel):
     plan_input: str = Field(description="JSON loadout or supported plan URL")
+
+
+class MissingMaterialsParams(BaseModel):
+    count: int | None = Field(
+        default=None,
+        description=(
+            "Number of most-missing materials to list with a collection plan, "
+            "only when the player asks for a specific number. Leave empty when "
+            "the player asks generically which materials are missing."
+        ),
+    )
+    session_id: str | None = Field(default=None, description="Optional session id")
+
+
+class MaterialQueryParams(BaseModel):
+    material: str = Field(
+        description="Engineering material named by the player, e.g. 'Proprietary Composites'"
+    )
+    session_id: str | None = Field(default=None, description="Optional session id")
+
+
+class StepMaterialsParams(BaseModel):
+    module: str | None = Field(
+        default=None,
+        description=(
+            "Optional plan module to check. Leave empty to check the next upgrade."
+        ),
+    )
+    session_id: str | None = Field(default=None, description="Optional session id")
 
 
 class ShipUpgradeManagerPlugin(PluginBase):
@@ -900,6 +981,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                         or ""
                     ),
                     "level": engineering.get("Level") or engineering.get("level"),
+                    "quality": engineering.get("Quality"),
                 }
             )
         used = [False] * len(available)
@@ -957,22 +1039,30 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if required_level is None:
                 satisfied = True
                 eng_current = None
+                eng_completed = None
             else:
                 blueprint_ok = required_blueprint and self._blueprint_key(
                     candidate["blueprint"]
                 ) == self._blueprint_key(required_blueprint)
                 satisfied = bool(
                     blueprint_ok
-                    and current_level is not None
-                    and current_level >= int(float(required_level))
+                    and grade_reached(current_level, candidate["quality"], required_level)
                 )
                 eng_current = current_level if blueprint_ok else 0
+                # Only fully completed grades (Quality 1.0) give their effect.
+                eng_completed = (
+                    0 if not blueprint_ok or current_level is None
+                    else current_level
+                    if grade_reached(current_level, candidate["quality"], current_level)
+                    else current_level - 1
+                )
             results.append(
                 {
                     "step": step,
                     "installed": True,
                     "slot": candidate["slot"],
                     "eng_current": eng_current,
+                    "eng_completed": eng_completed,
                     "eng_blueprint_id": candidate["blueprint"],
                     "satisfied": satisfied,
                 }
@@ -986,8 +1076,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
         Modules: installed steps matched one-to-one against the loadout (slot
         preferred when known). Engineering: for steps that require it, the sum
-        of target levels vs the sum of levels currently reached — a level only
-        counts when the blueprint matches the target (strict)."""
+        of target levels vs the sum of completed levels (Quality 1.0) — a
+        level only counts when the blueprint matches the target (strict)."""
         matches = self._match_steps(steps, modules)
         modules_done = sum(1 for match in matches if match["installed"])
         eng_target = 0
@@ -1000,8 +1090,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
             # The target sums every engineering step of the plan, whether or
             # not the module is installed yet.
             eng_target += int(float(required_level))
-            if match["eng_current"] is not None:
-                eng_current += match["eng_current"]
+            if match.get("eng_completed") is not None:
+                eng_current += match["eng_completed"]
         total = len(steps)
         return {
             "modules_done": modules_done,
@@ -1187,7 +1277,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "for questions about what engineering modification or experimental "
                 "effect to apply next, even when the player is not asking for a "
                 "complete route. Never infer an experimental effect that is absent "
-                "from the plan."
+                "from the plan. The reply automatically warns when engineering "
+                "materials are missing for this upgrade; relay that warning."
             ),
             parameters=SessionActionParams,
             method=lambda args, context: self._next_step_action(args.session_id, context),
@@ -1198,6 +1289,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "quel effet expérimental appliquer au prochain module": {},
                 "what experimental effect should i apply": {},
                 "which experimental effect should i apply to the next module": {},
+                "programme l'amélioration suivante": {},
+                "programme la prochaine amélioration": {},
+                "quelle est la prochaine amélioration": {},
+                "schedule the next upgrade": {},
+                "what is the next upgrade": {},
             },
         )
         helper.register_action(
@@ -1359,6 +1455,73 @@ class ShipUpgradeManagerPlugin(PluginBase):
             method=self._goal_declare_action,
             action_type="ship",
         )
+        helper.register_action(
+            name="ship_upgrade_missing_materials",
+            description=(
+                "Compare the commander's engineering material stock with every "
+                "material still needed by the remaining upgrades of the active or "
+                "imported ship build (blueprint grades and experimental effects). "
+                "Without count: reply how many material types must still be "
+                "collected and the missing quantity of the top 3 only; never "
+                "enumerate all missing materials. With count (the player asks for "
+                "the N most missing materials): list those N materials with a plan "
+                "to obtain each one (material trader exchanges from surplus stock, "
+                "then known sources)."
+            ),
+            parameters=MissingMaterialsParams,
+            method=self._missing_materials_action,
+            action_type="ship",
+            input_template=lambda _args, _states: "Check missing engineering materials",
+            cache_prefill={
+                "quels sont les matériaux manquants": {},
+                "quels matériaux me manquent": {},
+                "quels matériaux manque-t-il": {},
+                "il me manque quels matériaux": {},
+                "which materials am i missing": {},
+                "what materials are missing": {},
+                "which materials are missing for my build": {},
+                "quels sont les 3 matériaux qui manquent le plus": {"count": 3},
+                "quels sont les 5 matériaux qui manquent le plus": {"count": 5},
+                "quels sont les 10 matériaux qui manquent le plus": {"count": 10},
+                "what are the 5 most missing materials": {"count": 5},
+                "what are the 10 most missing materials": {"count": 10},
+            },
+        )
+        helper.register_action(
+            name="ship_upgrade_material_shortfall",
+            description=(
+                "Report how many units of one named engineering material the "
+                "remaining ship upgrades need, how many the commander has, how many "
+                "are missing, which modules use it, and how to obtain the rest."
+            ),
+            parameters=MaterialQueryParams,
+            method=self._material_shortfall_action,
+            action_type="ship",
+            input_template=lambda args, _states: f"Check material {args.get('material', '')}",
+        )
+        helper.register_action(
+            name="ship_upgrade_step_materials",
+            description=(
+                "List the engineering materials (blueprint grades and experimental "
+                "effect) required by the next ship upgrade, or by a named plan "
+                "module, with need, stock and missing quantities. Use when the "
+                "player asks to check whether they have the materials for the next "
+                "upgrade or for the materials details of an upgrade."
+            ),
+            parameters=StepMaterialsParams,
+            method=self._step_materials_action,
+            action_type="ship",
+            input_template=lambda _args, _states: "Check materials for the upgrade",
+            cache_prefill={
+                "ai-je les matériaux pour la prochaine amélioration": {},
+                "vérifie les matériaux pour la prochaine amélioration": {},
+                "est-ce que j'ai assez de matériaux pour l'amélioration suivante": {},
+                "quels matériaux faut-il pour la prochaine amélioration": {},
+                "do i have the materials for the next upgrade": {},
+                "check materials for the next upgrade": {},
+                "what materials does the next upgrade need": {},
+            },
+        )
         helper.register_sideeffect(self._on_event)
         helper.register_status_generator(self._status_generator)
         self._publish_status()
@@ -1481,6 +1644,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return (
             f"Next module, {len(session['completed_steps']) + 1} of "
             f"{session['total_steps']}: {self._step_voice_label(step)}."
+            + self._next_step_materials_warning(step, session["ship_instance_id"])
         )
 
     def _list_plans_action(self) -> str:
@@ -1539,6 +1703,276 @@ class ShipUpgradeManagerPlugin(PluginBase):
         label = str(step.get("label") or step.get("id", ""))
         return normalized_query in re.sub(r"[^a-z0-9]", "", label.casefold())
 
+    def _upgrade_target(self, session_id=None, context=None) -> dict[str, Any] | str:
+        """Active session target, else the latest imported plan for the
+        current ship; a spoken explanation when neither is usable."""
+        session = self.get_session(session_id, context)
+        if session is not None:
+            return {
+                "plan_name": session["plan_name"],
+                "steps": session["steps"],
+                "completed": set(session["completed_steps"]),
+                "ship_instance_id": session["ship_instance_id"],
+                "ship_name": session.get("ship_custom_name") or None,
+                "session": True,
+            }
+        # An imported target plan is sufficient to plan the build; do not
+        # require the user to activate progress tracking.
+        last_import = self._load_last_import()
+        with self.get_db() as db:
+            if last_import and last_import.get("plan_id"):
+                plan_row = db.execute(
+                    "SELECT id, plan_name, ship_model, source_json FROM plans WHERE id = ?",
+                    (last_import["plan_id"],),
+                ).fetchone()
+            else:
+                plan_row = db.execute(
+                    "SELECT id, plan_name, ship_model, source_json FROM plans ORDER BY last_modified DESC LIMIT 1"
+                ).fetchone()
+        if plan_row is None:
+            return "No target build is imported yet. Import a target build in the Plans settings first."
+        plan = dict(plan_row)
+        detected = self._detect_ship_from_journal() if not self._current_ship_id else {}
+        ship_instance_id = self._current_ship_id or detected.get("id", "")
+        if not ship_instance_id:
+            return "I found the target build, but cannot identify the current ship from the Journal yet."
+        return {
+            "plan_name": plan["plan_name"],
+            "steps": self._plan_steps(plan["source_json"]),
+            "completed": set(),
+            "ship_instance_id": ship_instance_id,
+            "ship_name": self._current_ship_name or detected.get("name") or None,
+            "session": False,
+        }
+
+    @staticmethod
+    def _remaining_steps(target: dict[str, Any]) -> list[dict[str, Any]]:
+        return [step for step in target["steps"] if step.get("id") not in target["completed"]]
+
+    def _next_target_step(self, target: dict[str, Any]) -> dict[str, Any] | None:
+        """Next upgrade: first uncompleted session step, else the first plan
+        step the current loadout does not satisfy."""
+        remaining = self._remaining_steps(target)
+        if target["session"]:
+            return remaining[0] if remaining else None
+        loadout = self._loadout_for_ship(target["ship_instance_id"])
+        return next(
+            (step for step in remaining if not self._step_satisfied_by_loadout(step, loadout)),
+            None,
+        )
+
+    def _material_inventory(self) -> dict[str, int] | None:
+        """Ship engineering materials (Raw/Manufactured/Encoded) from the
+        runtime Materials projection; None when unavailable."""
+        event_manager = getattr(self.helper, "_event_manager", None)
+        if event_manager is None:
+            return None
+        _events, states = event_manager.get_current_state()
+        return inventory_from_state(states.get("Materials"))
+
+    def _step_material_needs(
+        self, steps: list[dict[str, Any]], ship_instance_id: str
+    ) -> list[StepNeed]:
+        """Remaining engineering material needs of each step vs the loadout."""
+        if not steps:
+            return []
+        deltas = analyze_build(steps, self._loadout_for_ship(ship_instance_id))
+        reference = _material_reference()
+        specials = _specials_catalog()
+        return [
+            step_need(str(step.get("id", "")), delta, self._catalog, specials, reference)
+            for step, delta in zip(steps, deltas)
+        ]
+
+    def _step_short_label(self, step: dict[str, Any]) -> str:
+        item = step.get("item")
+        if item:
+            name, _key, grade = self._module_display(str(item))
+            return f"{name} {grade}" if grade else name
+        return str(step.get("label") or step.get("id", ""))
+
+    @staticmethod
+    def _unknown_costs_note(needs: list[StepNeed]) -> str:
+        unknown = sorted({entry for need in needs for entry in need.unknown})
+        if not unknown:
+            return ""
+        return (
+            " Material costs are unknown and not counted for: "
+            + ", ".join(unknown)
+            + "."
+        )
+
+    def _materials_overview(self, steps: list[dict[str, Any]], ship_instance_id: str) -> str:
+        """One-sentence stock check for a set of steps (used by the route)."""
+        inventory = self._material_inventory()
+        if inventory is None:
+            return ""
+        needs = self._step_material_needs(steps, ship_instance_id)
+        totals = aggregate_needs(needs)
+        if not totals:
+            return ""
+        missing = shortfalls(totals, inventory, _material_reference())
+        if not missing:
+            return " Materials: everything required is in stock."
+        return (
+            f" Materials: {len(missing)} material types are missing "
+            f"({sum(row.missing for row in missing)} units); ask for the most "
+            "missing materials to get a collection plan."
+        )
+
+    def _next_step_materials_warning(self, step: dict[str, Any], ship_instance_id: str) -> str:
+        """Automatic stock warning appended when the next upgrade is announced."""
+        needs = self._step_material_needs([step], ship_instance_id)
+        if not needs or not needs[0].engineering:
+            return ""
+        need = needs[0]
+        unknown = self._unknown_costs_note(needs)
+        inventory = self._material_inventory()
+        if inventory is None:
+            return (
+                " Material stock could not be checked: the game has not reported "
+                "the material inventory yet." + unknown
+            )
+        missing = shortfalls(aggregate_needs([need]), inventory, _material_reference())
+        if not missing:
+            return " Materials check: you have everything needed for this engineering." + unknown
+        shown = ", ".join(f"{row.name} (missing {row.missing})" for row in missing[:3])
+        more = f" and {len(missing) - 3} more" if len(missing) > 3 else ""
+        return (
+            f" Warning: materials are missing for this upgrade, {len(missing)} "
+            f"types: {shown}{more}. Ask for this upgrade's materials for details."
+            + unknown
+        )
+
+    def _missing_materials_action(
+        self, args: MissingMaterialsParams, context: dict[str, Any] | None = None
+    ) -> str:
+        target = self._upgrade_target(args.session_id, context)
+        if isinstance(target, str):
+            return target
+        inventory = self._material_inventory()
+        if inventory is None:
+            return MATERIALS_UNAVAILABLE
+        needs = self._step_material_needs(
+            self._remaining_steps(target), target["ship_instance_id"]
+        )
+        unknown = self._unknown_costs_note(needs)
+        totals = aggregate_needs(needs)
+        plan_name = target["plan_name"]
+        if not totals:
+            return f"The remaining upgrades of {plan_name} need no engineering materials." + unknown
+        reference = _material_reference()
+        missing = shortfalls(totals, inventory, reference)
+        if not missing:
+            return (
+                f"You already have all {len(totals)} material types needed for the "
+                f"remaining upgrades of {plan_name}." + unknown
+            )
+        if args.count is None:
+            top = "; ".join(f"{row.name}: {row.missing} missing" for row in missing[:3])
+            return (
+                f"{len(missing)} material types still need to be collected to complete "
+                f"{plan_name} ({sum(row.missing for row in missing)} units in total). "
+                f"The most missing: {top}." + unknown
+            )
+        count = max(1, min(int(args.count), 20))
+        selected = missing[:count]
+        plans = " ".join(
+            f"{index}. {acquisition_plan(row, inventory, totals, reference)}"
+            for index, row in enumerate(selected, 1)
+        )
+        return (
+            f"The {len(selected)} most missing materials for {plan_name} "
+            f"(out of {len(missing)} missing types): {plans} "
+            "The nearest material trader can be located on request with a station search."
+            + unknown
+        )
+
+    def _material_shortfall_action(
+        self, args: MaterialQueryParams, context: dict[str, Any] | None = None
+    ) -> str:
+        target = self._upgrade_target(args.session_id, context)
+        if isinstance(target, str):
+            return target
+        remaining = self._remaining_steps(target)
+        needs = self._step_material_needs(remaining, target["ship_instance_id"])
+        totals = aggregate_needs(needs)
+        reference = _material_reference()
+        material_id = reference.resolve(args.material, candidates=totals) or reference.resolve(args.material)
+        if material_id is None:
+            return (
+                f"'{args.material}' does not match a single ship engineering "
+                "material; ask the player for its full name."
+            )
+        name = reference.name(material_id)
+        inventory = self._material_inventory()
+        plan_name = target["plan_name"]
+        if material_id not in totals:
+            stock = f" You have {inventory.get(material_id, 0)}." if inventory is not None else ""
+            return f"{name} is not needed by the remaining upgrades of {plan_name}.{stock}"
+        total = totals[material_id]
+        steps_by_id = {str(step.get("id", "")): step for step in remaining}
+        used_by = ", ".join(
+            self._step_short_label(steps_by_id[step_id])
+            for step_id in total.steps if step_id in steps_by_id
+        )
+        if inventory is None:
+            return (
+                f"The remaining upgrades of {plan_name} need {total.needed} {name} "
+                f"(used by {used_by}). {MATERIALS_UNAVAILABLE}"
+            )
+        row = next(row for row in material_status(totals, inventory, reference) if row.material_id == material_id)
+        if row.missing == 0:
+            return (
+                f"You have enough {name} for {plan_name}: need {row.needed}, "
+                f"have {row.have} (used by {used_by})."
+            )
+        return f"{acquisition_plan(row, inventory, totals, reference)} Used by {used_by}."
+
+    def _step_materials_action(
+        self, args: StepMaterialsParams, context: dict[str, Any] | None = None
+    ) -> str:
+        target = self._upgrade_target(args.session_id, context)
+        if isinstance(target, str):
+            return target
+        if args.module and args.module.strip():
+            step = next(
+                (
+                    candidate for candidate in self._remaining_steps(target)
+                    if self._step_matches_module_query(candidate, args.module.strip())
+                ),
+                None,
+            )
+            if step is None:
+                return f"No remaining upgrade of {target['plan_name']} matches '{args.module}'."
+        else:
+            step = self._next_target_step(target)
+            if step is None:
+                return f"Plan {target['plan_name']} is complete."
+        needs = self._step_material_needs([step], target["ship_instance_id"])
+        label = self._step_voice_label(step)
+        if not needs or not needs[0].engineering:
+            return f"{label}: no engineering materials are required."
+        need = needs[0]
+        unknown = self._unknown_costs_note(needs)
+        reference = _material_reference()
+        inventory = self._material_inventory()
+        rows = material_status(aggregate_needs([need]), inventory or {}, reference)
+        if inventory is None:
+            listing = "; ".join(f"{row.name}: {row.needed}" for row in rows)
+            return f"Materials for {label}: {listing}. {MATERIALS_UNAVAILABLE}{unknown}"
+        listing = "; ".join(
+            f"{row.name}: need {row.needed}, have {row.have}"
+            + (f", missing {row.missing}" if row.missing else "")
+            for row in rows
+        )
+        missing = [row for row in rows if row.missing]
+        verdict = (
+            f"{len(missing)} material types are missing."
+            if missing else "All materials are in stock."
+        )
+        return f"Materials for {label}: {listing}. {verdict}{unknown}"
+
     def _build_advice_action(
         self,
         args: BuildAdviceParams | None = None,
@@ -1554,36 +1988,12 @@ class ShipUpgradeManagerPlugin(PluginBase):
             # Backward compatibility for direct tests/callers that passed a session id.
             session_id, args = args, None
         selected_module = args.module.strip() if args and args.module else None
-        session = self.get_session(session_id, context)
-        if session is not None:
-            plan_name = session["plan_name"]
-            target_steps = session["steps"]
-            ship_instance_id = session["ship_instance_id"]
-            ship_name = session.get("ship_custom_name") or None
-        else:
-            # An imported target plan is sufficient to ask for its complete
-            # route; do not require the user to activate progress tracking.
-            last_import = self._load_last_import()
-            with self.get_db() as db:
-                if last_import and last_import.get("plan_id"):
-                    plan_row = db.execute(
-                        "SELECT id, plan_name, ship_model, source_json FROM plans WHERE id = ?",
-                        (last_import["plan_id"],),
-                    ).fetchone()
-                else:
-                    plan_row = db.execute(
-                        "SELECT id, plan_name, ship_model, source_json FROM plans ORDER BY last_modified DESC LIMIT 1"
-                    ).fetchone()
-            if plan_row is None:
-                return "No target build is imported yet. Import a target build in the Plans settings first."
-            plan = dict(plan_row)
-            plan_name = plan["plan_name"]
-            target_steps = self._plan_steps(plan["source_json"])
-            detected = self._detect_ship_from_journal() if not self._current_ship_id else {}
-            ship_instance_id = self._current_ship_id or detected.get("id", "")
-            ship_name = self._current_ship_name or detected.get("name") or None
-            if not ship_instance_id:
-                return "I found the target build, but cannot identify the current ship from the Journal yet."
+        target = self._upgrade_target(session_id, context)
+        if isinstance(target, str):
+            return target
+        target_steps = target["steps"]
+        ship_instance_id = target["ship_instance_id"]
+        ship_name = target["ship_name"]
         if selected_module:
             target_steps = [
                 step for step in target_steps
@@ -1612,6 +2022,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 cache_key=cache_key,
             )
 
+        inventory = self._material_inventory()
         actions = build_advice(
             deltas,
             self._catalog,
@@ -1620,8 +2031,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
             ship_name=ship_name,
             station_search=station_search,
             module_filter=self._station_module_filter,
+            inventory=inventory,
         )
-        return render_chain(actions)
+        remaining_steps = [
+            step for step in target_steps if step.get("id") not in target["completed"]
+        ]
+        return render_chain(actions) + self._materials_overview(
+            remaining_steps, ship_instance_id
+        )
 
     def _preview_changes_action(
         self, args: PlanChangeParams, _context: dict[str, Any]
@@ -1815,6 +2232,22 @@ class ShipUpgradeManagerPlugin(PluginBase):
         ship_id = self._current_ship_id or self._detect_ship_from_journal().get("id", "")
         if not ship_id:
             return "No ship detected from the journal — cannot start a build goal."
+        existing = next(
+            (
+                session for session in self.list_sessions()
+                if session["plan_name"] == args.plan_name
+                and str(session["ship_instance_id"]) == str(ship_id)
+            ),
+            None,
+        )
+        if existing is not None:
+            # Restarting would discard progress already tracked for this goal.
+            return (
+                f"Build goal already active: {existing['plan_name']} on "
+                f"{existing['ship_custom_name'] or existing['ship_instance_id']} "
+                f"({existing['total_steps']} steps, "
+                f"{len(existing['completed_steps'])} already done)."
+            )
         try:
             session = self.start_session(args.plan_name, ship_id, self._current_ship_name)
         except ValueError as error:
@@ -1974,13 +2407,24 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     pass
             return
         if event_name == "EngineerCraft":
-            # The Loadout event that follows carries the new Engineering
-            # state; log for the audit trail and let the watcher refresh.
+            # The game does not write a Loadout after each craft (often not
+            # until the player leaves the engineer), so the craft itself
+            # carries the new engineering state of the module.
             blueprint = content.get("BlueprintName") or ""
             level = content.get("Level")
             log("info", f"EngineerCraft: {blueprint} grade {level}")
-            return
-        if event_name not in {
+            ship_id = self._current_ship_id
+            if not ship_id:
+                detected = self._detect_ship_from_journal()
+                ship_id = detected.get("id", "")
+                if ship_id:
+                    self._current_ship_id = ship_id
+                    self._current_ship_name = detected.get("name", "")
+            if ship_id:
+                self._current_loadout_modules = self._apply_engineer_craft(
+                    self._loadout_for_ship(ship_id), content
+                )
+        elif event_name not in {
             "Loadout",
             "ModuleInfo",
             "ModuleBuy",
@@ -1989,26 +2433,32 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "ModuleRetrieve",
         }:
             return
-        ship_id = str(
-            content.get("ShipID")
-            or content.get("ShipIdent")
-            or content.get("ShipName")
-            or content.get("Ship")
-            or ""
-        )
-        if ship_id:
-            self._current_ship_id = ship_id
-            ship_name = content.get("ShipName")
-            if isinstance(ship_name, str) and ship_name.strip():
-                self._current_ship_name = ship_name.strip()
-        if event_name in {"Loadout", "ModuleInfo"} and (
-            not ship_id or not self._current_ship_id or ship_id == self._current_ship_id
-        ):
-            loadout_modules = content.get("Modules")
-            if isinstance(loadout_modules, list):
-                self._current_loadout_modules = [
-                    module for module in loadout_modules if isinstance(module, dict)
-                ]
+        else:
+            ship_id = str(
+                content.get("ShipID")
+                or content.get("ShipIdent")
+                or content.get("ShipName")
+                or content.get("Ship")
+                or ""
+            )
+            if ship_id:
+                self._current_ship_id = ship_id
+                ship_name = content.get("ShipName")
+                if isinstance(ship_name, str) and ship_name.strip():
+                    self._current_ship_name = ship_name.strip()
+            if event_name in {"Loadout", "ModuleInfo"} and (
+                not ship_id or not self._current_ship_id or ship_id == self._current_ship_id
+            ):
+                loadout_modules = content.get("Modules")
+                if isinstance(loadout_modules, list):
+                    new_modules = [
+                        module for module in loadout_modules if isinstance(module, dict)
+                    ]
+                    if event_name == "ModuleInfo":
+                        new_modules = self._carry_over_engineering(
+                            self._current_loadout_modules, new_modules
+                        )
+                    self._current_loadout_modules = new_modules
         modules = self._event_modules(content)
         with self.get_db() as db:
             rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
@@ -2091,7 +2541,93 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     "slot": content.get("Slot"),
                 }
             ]
+        if event_name == "EngineerCraft":
+            return [
+                {
+                    "item": ShipUpgradeManagerPlugin._normalize_event_item(
+                        content.get("Module")
+                    ),
+                    "slot": content.get("Slot"),
+                    "engineering": ShipUpgradeManagerPlugin._engineer_craft_engineering(
+                        content
+                    ),
+                }
+            ]
         return []
+
+    @staticmethod
+    def _engineer_craft_engineering(content: dict[str, Any]) -> dict[str, Any]:
+        """Loadout-shaped Engineering block from an EngineerCraft event."""
+        engineering = {
+            key: content[key]
+            for key in (
+                "Engineer",
+                "EngineerID",
+                "BlueprintID",
+                "BlueprintName",
+                "Level",
+                "Quality",
+                "ExperimentalEffect",
+                "ExperimentalEffect_Localised",
+                "Modifiers",
+            )
+            if key in content
+        }
+        if not engineering.get("ExperimentalEffect") and content.get("ApplyExperimentalEffect"):
+            engineering["ExperimentalEffect"] = content["ApplyExperimentalEffect"]
+        return engineering
+
+    @classmethod
+    def _apply_engineer_craft(
+        cls, modules: list[dict[str, Any]], content: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Copy of a loadout module list with an EngineerCraft result applied
+        to the crafted slot (unchanged when the slot/module does not match)."""
+        slot = str(content.get("Slot") or "").casefold()
+        item = cls._normalize_event_item(content.get("Module"))
+        if not slot:
+            return modules
+        updated: list[dict[str, Any]] = []
+        for module in modules:
+            if (
+                str(module.get("Slot") or "").casefold() == slot
+                and (
+                    not item
+                    or canonical_item(str(module.get("Item") or "")) == canonical_item(item)
+                )
+            ):
+                module = {**module, "Engineering": cls._engineer_craft_engineering(content)}
+            updated.append(module)
+        return updated
+
+    @staticmethod
+    def _carry_over_engineering(
+        previous: list[dict[str, Any]], modules: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """ModulesInfo snapshots omit Engineering: keep the known engineering
+        of modules that are still fitted in the same slot."""
+        known = {
+            (str(module.get("Slot") or "").casefold(), canonical_item(str(module.get("Item") or ""))):
+                module["Engineering"]
+            for module in previous
+            if module.get("Engineering")
+        }
+        merged: list[dict[str, Any]] = []
+        for module in modules:
+            key = (str(module.get("Slot") or "").casefold(), canonical_item(str(module.get("Item") or "")))
+            if "Engineering" not in module and key in known:
+                module = {**module, "Engineering": known[key]}
+            merged.append(module)
+        return merged
+
+    @staticmethod
+    def _experimental_effect(engineering: dict[str, Any]) -> str:
+        return str(
+            engineering.get("ExperimentalEffect")
+            or engineering.get("experimental_effect")
+            or engineering.get("experimentalEffect")
+            or ""
+        )
 
     @staticmethod
     def _normalize_event_item(item: Any) -> str | None:
@@ -2116,10 +2652,21 @@ class ShipUpgradeManagerPlugin(PluginBase):
         actual_engineering = module.get("engineering")
         if not isinstance(actual_engineering, dict):
             return False
-        for key in ("BlueprintName", "Level", "ExperimentalEffect"):
-            expected = expected_engineering.get(key)
-            if expected is not None and actual_engineering.get(key) != expected:
-                return False
+        expected_blueprint = expected_engineering.get("BlueprintName")
+        if expected_blueprint is not None and str(
+            actual_engineering.get("BlueprintName") or ""
+        ).casefold() != str(expected_blueprint).casefold():
+            return False
+        expected_level = expected_engineering.get("Level")
+        if expected_level is not None and not grade_reached(
+            actual_engineering.get("Level"), actual_engineering.get("Quality"), expected_level
+        ):
+            return False
+        expected_effect = ShipUpgradeManagerPlugin._experimental_effect(expected_engineering)
+        if expected_effect and ShipUpgradeManagerPlugin._experimental_effect(
+            actual_engineering
+        ).casefold() != expected_effect.casefold():
+            return False
         return True
 
     def _status_generator(self, _states: dict[str, BaseModel]) -> list[tuple[str, Any]]:
@@ -2556,7 +3103,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return True
 
     def _loadout_baseline_for_ship(self, ship_instance_id: str) -> list[dict[str, Any]]:
-        """Most recent Loadout modules for the given ship, from the journals."""
+        """Most recent Loadout modules for the given ship, from the journals,
+        with the EngineerCraft results recorded after that Loadout applied."""
         try:
             journals_path = get_ed_journals_path({})
             log_files = [
@@ -2568,6 +3116,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
         except (OSError, FileNotFoundError) as error:
             log("warning", f"Ship Upgrade Manager loadout baseline failed: {error}")
             return []
+        # Newest first: crafts seen before reaching a Loadout happened after it.
+        # A Loadout of another ship means those crafts belong to that ship.
+        later_crafts: list[dict[str, Any]] = []
         for log_file in sorted(log_files, key=os.path.getmtime, reverse=True):
             try:
                 with open(log_file, encoding="utf-8", errors="ignore") as handle:
@@ -2583,12 +3134,22 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if entry.get("event") != "Loadout":
+                event_name = entry.get("event")
+                if event_name == "EngineerCraft":
+                    later_crafts.append(entry)
+                    continue
+                if event_name != "Loadout":
                     continue
                 if str(entry.get("ShipID", "")) != str(ship_instance_id):
+                    later_crafts = []
                     continue
                 modules = entry.get("Modules")
-                return modules if isinstance(modules, list) else []
+                if not isinstance(modules, list):
+                    return []
+                result = [module for module in modules if isinstance(module, dict)]
+                for craft in reversed(later_crafts):
+                    result = self._apply_engineer_craft(result, craft)
+                return result
         return []
 
     @staticmethod
@@ -2613,9 +3174,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
         A step is satisfied when a loadout module carries the same item and,
         when the plan requires engineering, a blueprint of the same family at
-        an equal or higher level. Steps without an installed module stay open,
-        so engineering-only progress starts from the real ship state."""
-        loadout: dict[str, list[tuple[str, Any]]] = {}
+        a higher level or the required level completed (Quality 1.0). Steps
+        without an installed module stay open, so engineering-only progress
+        starts from the real ship state."""
+        loadout: dict[str, list[tuple[str, Any, str, Any]]] = {}
         for module in modules:
             item = self._normalize_module_id(str(module.get("Item") or ""))
             if not item or item == "null":
@@ -2623,7 +3185,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
             engineering = module.get("Engineering") or {}
             blueprint = str(engineering.get("BlueprintName") or engineering.get("blueprint") or "")
             level = engineering.get("Level") or engineering.get("level")
-            loadout.setdefault(item, []).append((blueprint, level))
+            loadout.setdefault(item, []).append(
+                (
+                    blueprint,
+                    level,
+                    self._experimental_effect(engineering),
+                    engineering.get("Quality"),
+                )
+            )
         satisfied: list[str] = []
         for step in steps:
             item = self._normalize_module_id(
@@ -2644,21 +3213,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 required.get("BlueprintName") or required.get("blueprint") or ""
             )
             required_level = required.get("Level") or required.get("level")
-            if required_blueprint or required_level:
+            required_effect = self._experimental_effect(required)
+            if required_blueprint or required_level or required_effect:
                 satisfied_module = any(
                     (
                         not required_blueprint
                         or self._blueprint_key(blueprint)
                         == self._blueprint_key(required_blueprint)
                     )
+                    and grade_reached(level, quality, required_level)
                     and (
-                        required_level is None
-                        or (
-                            isinstance(level, (int, float))
-                            and level >= required_level
-                        )
+                        not required_effect
+                        or effect.casefold() == required_effect.casefold()
                     )
-                    for blueprint, level in candidates
+                    for blueprint, level, effect, quality in candidates
                     if blueprint
                 )
                 if not satisfied_module:
@@ -2762,7 +3330,16 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def get_session(
         self, session_id: str | None = None, context: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
+        """Active session by id, else the most recently active one.
+
+        The AI does not know the internal session hash and passes whatever
+        label it has (plan name, ship name/model, journal ShipID), so an
+        unknown identifier is resolved against those labels, then falls back
+        to the only active session."""
         session_id = session_id or (context or {}).get("session_id")
+        identifier = str(
+            session_id or (context or {}).get("ship_instance_id") or ""
+        ).strip()
         with self.get_db() as db:
             query = """
                 SELECT s.*, p.plan_name, p.ship_model, p.plan_version,
@@ -2770,16 +3347,19 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 FROM active_session s
                 JOIN plans p ON p.id = s.plan_id
             """
-            if session_id:
-                query += " WHERE s.id = ?"
-                params: tuple[Any, ...] = (session_id,)
-            elif context and context.get("ship_instance_id"):
-                query += " WHERE s.ship_instance_id = ? ORDER BY s.last_activity DESC LIMIT 1"
-                params = (str(context["ship_instance_id"]),)
+            if identifier:
+                row = db.execute(query + " WHERE s.id = ?", (identifier,)).fetchone()
+                if row is None:
+                    rows = db.execute(
+                        query + " ORDER BY s.last_activity DESC"
+                    ).fetchall()
+                    row = self._match_session_label(rows, identifier)
+                    if row is None and len(rows) == 1:
+                        row = rows[0]
             else:
-                query += " ORDER BY s.last_activity DESC LIMIT 1"
-                params = ()
-            row = db.execute(query, params).fetchone()
+                row = db.execute(
+                    query + " ORDER BY s.last_activity DESC LIMIT 1"
+                ).fetchone()
         if row is None:
             return None
         session = dict(row)
@@ -2788,6 +3368,34 @@ class ShipUpgradeManagerPlugin(PluginBase):
         session["paused"] = bool(session["paused"])
         session["total_steps"] = len(session["steps"])
         return session
+
+    def _match_session_label(
+        self, rows: list[sqlite3.Row], identifier: str
+    ) -> sqlite3.Row | None:
+        """First session (most recent first) whose ship id, ship name, plan
+        name or ship model matches the identifier: exact first, then partial."""
+        needle = identifier.casefold()
+
+        def labels(row: sqlite3.Row) -> list[str]:
+            values = [
+                row["ship_instance_id"],
+                row["ship_custom_name"],
+                row["plan_name"],
+                row["ship_model"],
+                self._ship_display_name(str(row["ship_model"] or "")),
+            ]
+            return [str(value).strip().casefold() for value in values if value]
+
+        for row in rows:
+            if needle in labels(row):
+                return row
+        for row in rows:
+            if any(
+                len(label) > 2 and (needle in label or label in needle)
+                for label in labels(row)
+            ):
+                return row
+        return None
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """Return all active sessions, ordered by most recently active."""

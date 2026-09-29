@@ -424,10 +424,27 @@ Registered in `on_chat_start` via
 | `ship_upgrade_start_session` | `plan_name`, `ship_instance_id`, `ship_custom_name=""` | Confirmation + step count. |
 | `ship_upgrade_complete_step` | `step_id`, `notes=""`, `session_id?` | Progress line. |
 | `ship_upgrade_pause_session` / `resume_session` / `stop_session` | `session_id?` (+ context) | Status line. |
-| `ship_upgrade_next_step` | `session_id?` (+ context) | Spec name + grade + engineering target ("…then engineer it with Thermic grade 5"). |
+| `ship_upgrade_next_step` | `session_id?` (+ context) | Spec name + grade + engineering target ("…then engineer it with Thermic grade 5"), plus an automatic warning when engineering materials are missing. |
 | `ship_upgrade_list_plans` | — | Plan inventory line. |
 | `ship_upgrade_preview_changes` | `plan_input` | Diff summary text (plan vs stored plan). |
 | `ship_upgrade_apply_changes` | `plan_input` | Applies the plan (voice equivalent of the import). |
+| `ship_upgrade_missing_materials` | `count?`, `session_id?` | Without `count`: number of material types still to collect + missing quantity of the top 3. With `count`: the N most missing materials, each with a collection plan (same-family trades from surplus stock, then known sources, storage cap). |
+| `ship_upgrade_material_shortfall` | `material`, `session_id?` | Need / stock / missing for one material, the modules using it and how to obtain the rest. |
+| `ship_upgrade_step_materials` | `module?`, `session_id?` | Per-material need / stock / missing for the next upgrade (or a named plan module). |
+
+Material needs (`materials.py`) follow the journal `EngineerCraft` model:
+grade N takes N increments, each at its `module_catalog.json` recipe cost
+(Quality rises by 1/N per increment), and an incomplete current grade
+(Quality < 1) is finished first (`planner.engineering_increments`). A target
+grade only counts as reached when complete (Quality 1.0, max effect):
+`planner.grade_reached` is the single rule used by the planner, step
+auto-completion, loadout baselines and progress metrics. The
+experimental effect recipe from `assets/specials.json` is counted once,
+unless the same effect is already applied on the same blueprint. Stock comes
+from the core `Materials` projection (Raw / Manufactured / Encoded); unknown
+costs are reported, never counted as zero. `ship_upgrade_build_advice` shows
+the increments per grade, marks grades whose materials are missing and
+appends a stock summary.
 
 All return plain strings consumed by the LLM (spoken via TTS).
 
