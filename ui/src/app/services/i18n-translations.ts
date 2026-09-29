@@ -62,11 +62,12 @@ export const TRANSLATIONS: Record<string, object> = {
         "sessionStep": {
           "absent": "Absent from the ship",
           "installed": "Installed",
-          "targetDone": "Target: {{blueprint}} · Grade {{target}} — reached",
-          "targetProgress": "Target: {{blueprint}} · Grade {{target}} — reached: Grade {{current}}",
-          "targetOther": "Target: {{blueprint}} · Grade {{target}} — different blueprint: Grade {{current}}",
-          "targetAbsent": "Target: {{blueprint}} · Grade {{target}} — absent",
-          "targetNotEngineered": "Target: {{blueprint}} · Grade {{target}} — no engineering yet"
+          "targetDone": "Target: {{blueprint}} · Grade {{target}}{{experimentalEffect}} — reached",
+          "targetProgress": "Target: {{blueprint}} · Grade {{target}}{{experimentalEffect}} — reached: Grade {{current}}",
+          "targetOther": "Target: {{blueprint}} · Grade {{target}}{{experimentalEffect}} — different blueprint: Grade {{current}}",
+          "targetAbsent": "Target: {{blueprint}} · Grade {{target}}{{experimentalEffect}} — absent",
+          "targetNotEngineered": "Target: {{blueprint}} · Grade {{target}}{{experimentalEffect}} — no engineering yet",
+          "specialEffect": " · {{name}}"
         },
         "category": {
           "coreInternal": "Core Internal",
@@ -156,10 +157,11 @@ export const TRANSLATIONS: Record<string, object> = {
       "dockingcomputeradvanced": "Advanced Docking Computer",
       "supercruiseassist": "Supercruise Assist",
       "detailedsurfacescanner": "Detailed Surface Scanner (DSS)",
+      "panthermkiiarmourgrade3": "Panther Mk II Armour Grade 3",
       "mkiiplasmashockautocannon": "Mk II Plasma Shock Accelerator",
       "mkiiagileboostengine": "Mk II Agile Boost Thrusters",
       "guardianmodulereinforcement": "Guardian Module Reinforcement",
-      "smallcombat01nxarmourreactive": "Reactive Armour",
+      "smallcombat01nxarmourreactive": "Reactive Surface Composite",
       "modularcargobaydoor": "Cargo Bay Door",
       "plasma shockautocannon": "Mk II Plasma Shock Accelerator",
       "engineagile": "Mk II Agile Boost Thrusters"
@@ -225,11 +227,12 @@ export const TRANSLATIONS: Record<string, object> = {
         "sessionStep": {
           "absent": "Absent du vaisseau",
           "installed": "Installé",
-          "targetDone": "Cible : {{blueprint}} · Grade {{target}} — atteint",
-          "targetProgress": "Cible : {{blueprint}} · Grade {{target}} — atteint : Grade {{current}}",
-          "targetOther": "Cible : {{blueprint}} · Grade {{target}} — autre blueprint : Grade {{current}}",
-          "targetAbsent": "Cible : {{blueprint}} · Grade {{target}} — absent",
-          "targetNotEngineered": "Cible : {{blueprint}} · Grade {{target}} — pas encore d'ingénierie"
+          "targetDone": "Cible : {{blueprint}} · Grade {{target}}{{experimentalEffect}} — atteint",
+          "targetProgress": "Cible : {{blueprint}} · Grade {{target}}{{experimentalEffect}} — atteint : Grade {{current}}",
+          "targetOther": "Cible : {{blueprint}} · Grade {{target}}{{experimentalEffect}} — autre blueprint : Grade {{current}}",
+          "targetAbsent": "Cible : {{blueprint}} · Grade {{target}}{{experimentalEffect}} — absent",
+          "targetNotEngineered": "Cible : {{blueprint}} · Grade {{target}}{{experimentalEffect}} — pas encore d'ingénierie",
+          "specialEffect": " · {{name}}"
         },
         "category": {
           "coreInternal": "Compartiments essentiels",
@@ -319,6 +322,7 @@ export const TRANSLATIONS: Record<string, object> = {
       "dockingcomputeradvanced": "Ordinateur d'appontage avancé",
       "supercruiseassist": "Module d'aide au Supercruise",
       "detailedsurfacescanner": "Scanner de surface détaillé",
+      "panthermkiiarmourgrade3": "Blindage Panther Mk II grade 3",
       "mkiiplasmashockautocannon": "Accélérateur à plasma de choc Mk II",
       "mkiiagileboostengine": "Propulseurs Agile Boost Mk II",
       "guardianmodulereinforcement": "Renfort de modules Guardian",

@@ -1388,12 +1388,37 @@ def send_message(obj, projected_states):
 
 
 def get_visuals(obj, projected_states):
+    query = obj.get("query", "")
+    loadout = get_state_dict(projected_states, "Loadout")
+    if isinstance(loadout, BaseModel):
+        loadout = loadout.model_dump()
+    if isinstance(loadout, dict):
+        modules = loadout.get("Modules") or []
+        armour = next(
+            (module for module in modules if isinstance(module, dict) and module.get("Slot") == "Armour"),
+            None,
+        )
+        if armour and any(term in query.casefold() for term in ("armour", "armor", "armure", "blindage")):
+            item_id = str(armour.get("Item") or "")
+            response = f"The current ship's installed armor module has technical id {item_id}."
+            engineering = armour.get("Engineering")
+            if isinstance(engineering, dict):
+                blueprint = engineering.get("BlueprintName")
+                level = engineering.get("Level")
+                if blueprint:
+                    response += f" It is engineered with {blueprint}"
+                if level is not None:
+                    response += f" grade {level}"
+                if blueprint or level is not None:
+                    response += "."
+            return response
+
     image = screenshot()
     if not image: return "Unable to take screenshot."
     if not vision_model: return "Vision not enabled."
 
     response_text, _, _ = vision_model.generate(
-        messages=format_image(image, obj.get("query")),
+        messages=format_image(image, query),
     )
 
     return response_text or ""
@@ -2680,7 +2705,7 @@ def register_actions(actionManager: ActionManager, eventManager: EventManager, p
         )
 
     if vision_model:
-        actionManager.registerAction('getVisuals', "Describes what's currently visible to the Commander.", {
+        actionManager.registerAction('getVisuals', "Describes what's currently visible to the Commander. For questions about installed ship modules, use the current ship loadout data instead.", {
             "type": "object",
             "properties": {
                 "query": {

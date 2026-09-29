@@ -12,6 +12,7 @@ import humanize
 import json
 
 from .Projections import get_state_dict, ProjectedStates
+from .Config import get_asset_path
 from .Database import QuestDatabase
 
 from .EventModels import (
@@ -48,6 +49,21 @@ from .Event import (
     QuestEvent,
 )
 from .Logger import log, observe, PromptUsageStats
+
+
+def _load_ship_names() -> dict[str, str]:
+    try:
+        with open(get_asset_path("ship_names.json"), encoding="utf-8") as handle:
+            return {
+                key: value
+                for key, value in json.load(handle).items()
+                if not key.startswith("_")
+            }
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+SHIP_NAMES = _load_ship_names()
 
 # Add these new type definitions along with the other existing types
 DockingCancelledEvent = dict
@@ -3016,6 +3032,9 @@ class PromptGenerator:
         
         # Create a copy of ship_info so we don't modify the original
         ship_display = dict(ship_info)
+        ship_type = str(ship_display.get('Type') or '')
+        if ship_type:
+            ship_display['DisplayType'] = SHIP_NAMES.get(ship_type, ship_type)
         ship_display.pop('JetConeBoost', None)
         ship_display.pop('DriveMaxFuel', None)
         ship_display.pop('DrivePowerConst', None)

@@ -28,7 +28,20 @@ export function resolveSettingText(
     if (!looksLikeI18nKey(value)) {
         return value;
     }
-    const translated = translate.instant(value, params);
+    let resolvedParams = params;
+    if (value.startsWith("plugin.sum.sessionStep.target")) {
+        const experimentalEffect = params?.["experimentalEffect"];
+        resolvedParams = { ...params, experimentalEffect: "" };
+        if (typeof experimentalEffect === "string" && experimentalEffect) {
+            const suffixKey = "plugin.sum.sessionStep.specialEffect";
+            const suffix = translate.instant(suffixKey, { name: experimentalEffect });
+            resolvedParams["experimentalEffect"] =
+                typeof suffix === "string" && suffix !== suffixKey
+                    ? suffix
+                    : ` · ${experimentalEffect}`;
+        }
+    }
+    const translated = translate.instant(value, resolvedParams);
     return typeof translated === "string" ? translated : value;
 }
 

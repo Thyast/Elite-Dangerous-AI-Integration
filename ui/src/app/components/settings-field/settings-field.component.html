@@ -141,7 +141,7 @@
                             </div>
                         </div>
                     } @else {
-                        <div class="list-row" [class.pending]="entry.row.pending">
+                        <div class="list-row" [class.pending]="entry.row.pending" [class.status-absent]="entry.row.status === 'absent'" [class.status-installed-pending]="entry.row.status === 'installed-pending'" [class.status-complete]="entry.row.status === 'complete'">
                             <div class="list-row-text">
                         <span class="list-row-title">{{ moduleName(entry.row) }}</span>
                         @if (entry.row.meta) {
@@ -181,7 +181,7 @@
                             @if (progress.next_label) {
                                 <div class="progress-next">
                                     <span class="progress-next-label">{{ progress.modules_done ? resolve('plugin.sum.progress.nextModule') : resolve('plugin.sum.progress.suggestedModule') }}</span>
-                                    <span class="progress-next-module">{{ nextModuleName(progress) }}@if (progress.next_grade) {<span> · Grade {{ progress.next_grade }}</span>}@if (progress.next_engineering) {<span> · {{ progress.next_engineering }}</span>}</span>
+                                    <span class="progress-next-module">{{ nextModuleName(progress) }}@if (progress.next_grade) {<span> · Grade {{ progress.next_grade }}</span>}@if (progress.next_engineering) {<span> · {{ progress.next_engineering }}</span>}@if (progress.next_experimental_effect) {<span>{{ resolve('plugin.sum.sessionStep.specialEffect', { name: progress.next_experimental_effect }) }}</span>}</span>
                                 </div>
                             }
                         </div>

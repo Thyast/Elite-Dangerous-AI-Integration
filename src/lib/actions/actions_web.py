@@ -20,6 +20,7 @@ embedding_model: EmbeddingModel = cast(EmbeddingModel, None)
 event_manager: EventManager = cast(EventManager, None)
 prompt_generator: PromptGenerator = cast(PromptGenerator, None)
 agent_max_tries: int = 7
+SPANSH_STATIONS_URL = "https://spansh.co.uk/api/stations/search"
 
 
 def extract_http_error_details(response):
@@ -2117,14 +2118,17 @@ def prepare_station_request(obj, projected_states):# Helper function for fuzzy m
 
 
 # filter a spansh station result set for only relevant information
-def filter_station_response(request, response, unfiltered_results=None):
+def filter_station_response(
+    request, response, unfiltered_results=None, *, include_match_metadata: bool = False
+):
     unfiltered_results = unfiltered_results or {}
     unfiltered_markets = unfiltered_results.get("commodities", False)
     unfiltered_modules = unfiltered_results.get("modules", False)
     unfiltered_ships = unfiltered_results.get("ships", False)
-    # Extract requested commodities and modules
-    commodities_requested = {item["name"] for item in request["filters"].get("market", {})}
-    modules_requested = {item["name"] for item in request["filters"].get("modules", {})}
+    # Extract requested commodities and modules. Station module filters are
+    # dicts (name/class/rating), so do not put the dict itself in a set.
+    commodities_requested = {item["name"] for item in request["filters"].get("market", [])}
+    modules_requested = request["filters"].get("modules", [])
     ships_requested = {item["name"] for item in request["filters"].get("ships", {}).get("value", [])}
     services_requested = {item["name"] for item in request["filters"].get("services", {}).get("value", [])}
 
@@ -2154,17 +2158,52 @@ def filter_station_response(request, response, unfiltered_results=None):
         if "modules" in result:
             if unfiltered_modules:
                 filtered_result["modules"] = result["modules"]
+                matched_filters = []
+                for requested_module in modules_requested:
+                    if any(
+                        str(requested_module.get("name", "")).casefold()
+                        in str(offered_module.get("name", "")).casefold()
+                        for offered_module in result["modules"]
+                    ):
+                        matched_filters.append(dict(requested_module))
             else:
                 filtered_modules = []
-                for module in result["modules"]:
+                matched_filters = []
+                for offered_module in result["modules"]:
                     for requested_module in modules_requested:
-                        if requested_module.lower() in module["name"].lower():
-                            filtered_modules.append(
-                                {"name": module["name"], "class": module["class"], "rating": module["rating"],
-                                 "price": module["price"]})
+                        requested_name = str(requested_module.get("name", "")).casefold()
+                        offered_name = str(offered_module.get("name", "")).casefold()
+                        name_matches = not requested_name or requested_name in offered_name
+                        requested_classes = requested_module.get("class") or []
+                        requested_ratings = requested_module.get("rating") or []
+                        if isinstance(requested_classes, (str, int)):
+                            requested_classes = [requested_classes]
+                        if isinstance(requested_ratings, str):
+                            requested_ratings = [requested_ratings]
+                        offered_class = offered_module.get("class")
+                        offered_rating = offered_module.get("rating")
+                        class_matches = (
+                            not requested_classes
+                            or str(offered_class).casefold() in {str(v).casefold() for v in requested_classes}
+                        )
+                        rating_matches = (
+                            not requested_ratings
+                            or str(offered_rating).casefold() in {str(v).casefold() for v in requested_ratings}
+                        )
+                        if name_matches and class_matches and rating_matches:
+                            filtered_modules.append({
+                                "name": offered_module.get("name", ""),
+                                "class": offered_class,
+                                "rating": offered_rating,
+                                "price": offered_module.get("price"),
+                            })
+                            matched_filters.append(dict(requested_module))
+                            break
 
                 if filtered_modules:
                     filtered_result["modules"] = filtered_modules
+                if include_match_metadata and matched_filters:
+                    filtered_result["matched_filters"] = matched_filters
 
         if "ships" in result:
             if unfiltered_ships:
@@ -2205,25 +2244,137 @@ def filter_station_response(request, response, unfiltered_results=None):
     return filtered_response
 
 
-def station_finder(obj, projected_states):
-    # Initialize the filters
-    request_body = prepare_station_request(obj, projected_states)
-    log('debug', 'station search input', request_body)
+def _execute_station_search(
+    request_body: dict[str, Any],
+    unfiltered_results: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute and filter a prepared Spansh station search request."""
+    response = requests.post(SPANSH_STATIONS_URL, json=request_body, timeout=15)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise ValueError("Spansh station response has no results list")
+    return filter_station_response(
+        request_body, payload, unfiltered_results, include_match_metadata=True
+    )
 
-    url = "https://spansh.co.uk/api/stations/search"
+
+def _resolve_station_module_filter(module: dict[str, Any]) -> dict[str, Any]:
+    """Validate and canonicalize module filter terms using the host allow-list."""
+    result = dict(module)
+    raw_name = str(result.get("name", "")).strip()
+    if not raw_name:
+        raise ValueError("module filter requires a non-empty name")
+    matching = next((known for known in known_modules if known.casefold() == raw_name.casefold()), None)
+    if matching is None:
+        raise ValueError(
+            f"Invalid module name: {raw_name}. {educated_guesses_message(raw_name, known_modules)}"
+        )
+    result["name"] = matching
+    for key in ("class", "rating"):
+        value = result.get(key) or []
+        if isinstance(value, (str, int)):
+            value = [value]
+        result[key] = [str(item) for item in value]
+    return result
+
+
+
+def search_stations_for_modules(
+    modules: list[dict[str, Any]],
+    projected_states: Any,
+    *,
+    distance: int | float = 50000,
+    size: int = 25,
+) -> dict[str, Any]:
+    """Structured Spansh station search shared by station_finder and plugins.
+
+    Spansh's station endpoint accepts a list of module filters. This wrapper
+    returns structured station rows instead of an LLM-formatted string. It
+    deliberately marks stock/availability as unknown: Spansh module catalog
+    matches are not a guarantee of current stock.
+    """
+    request_obj = {
+        "modules": [_resolve_station_module_filter(module) for module in modules],
+        "distance": distance,
+        "sort_by": "distance",
+        "size": ensure_result_size({"size": size}),
+    }
+    request_body = prepare_station_request(request_obj, projected_states)
     response = None
     try:
-        response = requests.post(url, json=request_body, timeout=15)
-        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx and 5xx)
+        filtered = _execute_station_search(request_body)
+        rows = []
+        canonical_modules = request_body["filters"].get("modules", [])
+        for station in filtered.get("results", []):
+            offered = station.get("modules") or []
+            matched_filters = []
+            for requested in canonical_modules:
+                requested_name = str(requested.get("name", "")).casefold()
+                requested_class = {str(v).casefold() for v in (requested.get("class") or [])}
+                requested_rating = {str(v).casefold() for v in (requested.get("rating") or [])}
+                if any(
+                    (not requested_name or requested_name in str(module.get("name", "")).casefold())
+                    and (not requested_class or str(module.get("class", "")).casefold() in requested_class)
+                    and (not requested_rating or str(module.get("rating", "")).casefold() in requested_rating)
+                    for module in offered
+                ):
+                    matched_filters.append(requested)
+            rows.append({
+                "id": f"{station.get('system', '').casefold()}::{station.get('name', '').casefold()}",
+                "name": station.get("name", ""),
+                "system": station.get("system", ""),
+                "distance_ly": station.get("distance"),
+                "arrival_ls": station.get("orbit"),
+                "is_planetary": station.get("is_planetary", False),
+                "services": station.get("services", []),
+                "stock_status": "unknown",
+                "modules": [
+                    {
+                        "name": module.get("name", ""),
+                        "class": module.get("class"),
+                        "rating": module.get("rating"),
+                        "price": module.get("price"),
+                        "stock_status": "unknown",
+                    }
+                    for module in offered
+                ],
+                "matched_filters": matched_filters,
+                "source": "spansh",
+                "fetched_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            })
+        return {
+            "status": "ok",
+            "stations": rows,
+            "count": filtered.get("amount_total", len(rows)),
+            "stock_status": "unknown",
+        }
+    except Exception as error:
+        log('error', error, traceback.format_exc())
+        return {
+            "status": "error",
+            "error": format_web_request_error("station finder", error, response),
+            "stations": [],
+            "count": 0,
+            "stock_status": "unknown",
+        }
 
-        data = response.json()
 
-        filtered_data = filter_station_response(request_body, data, obj.get("unfiltered_results"))
-
+def station_finder(obj, projected_states):
+    # Preserve the established LLM-facing response while sharing the same
+    # prepared request and execution/filtering path as the plugin helper.
+    request_body = prepare_station_request(obj, projected_states)
+    log('debug', 'station search input', request_body)
+    try:
+        filtered_data = _execute_station_search(
+            request_body, obj.get("unfiltered_results")
+        )
+        for station in filtered_data.get("results", []):
+            station.pop("matched_filters", None)
         return f'Here is a list of stations: {json.dumps(filtered_data)}'
-    except Exception as e:
-        log('error', e, traceback.format_exc())
-        return format_web_request_error("station finder", e, response)
+    except Exception as error:
+        log('error', error, traceback.format_exc())
+        return format_web_request_error("station finder", error)
 
 
 def prepare_system_request(obj, projected_states):# Helper function for fuzzy matching
@@ -2703,7 +2854,7 @@ def register_web_actions(actionManager: ActionManager, eventManager: EventManage
 
     actionManager.registerAction(
         'web_search_agent',
-        "Request a detailed report about information from the game, including news, system, station, body, engineers, blueprint, material lookups and commander data(owned ships and modules, statistics, super power reputation, elite ranks, squadron, owned fleet carriers). Use this tool whenever the user asks about anything related to external or global information.",
+        "Search external or global Elite Dangerous information (Galnet news, systems, stations, bodies, engineers, blueprint/material references, commander statistics). For route planning against a player's imported Ship Upgrade Manager target build, do NOT use web search: call ship_upgrade_build_advice, which compares the active target with the current loadout and builds the grouped multi-stop route. Use web search only for standalone external lookups or when no target build is being planned.",
         {
             "type": "object",
             "properties": {

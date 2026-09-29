@@ -1,44 +1,6 @@
 # COVAS:NEXT Agent Guide
 
-This document is the working guide for agents extending COVAS:NEXT and its
-Ship Upgrade Manager plugin. It records the architecture, integration points,
-domain rules, supported input formats, development workflow, and validation
-requirements established during the implementation.
-
-## Handoff Snapshot
-
-The current work is on branch `feat/ship-upgrade-plugin-api`. The repository
-may contain uncommitted implementation changes when an agent starts:
-
-- `plugins/ship_upgrade_manager/ship_upgrade_manager.py`
-- `src/lib/PluginManager.py`
-- `test/plugins/test_ship_upgrade_manager.py`
-- `test/lib/test_plugin_manager_settings.py`
-- this `AGENT.md`
-
-These files belong to the Ship Upgrade Manager work and should be reviewed
-before editing. The untracked `src/KeyboardLayoutExperiment.py` is unrelated
-pre-existing user work and must remain untouched.
-
-The import flow redesign described in the "Import Flow (Implemented)"
-section below is implemented on this branch, on top of the i18n
-infrastructure branch `feat/i18n-app-ngx-translate`. The test baseline is
-155 Python tests in the global suite **plus** 31 tests in
-`test/plugins/test_ship_upgrade_manager.py`, which the global run does not
-collect (see Testing Expectations).
-
-The latest validated baseline is **155 passing Python tests**. Start with:
-
-```powershell
-Set-Location 'G:\covas\Elite-Dangerous-AI-Integration'
-. .\.venv312\Scripts\Activate.ps1
-$env:PYTHONPATH='.'
-python -m pytest -q
-```
-
-Do not assume the working tree is clean or that the latest commit contains all
-current changes. Run `git status --short` and inspect the diff before staging
-anything.
+This document records the architecture, integration points, domain rules, supported input formats, development workflow, and validation requirements for extending COVAS:NEXT and its Ship Upgrade Manager plugin.
 
 ## Project Scope
 

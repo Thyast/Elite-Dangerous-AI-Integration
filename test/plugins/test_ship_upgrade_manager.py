@@ -38,6 +38,7 @@ class _Helper:
 
     def __init__(self, data_path: Path):
         self.data_path = data_path
+        self._event_manager = None
 
     def get_plugin_data_path(self, _manifest):
         return str(self.data_path)
@@ -63,6 +64,46 @@ def _plugin(data_path: Path) -> ShipUpgradeManagerPlugin:
     )
     plugin.on_chat_start(_Helper(data_path))
     return plugin
+
+
+def test_current_loadout_action_reports_technical_item_id_and_engineering(tmp_path: Path):
+    class FakeEventManager:
+        def get_current_state(self):
+            return [], {
+                "Loadout": {
+                    "Ship": "smallcombat01_nx",
+                    "Modules": [
+                        {
+                            "Slot": "Armour",
+                            "Item": "smallcombat01_nx_armour_reactive",
+                            "Engineering": {
+                                "BlueprintName": "Armour_Thermic",
+                                "Level": 5,
+                            },
+                        }
+                    ],
+                }
+            }
+
+    plugin = ShipUpgradeManagerPlugin(
+        PluginManifest(
+            '{"guid":"test-guid","name":"Test","version":"1.0.0"}'
+        )
+    )
+    helper = _Helper(tmp_path)
+    helper._event_manager = FakeEventManager()
+    plugin.helper = helper
+
+    class Args:
+        slot = "Armour"
+
+    result = plugin._current_loadout_action(Args(), {})
+
+    assert "Kestrel Mk II" in result
+    assert "Reactive Surface Composite" in result
+    assert "smallcombat01_nx_armour_reactive" in result
+    assert "Thermic" in result
+    assert "grade 5" in result
 
 
 def test_plan_import_and_session_progression(tmp_path: Path):
@@ -572,7 +613,11 @@ def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
                 {
                     "id": "shield",
                     "item": "int_shieldgenerator_size5_class5",
-                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                    "engineering": {
+                        "BlueprintName": "ShieldGenerator_Reinforced",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_shield_regenerative",
+                    },
                 },
             ]
         },
@@ -596,6 +641,7 @@ def test_plan_rows_expose_session_progress_and_next_module(tmp_path: Path):
     assert progress[0]["next_class"] == "5A"
     assert progress[0]["next_grade"] == 5
     assert progress[0]["next_engineering"] == "Reinforced"
+    assert progress[0]["next_experimental_effect"] == "Fast Charge"
 
 
 def test_next_module_label_falls_back_for_unknown_families(tmp_path: Path):
@@ -608,7 +654,7 @@ def test_next_module_label_falls_back_for_unknown_families(tmp_path: Path):
     plugin.start_session("PvE", "SHIP-1")
 
     progress = plugin._field("plans", "available_plans")["items"][0]["progress"]
-    assert progress[0]["next_label"] == "Modulereinforcement"
+    assert progress[0]["next_label"] == "Module Reinforcement Package"
     assert progress[0]["next_key"] == "module.modulereinforcement"
     assert progress[0]["next_class"] == "2E"
 
@@ -785,7 +831,7 @@ def test_session_start_baselines_steps_satisfied_by_current_loadout(
     assert progress[0]["eng_current"] == 8
     assert progress[0]["eng_target"] == 10
     assert progress[0]["eng_pct"] == 80
-    assert progress[0]["next_label"] == "Hyperdrive"
+    assert progress[0]["next_label"] == "Frame Shift Drive (FSD)"
     assert progress[0]["next_class"] == "5A"
 
 
@@ -840,6 +886,29 @@ def test_engineering_progress_requires_matching_blueprint(
     assert progress[0]["eng_pct"] == 0
 
 
+def test_engineering_catalogs_resolve_slef_ids_and_keep_unknown_ids_visible():
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    assert (
+        sum_module._engineering_catalog_display_name(
+            "Armour_Thermic", "blueprints.json", "fdname"
+        )
+        == "Thermal resistant"
+    )
+    assert (
+        sum_module._engineering_catalog_display_name(
+            "special_armour_chunky", "specials.json", "edname"
+        )
+        == "Deep Plating"
+    )
+    assert (
+        sum_module._engineering_catalog_display_name(
+            "unknown_engineering_id", "blueprints.json", "fdname"
+        )
+        == "unknown_engineering_id"
+    )
+
+
 def test_session_module_rows_diff_target_vs_current_loadout(
     tmp_path: Path, monkeypatch
 ):
@@ -852,7 +921,11 @@ def test_session_module_rows_diff_target_vs_current_loadout(
         {
             "Slot": "ShieldGenerator",
             "Item": "int_shieldgenerator_size5_class5",
-            "Engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 3},
+            "Engineering": {
+                "BlueprintName": "ShieldGenerator_Reinforced",
+                "Level": 3,
+                "ExperimentalEffect": "special_shield_regenerative",
+            },
         },
     ]
     (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
@@ -874,7 +947,11 @@ def test_session_module_rows_diff_target_vs_current_loadout(
                 {
                     "id": "shield",
                     "item": "int_shieldgenerator_size5_class5",
-                    "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5},
+                    "engineering": {
+                        "BlueprintName": "ShieldGenerator_Reinforced",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_shield_regenerative",
+                    },
                 },
                 {
                     "id": "cannon",
@@ -889,17 +966,21 @@ def test_session_module_rows_diff_target_vs_current_loadout(
     by_title = {row.get("title_key", row["title"]): row for row in rows}
     assert by_title["module.powerplant"]["meta"] == "plugin.sum.sessionStep.installed"
     assert by_title["module.powerplant"]["pending"] is False
+    assert by_title["module.powerplant"]["status"] == "complete"
     assert by_title["module.powerplant"]["group"] == "plugin.sum.category.coreInternal"
     assert by_title["module.shieldgenerator"]["meta"] == "plugin.sum.sessionStep.targetProgress"
     assert by_title["module.shieldgenerator"]["params"] == {
         "blueprint": "Reinforced",
         "target": 5,
         "current": 3,
+        "experimentalEffect": "Fast Charge",
     }
     assert by_title["module.shieldgenerator"]["pending"] is True
+    assert by_title["module.shieldgenerator"]["status"] == "installed-pending"
     assert by_title["module.shieldgenerator"]["group"] == "plugin.sum.category.optionalInternal"
     assert by_title["module.cannon"]["meta"] == "plugin.sum.sessionStep.absent"
     assert by_title["module.cannon"]["pending"] is True
+    assert by_title["module.cannon"]["status"] == "absent"
     assert by_title["module.cannon"]["group"] == "plugin.sum.category.optionalInternal"
     group_order: list[str] = []
     for row in rows:
@@ -910,6 +991,62 @@ def test_session_module_rows_diff_target_vs_current_loadout(
         "plugin.sum.category.coreInternal",
         "plugin.sum.category.optionalInternal",
     ]
+
+
+def test_session_module_rows_display_catalog_names_for_reactive_armour(
+    tmp_path: Path, monkeypatch
+):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    module = {
+        "Slot": "Armour",
+        "Item": "smallcombat01_nx_armour_reactive",
+        "Engineering": {
+            "BlueprintName": "Armour_Thermic",
+            "Level": 5,
+            "ExperimentalEffect": "special_armour_chunky",
+        },
+    }
+    (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
+        json.dumps(
+            {"event": "Loadout", "Ship": "python", "ShipID": 7, "Modules": [module]}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "Reactive armour",
+        {
+            "steps": [
+                {
+                    "id": "armour",
+                    "slot": "Armour",
+                    "item": "reactive_armour",
+                    "engineering": {
+                        "BlueprintName": "Armour_Thermic",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_armour_chunky",
+                    },
+                }
+            ]
+        },
+    )
+    plugin.start_session("Reactive armour", "7")
+
+    row = plugin._field("session", "session_modules")["items"][0]
+    assert row["key"] == "armour"
+    assert row["params"] == {
+        "blueprint": "Thermal resistant",
+        "target": 5,
+        "experimentalEffect": "Deep Plating",
+        "current": 5,
+    }
 
 
 def test_journal_watcher_dispatches_entries_in_config_state(tmp_path: Path, monkeypatch):
@@ -961,13 +1098,36 @@ def test_slef_kestrel_fixture_parses_full_engineering(tmp_path: Path):
     }
     assert engineering["int_powerplant_size5_class5"]["BlueprintName"] == "PowerPlant_Armoured"
     assert engineering["int_powerplant_size5_class5"]["Level"] == 5
+    assert engineering["int_powerplant_size5_class5"]["ExperimentalEffect"] == "special_powerplant_cooled"
     assert engineering["int_hyperdrive_overcharge_size4_class5"]["Level"] == 5
     # Cargo hatch and the guardian module carry no engineering.
     assert engineering["modularcargobaydoor"] is None
     assert engineering["int_guardianmodulereinforcement_size2_class1"] is None
 
 
-def test_next_step_action_uses_spec_name_and_engineering_target(tmp_path: Path):
+def test_reactive_armour_target_matches_kestrel_loadout_name(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    step = {
+        "id": "armour",
+        "slot": "Armour",
+        "item": "reactive_armour",
+        "engineering": {"BlueprintName": "Armour_Thermic", "Level": 5},
+    }
+    loadout = [{
+        "Slot": "Armour",
+        "Item": "smallcombat01_nx_armour_reactive",
+        "Engineering": {"BlueprintName": "Armour_Thermic", "Level": 5},
+    }]
+
+    assert plugin._module_display("smallcombat01_nx_armour_reactive")[0] == "Reactive Surface Composite"
+    assert plugin._module_display("reactive_armour")[0] == "Reactive Surface Composite"
+    assert plugin._module_display("smallcombat01_nx_armour_reactive")[1] == "module.smallcombat01nxarmourreactive"
+    assert plugin._match_steps([step], loadout)[0]["installed"] is True
+    assert plugin._match_steps([step], loadout)[0]["satisfied"] is True
+    assert plugin._steps_satisfied_by_loadout([step], loadout) == ["armour"]
+
+
+def test_next_step_action_uses_catalog_blueprint_and_experimental_effect(tmp_path: Path):
     plugin = _plugin(tmp_path)
     plugin.import_plan(
         "Python",
@@ -976,9 +1136,13 @@ def test_next_step_action_uses_spec_name_and_engineering_target(tmp_path: Path):
             "steps": [
                 {"id": "fsd", "item": "int_hyperdrive_size4_class5"},
                 {
-                    "id": "shield",
-                    "item": "int_shieldgenerator_size5_class3_fast",
-                    "engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 5},
+                    "id": "armour",
+                    "item": "reactive_armour",
+                    "engineering": {
+                        "BlueprintName": "Armour_Thermic",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_armour_chunky",
+                    },
                 },
             ]
         },
@@ -988,8 +1152,10 @@ def test_next_step_action_uses_spec_name_and_engineering_target(tmp_path: Path):
 
     result = plugin._next_step_action()
 
-    assert "Shield Generator 5C" in result
-    assert "Thermic grade 5" in result
+    assert "Reactive Surface Composite" in result
+    assert "Thermal resistant grade 5" in result
+    assert "experimental effect Deep Plating" in result
+    assert "Thermic" not in result
     assert "2 of 2" in result
 
 
@@ -1024,6 +1190,77 @@ def test_status_generator_uses_spec_name(tmp_path: Path):
     assert label == "Ship upgrade"
     assert "Power Plant 5A" in content
     assert "Mina" in content
+
+
+def test_build_advice_works_from_imported_plan_without_active_session(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.helper = None
+    plugin._current_ship_id = "SHIP-1"
+    plugin._current_loadout_modules = []
+    plugin.import_plan(
+        "Python",
+        "Target build",
+        {"steps": [{"id": "pp", "item": "int_powerplant_size5_class5"}]},
+    )
+
+    reply = plugin._build_advice_action()
+
+    assert reply
+    assert "There is no active ship upgrade session" not in reply
+    assert "No target build is imported yet" not in reply
+    assert "route" in reply.lower() or "cannot compute" in reply.lower() or "nothing pending" in reply.lower()
+
+
+def test_build_advice_without_session_or_imported_plan_explains_next_step(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+
+    reply = plugin._build_advice_action()
+
+    assert reply == "No target build is imported yet. Import a target build in the Plans settings first."
+
+
+def test_status_generator_exposes_imported_target_without_active_session(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "Target Build",
+        {"steps": [{"id": "pp", "item": "int_powerplant_size5_class5"}]},
+    )
+    plugin._current_ship_id = "SHIP-7"
+    plugin._current_loadout_modules = [
+        {"Slot": "PowerPlant", "Item": "int_powerplant_size5_class5"}
+    ]
+
+    status = plugin._status_generator({})
+
+    assert len(status) == 1
+    assert status[0][0] == "Ship upgrade target"
+    assert "Target Build" in status[0][1]
+    assert "no progress session has been activated" in status[0][1]
+    assert "1/1 target modules (100%)" in status[0][1]
+
+
+def test_plan_status_reports_no_loaded_plan(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+
+    assert plugin._plan_status_action() == "No ship-upgrade plan is loaded. Import a target build in Plans settings."
+
+
+def test_plan_status_distinguishes_loaded_plan_from_active_session(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("smallcombat01_nx", "Kestrel target", {"steps": [{"id": "pp"}]})
+
+    loaded = plugin._plan_status_action()
+    assert "target upgrade plan is loaded but not active" in loaded
+    assert "Kestrel target" in loaded
+    assert "Kestrel Mk II" in loaded
+
+    plugin.start_session("Kestrel target", "SHIP-15")
+    active = plugin._plan_status_action()
+    assert "upgrade plan is active and in progress" in active
+    assert "Kestrel target" in active
+    assert "Kestrel Mk II" in active
+    assert "0/1 tracked steps complete" in active
 
 
 def test_session_summary_is_published_as_i18n_key(tmp_path: Path):

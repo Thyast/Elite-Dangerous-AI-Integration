@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+
+import pytest
 import sys
 
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
@@ -9,6 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.lib.actions import actions_web
+from src.lib.actions import Actions as actions
 
 
 class FakePromptGenerator:
@@ -46,6 +49,34 @@ def consume_generator(generator):
             values.append(next(generator))
         except StopIteration as stop:
             return values, stop.value
+
+
+def test_get_visuals_answers_armor_query_from_technical_loadout_id(monkeypatch) -> None:
+    monkeypatch.setattr(actions, "screenshot", lambda: pytest.fail("visual query should use loadout"))
+    monkeypatch.setattr(actions, "vision_model", None)
+
+    result = actions.get_visuals(
+        {"query": "Quel est le module d'armure que j'ai déjà ?"},
+        {
+            "Loadout": {
+                "Ship": "smallcombat01_nx",
+                "Modules": [
+                    {
+                        "Slot": "Armour",
+                        "Item": "smallcombat01_nx_armour_reactive",
+                        "Engineering": {
+                            "BlueprintName": "Armour_Thermic",
+                            "Level": 5,
+                        },
+                    }
+                ],
+            }
+        },
+    )
+
+    assert "smallcombat01_nx_armour_reactive" in result
+    assert "Armour_Thermic" in result
+    assert "grade 5" in result
 
 
 def test_web_search_agent_yields_internal_tool_processing_events(monkeypatch) -> None:
@@ -390,6 +421,81 @@ def test_station_request_rejects_invalid_commodity_market_data_age() -> None:
         assert str(error) == "market_days_old must be a positive whole number."
     else:
         raise AssertionError("Expected an invalid market data age to be rejected")
+
+
+def test_structured_station_search_handles_multiple_module_filters(monkeypatch) -> None:
+    captured = []
+
+    def fake_prepare(obj, states):
+        captured.append(obj)
+        return {"filters": {"modules": obj["modules"]}, "size": obj["size"]}
+
+    monkeypatch.setattr(actions_web, "prepare_station_request", fake_prepare)
+    monkeypatch.setattr(
+        actions_web,
+        "_execute_station_search",
+        lambda request: {
+            "amount_total": 1,
+            "results": [{
+                "name": "Jameson Memorial",
+                "system": "Shinrarta Dezhra",
+                "distance": 12.0,
+                "distance_to_arrival": 100.0,
+                "is_planetary": False,
+                "services": ["outfitting"],
+                "modules": [
+                    {"name": "Beam Laser", "class": "3", "rating": "A", "price": 100},
+                    {"name": "Power Plant", "class": "5", "rating": "A", "price": 200},
+                ],
+                "matched_filters": request["filters"]["modules"],
+            }],
+        },
+    )
+
+    result = actions_web.search_stations_for_modules(
+        [
+            {"name": "Beam Laser", "class": ["3"], "rating": ["A"]},
+            {"name": "Power Plant", "class": ["5"], "rating": ["A"]},
+        ],
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert len(result["stations"]) == 1
+    station = result["stations"][0]
+    assert station["name"] == "Jameson Memorial"
+    assert len(station["modules"]) == 2
+    assert len(station["matched_filters"]) == 2
+    assert station["stock_status"] == "unknown"
+    assert len(captured[0]["modules"]) == 2
+
+
+def test_structured_station_search_returns_errors_as_data(monkeypatch) -> None:
+    def fail(_request):
+        raise RuntimeError("Spansh unavailable")
+
+    monkeypatch.setattr(actions_web, "prepare_station_request", lambda obj, states: {"filters": {}, "size": 1})
+    monkeypatch.setattr(actions_web, "_execute_station_search", fail)
+
+    result = actions_web.search_stations_for_modules([{"name": "Beam Laser"}], {})
+
+    assert result["status"] == "error"
+    assert result["stations"] == []
+    assert "Spansh unavailable" in result["error"]
+
+
+def test_structured_station_search_returns_errors_as_data(monkeypatch) -> None:
+    def fail(_request, **_kwargs):
+        raise RuntimeError("Spansh unavailable")
+
+    monkeypatch.setattr(actions_web, "prepare_station_request", lambda obj, states: {"filters": {}, "size": 1})
+    monkeypatch.setattr(actions_web, "_execute_station_search", fail)
+
+    result = actions_web.search_stations_for_modules([{"name": "Beam Laser"}], {})
+
+    assert result["status"] == "error"
+    assert result["stations"] == []
+    assert "Spansh unavailable" in result["error"]
 
 
 def test_station_response_reports_effective_commodity_market_data_age() -> None:

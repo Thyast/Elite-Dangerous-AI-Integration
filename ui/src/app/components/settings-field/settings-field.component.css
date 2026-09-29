@@ -164,6 +164,22 @@ button.primary.mat-mdc-outlined-button:hover:not(:disabled) {
     color: rgba(255, 152, 0, 0.75);
 }
 
+.list-row.status-absent .list-row-title {
+    color: var(--color-warning-orange, #ff9800);
+}
+
+.list-row.status-absent .list-row-meta {
+    color: color-mix(in srgb, var(--color-warning-orange, #ff9800) 75%, transparent);
+}
+
+.list-row.status-installed-pending .list-row-title {
+    color: color-mix(in srgb, var(--color-primary-blue, #4fc3f7) 82%, white);
+}
+
+.list-row.status-installed-pending .list-row-meta {
+    color: color-mix(in srgb, var(--color-primary-blue, #4fc3f7) 65%, white);
+}
+
 .list-group-icon {
     font-size: 20px;
     width: 20px;

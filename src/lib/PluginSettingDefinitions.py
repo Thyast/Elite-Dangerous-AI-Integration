@@ -98,6 +98,7 @@ class ListRow(TypedDict):
     params: NotRequired[dict[str, str | int | float]]
     group: NotRequired[str]
     pending: NotRequired[bool]
+    status: NotRequired[str]
     progress: NotRequired[list[ListRowProgress]]
 
 class ListSetting(SettingBase):

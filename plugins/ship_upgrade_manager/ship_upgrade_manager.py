@@ -8,6 +8,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -33,7 +34,7 @@ from lib.PluginSettingDefinitions import (
     TextSetting,
 )
 from .parsers import PlanParseError, parse_plan_input
-from .planner import analyze_build, build_advice, render_chain
+from .planner import analyze_build, build_advice, canonical_item, render_chain
 
 
 PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
@@ -92,6 +93,19 @@ CORE_MODULE_FAMILIES = {
     "fueltank",
 }
 
+# Standard core internal slot names — checked before the item family so
+# ship-specific variants (MkIIAgileBoost engine, armour) classify correctly.
+CORE_SLOTS = {
+    "armour",
+    "powerplant",
+    "mainengines",
+    "frameshiftdrive",
+    "lifesupport",
+    "powerdistributor",
+    "radar",
+    "fueltank",
+}
+
 UTILITY_MODULE_FAMILIES = {
     "shieldbooster",
     "heatsinklauncher",
@@ -114,6 +128,46 @@ CATEGORY_ORDER = [
 def _blueprint_family_display(blueprint: str) -> str:
     """'ShieldGenerator_Reinforced' -> 'Reinforced'."""
     return re.sub(r"(?<!^)(?=[A-Z])", " ", blueprint.split("_")[-1])
+
+
+@lru_cache(maxsize=2)
+def _engineering_catalog_names(filename: str, id_field: str) -> dict[str, str]:
+    catalog_path = Path(__file__).resolve().parent / "assets" / filename
+    try:
+        with catalog_path.open(encoding="utf-8") as handle:
+            catalog = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Unable to load Ship Upgrade Manager engineering catalog: {catalog_path}"
+        ) from exc
+    if not isinstance(catalog, dict):
+        raise ValueError(f"Invalid engineering catalog format: {catalog_path}")
+
+    names: dict[str, str] = {}
+    for catalog_id, entry in catalog.items():
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Invalid entry {catalog_id!r} in engineering catalog: {catalog_path}"
+            )
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(
+                f"Missing display name for {catalog_id!r} in engineering catalog: "
+                f"{catalog_path}"
+            )
+        for identifier in (catalog_id, entry.get(id_field)):
+            if isinstance(identifier, str) and identifier.strip():
+                names[identifier.strip()] = name.strip()
+    return names
+
+
+def _engineering_catalog_display_name(
+    identifier: str, filename: str, id_field: str
+) -> str:
+    identifier = identifier.strip()
+    if not identifier:
+        return ""
+    return _engineering_catalog_names(filename, id_field).get(identifier, identifier)
 
 
 # Class (1-5) to E:D letter grade: 1=E, 2=D, 3=C, 4=B, 5=A.
@@ -336,6 +390,24 @@ class StateQueryParams(BaseModel):
     ship: str | None = Field(default=None, description="Optional ship name or id to filter on")
 
 
+class LoadoutQueryParams(BaseModel):
+    slot: str | None = Field(
+        default=None,
+        description="Optional technical ship slot such as Armour, PowerPlant, or FrameShiftDrive",
+    )
+
+
+class BuildAdviceParams(BaseModel):
+    session_id: str | None = Field(default=None, description="Optional active session id")
+    module: str | None = Field(
+        default=None,
+        description=(
+            "Optional specific module to plan for. Leave empty for the complete "
+            "active/imported ship build route. Use when the player names one module."
+        ),
+    )
+
+
 class PlanChangeParams(BaseModel):
     plan_input: str = Field(description="JSON loadout or supported plan URL")
 
@@ -357,6 +429,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._watch_active = True
         self._catalog: dict[str, Any] = {}
         self._engineer_registry: dict[str, Any] = {}
+        self._module_names: dict[str, str] = {}
         self._load_catalog()
         self._initialize_database()
         self._last_import = self._load_last_import()
@@ -365,7 +438,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         _JournalWatcher(self).start()
 
     def _load_catalog(self) -> None:
-        """Load the versioned catalog and engineer registry (build-time assets)."""
+        """Load the versioned catalog, engineer registry and module names."""
         try:
             self._catalog = json.loads(
                 Path(get_asset_path("module_catalog.json")).read_text(encoding="utf-8")
@@ -380,6 +453,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
         except (OSError, json.JSONDecodeError) as error:
             log("warning", f"Ship Upgrade Manager engineer registry load failed: {error}")
             self._engineer_registry = {}
+        try:
+            self._module_names = json.loads(
+                Path(get_asset_path("module_names.json")).read_text(encoding="utf-8")
+            ).get("names", {})
+        except (OSError, json.JSONDecodeError) as error:
+            log("warning", f"Ship Upgrade Manager module names load failed: {error}")
+            self._module_names = {}
 
     # ------------------------------------------------------------------
     # Settings UI construction (import tunnel state machine)
@@ -569,6 +649,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
         head = cleaned[len(prefix):] if prefix else cleaned
         size = module_class = None
         variant = ""
+        # Strip weapon mount suffix (hpt_: _fixed/gimbal/turret[_small/…/huge])
+        if prefix.startswith("hpt"):
+            head = re.sub(
+                r"_(?:fixed|gimbal|turret)(?:_(?:small|medium|large|huge|tiny))?$", "", head
+            )
         parts = re.split(r"_size(\d+)_class(\d+)", head, maxsplit=1)
         family = parts[0]
         if len(parts) > 1:
@@ -587,8 +672,16 @@ class ShipUpgradeManagerPlugin(PluginBase):
             family = f"{family}_{variant}"
         return family, size, module_class
 
-    def _module_category(self, item: str) -> str:
-        """Outfitting-style category of a module, from its FD id."""
+    def _module_category(self, item: str, slot: str = "") -> str:
+        """Outfitting-style category of a module, from its slot or FD id.
+
+        The slot is checked first: core internal slots have well-known names
+        regardless of the item's family (ship-specific variants like
+        `MkIIAgileBoost_Engine` or armour ids don't match the generic
+        family list)."""
+        slot_norm = (slot or "").strip().lower()
+        if slot_norm in CORE_SLOTS:
+            return "plugin.sum.category.coreInternal"
         cleaned = self._normalize_module_id(item)
         if cleaned.startswith("hpt_cr_"):
             return "plugin.sum.category.utilityMounts"
@@ -628,9 +721,21 @@ class ShipUpgradeManagerPlugin(PluginBase):
             required_blueprint = str(
                 required.get("BlueprintName") or required.get("blueprint") or ""
             )
+            required_special = str(
+                required.get("ExperimentalEffect")
+                or required.get("experimental_effect")
+                or required.get("experimentalEffect")
+                or ""
+            )
             target_params: dict[str, str | int | float] = {
-                "blueprint": _blueprint_family_display(required_blueprint),
+                "blueprint": _engineering_catalog_display_name(
+                    required_blueprint, "blueprints.json", "fdname"
+                ),
             }
+            if required_special:
+                target_params["experimentalEffect"] = _engineering_catalog_display_name(
+                    required_special, "specials.json", "edname"
+                )
             if required_level is not None:
                 target_params["target"] = int(float(required_level))
             if not match["installed"]:
@@ -647,11 +752,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 params = None
             else:
                 current_level = match["eng_current"]
-                has_engineering = bool(match["eng_blueprint"]) and bool(current_level)
+                has_engineering = bool(match["eng_blueprint_id"]) and bool(current_level)
                 blueprint_ok = match["satisfied"] or (
                     has_engineering
-                    and match["eng_blueprint"].lower().replace(" ", "")
-                    == re.sub(r"[^a-z0-9]", "", _blueprint_family_display(required_blueprint).lower())
+                    and self._blueprint_key(match["eng_blueprint_id"])
+                    == self._blueprint_key(required_blueprint)
                 )
                 target_params["current"] = current_level or 0
                 if match["satisfied"]:
@@ -671,10 +776,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "title": title,
                 "title_key": title_key,
                 "grade": title_grade or "",
-                "group": self._module_category(item),
+                "group": self._module_category(item, str(step.get("slot") or "")),
                 "meta": meta,
                 "params": params or {},
                 "pending": not match["satisfied"],
+                "status": (
+                    "absent"
+                    if not match["installed"]
+                    else "installed-pending"
+                    if not match["satisfied"]
+                    else "complete"
+                ),
             }
             rows.append(row)
         category_index = {key: index for index, key in enumerate(CATEGORY_ORDER)}
@@ -732,24 +844,29 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _module_display(self, item: str) -> tuple[str, str, str | None]:
         """Split an FD module id into display parts.
 
-        Returns (english fallback name, i18n key, size/class grade) where the
-        grade uses the E:D letter notation (1=E … 5=A, size 0 → letter only).
-        The i18n key ('module.<family>') is resolved by the UI against the
-        module dictionary; the english name is the fallback."""
+        Returns (display name, i18n key, size/class grade). The display name
+        resolves against the module_names.json dictionary first (spec EN
+        names), then the engineering catalogue, then a humanized fallback."""
         family, size, module_class = self._split_module_id(item)
         family_key = re.sub(r"[^a-z0-9]", "", family)
         key = f"module.{_spec_module_key(family_key)}"
-        pretty = next(
-            (name for name_key, name in MODULE_FAMILIES if family_key.startswith(name_key)),
-            None,
+        display = (
+            "Reactive Surface Composite"
+            if canonical_item(self._normalize_module_id(item)) == "reactive_surface_composite"
+            else self._module_names.get(family_key)
         )
-        if pretty is None:
-            pretty = family.replace("_", " ").strip().title()
+        if display is None:
+            display = next(
+                (name for name_key, name in MODULE_FAMILIES if family_key.startswith(name_key)),
+                None,
+            )
+        if display is None:
+            display = family.replace("_", " ").strip().title()
         grade = None
         if module_class:
             letter = CLASS_LETTERS.get(int(module_class))
             grade = f"{size}{letter}" if size and size != "0" else (letter or "?")
-        return pretty, key, grade
+        return display, key, grade
 
     def _loadout_for_ship(self, ship_instance_id: str) -> list[dict[str, Any]]:
         """Current modules of a ship: live runtime snapshot, else journal read."""
@@ -765,8 +882,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
         """One-to-one match of plan steps against the ship's loadout.
 
         Each result carries the step, whether a matching module is installed,
-        the currently reached engineering level with its blueprint family, and
-        whether the step requirement is satisfied (strict blueprint rule)."""
+        the currently reached engineering level and blueprint ID, and whether
+        the step requirement is satisfied (strict blueprint rule)."""
         available: list[dict[str, Any]] = []
         for module in modules:
             item = self._normalize_module_id(str(module.get("Item") or ""))
@@ -797,7 +914,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     index
                     for index, candidate in enumerate(available)
                     if not used[index]
-                    and candidate["item"] == item
+                    and canonical_item(candidate["item"]) == canonical_item(item)
                     and (
                         not step_slot
                         or not candidate["slot"]
@@ -811,13 +928,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     (
                         index
                         for index, candidate in enumerate(available)
-                        if not used[index] and candidate["item"] == item
+                        if not used[index]
+                        and canonical_item(candidate["item"]) == canonical_item(item)
                     ),
                     None,
                 )
             if candidate_index is None:
-                results.append({"step": step, "installed": False, "slot": "", "eng_current": None, "eng_blueprint": "", "satisfied": False})
-                continue
+                    results.append(
+                        {
+                            "step": step,
+                            "installed": False,
+                            "slot": "",
+                            "eng_current": None,
+                            "eng_blueprint_id": "",
+                            "satisfied": False,
+                        }
+                    )
+                    continue
             used[candidate_index] = True
             candidate = available[candidate_index]
             required = step.get("engineering") or {}
@@ -840,18 +967,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     and current_level >= int(float(required_level))
                 )
                 eng_current = current_level if blueprint_ok else 0
-            blueprint_family = ""
-            if candidate["blueprint"]:
-                blueprint_family = re.sub(
-                    r"(?<!^)(?=[A-Z])", " ", candidate["blueprint"].split("_")[-1]
-                )
             results.append(
                 {
                     "step": step,
                     "installed": True,
                     "slot": candidate["slot"],
                     "eng_current": eng_current,
-                    "eng_blueprint": blueprint_family,
+                    "eng_blueprint_id": candidate["blueprint"],
                     "satisfied": satisfied,
                 }
             )
@@ -935,9 +1057,27 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 grade = engineering.get("Level") or engineering.get("level")
                 if grade is not None:
                     entry["next_grade"] = grade
-                blueprint = str(engineering.get("BlueprintName") or engineering.get("blueprint") or "").split("_")[-1]
+                blueprint = str(
+                    engineering.get("BlueprintName")
+                    or engineering.get("blueprint")
+                    or ""
+                ).strip()
                 if blueprint and blueprint.lower() != "none":
-                    entry["next_engineering"] = re.sub(r"(?<!^)(?=[A-Z])", " ", blueprint)
+                    entry["next_engineering"] = _engineering_catalog_display_name(
+                        blueprint, "blueprints.json", "fdname"
+                    )
+                experimental_effect = str(
+                    engineering.get("ExperimentalEffect")
+                    or engineering.get("experimental_effect")
+                    or engineering.get("experimentalEffect")
+                    or ""
+                )
+                if experimental_effect:
+                    entry["next_experimental_effect"] = (
+                        _engineering_catalog_display_name(
+                            experimental_effect, "specials.json", "edname"
+                        )
+                    )
             progress.append(entry)
         return progress
 
@@ -1040,10 +1180,25 @@ class ShipUpgradeManagerPlugin(PluginBase):
         )
         helper.register_action(
             name="ship_upgrade_next_step",
-            description="Describe the next module of the active ship upgrade session",
+            description=(
+                "Describe the next uncompleted module of the active ship upgrade "
+                "session, including its target engineering blueprint, grade, and "
+                "experimental effect when specified by the plan. Use this action "
+                "for questions about what engineering modification or experimental "
+                "effect to apply next, even when the player is not asking for a "
+                "complete route. Never infer an experimental effect that is absent "
+                "from the plan."
+            ),
             parameters=SessionActionParams,
             method=lambda args, context: self._next_step_action(args.session_id, context),
             action_type="ship",
+            cache_prefill={
+                "j'ai un plan actif, quel effet expérimental dois-je appliquer": {},
+                "quel effet expérimental dois-je appliquer": {},
+                "quel effet expérimental appliquer au prochain module": {},
+                "what experimental effect should i apply": {},
+                "which experimental effect should i apply to the next module": {},
+            },
         )
         helper.register_action(
             name="ship_upgrade_list_plans",
@@ -1069,19 +1224,129 @@ class ShipUpgradeManagerPlugin(PluginBase):
         helper.register_action(
             name="ship_upgrade_build_advice",
             description=(
-                "Recommend the next action to complete the active upgrade plan: "
-                "module to buy, engineer to visit (with system and distance), "
-                "blueprint grade to apply"
+                "Prepare the complete ordered multi-stop route to finish the active "
+                "or most recently imported target ship build, even if no tracking "
+                "session has been activated yet. Compare every target module "
+                "against the current loadout; find and group module purchases by "
+                "Spansh outfitting stations; include engineer visits in order with "
+                "system names and distances, then list every blueprint grade and "
+                "materials status. Call this when the player asks for the full "
+                "route, complete route, all steps, or how to finish the build. "
+                "For a direct question about the next blueprint, grade, or "
+                "experimental effect, use ship_upgrade_next_step instead. "
+                "If the player names one module, set the optional module argument "
+                "and limit the route to that module. If no module is named, plan "
+                "the complete target build. Never send a build-route request to "
+                "web_search_agent: this action owns the route."
             ),
-            parameters=SessionActionParams,
+            parameters=BuildAdviceParams,
             method=self._build_advice_action,
             action_type="ship",
+            input_template=lambda _args, _states: "Prepare complete ship-upgrade route",
+            cache_prefill={
+                "prepare a route for improving my ship": {},
+                "prepare a route to improve my ship": {},
+                "prepare a route to improve my spaceship": {},
+                "prepare a route to upgrade my ship": {},
+                "prepare a route to upgrade my entire ship": {},
+                "make me a complete route to improve my entire ship": {},
+                "plan a complete route to improve my whole ship": {},
+                "prepare a complete route for improving my ship": {},
+                "prepare a complete route for all modules": {},
+                "prepare a complete route to improve the entire ship": {},
+                "i want a full route for all modules": {},
+                "make a complete route for my ship build": {},
+                "build me a route to finish the target build": {},
+                "plan the full route to complete my build": {},
+                "what is the complete route for this build": {},
+                "route complete for all modules": {},
+                "prepare route for ship upgrades": {},
+                "plan an upgrade route for my ship": {},
+                "route complète pour améliorer mon vaisseau": {},
+                "prépare-moi une route pour l'amélioration de mon vaisseau": {},
+                "prépare une route pour améliorer mon vaisseau": {},
+                "prépare moi une route pour améliorer mon vaisseau": {},
+                "prépare une route d'amélioration de mon vaisseau": {},
+                "programme-moi une route complète pour l'amélioration de mon vaisseau": {},
+                "programme-moi une route pour l'amélioration de mon vaisseau": {},
+                "programme une route complète pour améliorer mon vaisseau": {},
+                "prépare une route complète pour améliorer l'intégralité de mon vaisseau": {},
+                "prépare-moi une route complète pour améliorer l'intégralité de mon vaisseau": {},
+                "prépare une route complète pour tous les modules": {},
+                "je veux une route complète pour tous les modules": {},
+                "fais-moi une route pour améliorer mon vaisseau": {},
+                "fais-moi un itinéraire complet pour terminer le build": {},
+                "donne-moi toutes les étapes pour améliorer tout le vaisseau": {},
+                "toutes les étapes pour terminer mon build": {},
+            },
+        )
+        helper.register_action(
+            name="ship_upgrade_plan_status",
+            description=(
+                "Answer whether a ship-upgrade plan is loaded, active or currently "
+                "in progress. Report the plan name and ship; distinguish an imported "
+                "target plan from an active tracking session. Use for questions like "
+                "'is an upgrade plan loaded?', 'which plan is active/in progress?', "
+                "or 'do I have a ship build plan?'."
+            ),
+            parameters=SessionActionParams,
+            method=lambda _args, _context: self._plan_status_action(),
+            action_type="ship",
+            input_template=lambda _args, _states: "Check loaded ship-upgrade plan status",
+            cache_prefill={
+                "is an upgrade plan loaded": {},
+                "do i have a ship upgrade plan loaded": {},
+                "which upgrade plan is loaded": {},
+                "which upgrade plan is active": {},
+                "which plan is in progress": {},
+                "what is my current ship build plan": {},
+                "est-ce qu un plan d amelioration est charge": {},
+                "est-ce qu il y a un plan d amelioration charge": {},
+                "y a t il un plan d amelioration charge": {},
+                "quel plan d amelioration est charge": {},
+                "quel plan est actif": {},
+                "quel plan est en cours": {},
+                "mon plan d amelioration est il actif": {},
+                "est-ce que j ai un plan d amelioration charge": {},
+            },
+        )
+        helper.register_action(
+            name="ship_upgrade_current_loadout",
+            description=(
+                "Answer questions about modules actually installed on the current ship. "
+                "Use the loadout journal's technical slot and item identifiers, never "
+                "compare module display names or localized strings. For an armor/hull "
+                "question, query slot Armour and report its exact installed module id, "
+                "recognized module name, engineering blueprint, and grade. Do not use "
+                "the imported target plan to describe the current installed module."
+            ),
+            parameters=LoadoutQueryParams,
+            method=self._current_loadout_action,
+            action_type="ship",
+            input_template=lambda _args, _states: "Check the current ship loadout",
+            cache_prefill={
+                "what armor module is installed": {"slot": "Armour"},
+                "what armour module is installed": {"slot": "Armour"},
+                "which armor do i have installed": {"slot": "Armour"},
+                "which armour do i have installed": {"slot": "Armour"},
+                "what is my installed armor": {"slot": "Armour"},
+                "what is my installed armour": {"slot": "Armour"},
+                "quel module de blindage est installé": {"slot": "Armour"},
+                "quelle armure est installée": {"slot": "Armour"},
+                "quelle armure ai-je déjà": {"slot": "Armour"},
+                "quel est le module d'armure que j'ai déjà": {"slot": "Armour"},
+                "quel module d'armure ai-je déjà": {"slot": "Armour"},
+                "et quel est le module d'armure que j'ai déjà": {"slot": "Armour"},
+                "quel module d'armure ai-je déjà": {"slot": "Armour"},
+            },
         )
         helper.register_action(
             name="ship_upgrade_state",
             description=(
                 "Report the current upgrade plan state: which plan, on which ship, "
-                "progress, modules installed vs target, engineering remaining"
+                "progress, modules installed vs target, engineering remaining. "
+                "For the specific blueprint or experimental effect to apply next, "
+                "use ship_upgrade_next_step."
             ),
             parameters=StateQueryParams,
             method=self._state_query_action,
@@ -1164,7 +1429,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def _step_voice_label(self, step: dict[str, Any]) -> str:
         """Readable spoken label for a plan step: spec name with grade, plus
-        the engineering target when the step requires one."""
+        the engineering target and experimental effect when present."""
         item = step.get("item")
         if item:
             name, _key, grade = self._module_display(str(item))
@@ -1172,12 +1437,34 @@ class ShipUpgradeManagerPlugin(PluginBase):
         else:
             label = str(step.get("label") or step.get("id", ""))
         engineering = step.get("engineering") or {}
-        blueprint = str(
+        blueprint_id = str(
             engineering.get("BlueprintName") or engineering.get("blueprint") or ""
         )
         level = engineering.get("Level") or engineering.get("level")
-        if blueprint and level is not None:
-            label += f", then engineer it with {_blueprint_family_display(blueprint)} grade {int(float(level))}"
+        if blueprint_id and blueprint_id.lower() != "none":
+            blueprint_name = _engineering_catalog_display_name(
+                blueprint_id, "blueprints.json", "fdname"
+            )
+            if level is not None:
+                label += (
+                    f", then engineer it with {blueprint_name} "
+                    f"grade {int(float(level))}"
+                )
+            else:
+                label += f", then engineer it with {blueprint_name}"
+        experimental_effect_id = str(
+            engineering.get("ExperimentalEffect")
+            or engineering.get("experimental_effect")
+            or engineering.get("experimentalEffect")
+            or ""
+        )
+        if experimental_effect_id:
+            experimental_effect = _engineering_catalog_display_name(
+                experimental_effect_id, "specials.json", "edname"
+            )
+            label += (
+                f", then apply the experimental effect {experimental_effect}"
+            )
         return label
 
     def _next_step_action(self, session_id=None, context=None) -> str:
@@ -1205,20 +1492,134 @@ class ShipUpgradeManagerPlugin(PluginBase):
             for plan in plans
         )
 
-    def _build_advice_action(self, session_id=None, context=None) -> str:
-        """Full DAG chain rendered as a spoken sequence (spec §16.1)."""
+    def _station_module_filter(self, item: str) -> dict[str, Any] | None:
+        """Map an internal item id to an exact station_finder module filter."""
+        from lib.actions.data import known_modules
+
+        module_id = self._normalize_module_id(item)
+        family, size, module_class = self._split_module_id(module_id)
+        family_key = re.sub(r"[^a-z0-9]", "", family)
+        i18n_key = f"module.{_spec_module_key(family_key)}"
+        display = (
+            "Reactive Surface Composite"
+            if canonical_item(module_id) == "reactive_surface_composite"
+            else self._module_names.get(i18n_key.removeprefix("module."))
+        )
+        if not display:
+            return None
+
+        # station_finder expects the canonical known_modules spelling, not a
+        # substring and not an arbitrary localized string.
+        exact = next(
+            (candidate for candidate in known_modules if candidate.casefold() == display.casefold()),
+            None,
+        )
+        if exact is None:
+            return None
+        request: dict[str, Any] = {"name": exact}
+        if size and size != "0":
+            request["class"] = [str(int(size))]
+        if module_class:
+            rating = CLASS_LETTERS.get(int(module_class))
+            if rating:
+                request["rating"] = [rating]
+        return request
+
+    def _step_matches_module_query(self, step: dict[str, Any], query: str) -> bool:
+        normalized_query = re.sub(r"[^a-z0-9]", "", query.casefold())
+        item = str(step.get("item") or "")
+        if normalized_query in re.sub(r"[^a-z0-9]", "", item.casefold()):
+            return True
+        if item:
+            display_name, module_key, _grade = self._module_display(item)
+            if normalized_query in re.sub(r"[^a-z0-9]", "", display_name.casefold()):
+                return True
+            if normalized_query in re.sub(r"[^a-z0-9]", "", module_key.removeprefix("module.")):
+                return True
+        label = str(step.get("label") or step.get("id", ""))
+        return normalized_query in re.sub(r"[^a-z0-9]", "", label.casefold())
+
+    def _build_advice_action(
+        self,
+        args: BuildAdviceParams | None = None,
+        context=None,
+        session_id=None,
+    ) -> str:
+        """Full DAG route from the active session or latest imported goal.
+
+        When `args.module` is supplied, only matching module steps are planned;
+        otherwise the complete target build is planned.
+        """
+        if isinstance(args, str) and session_id is None:
+            # Backward compatibility for direct tests/callers that passed a session id.
+            session_id, args = args, None
+        selected_module = args.module.strip() if args and args.module else None
         session = self.get_session(session_id, context)
-        if session is None:
-            return "There is no active ship upgrade session."
-        target_steps = session["steps"]
-        loadout = self._loadout_for_ship(session["ship_instance_id"])
+        if session is not None:
+            plan_name = session["plan_name"]
+            target_steps = session["steps"]
+            ship_instance_id = session["ship_instance_id"]
+            ship_name = session.get("ship_custom_name") or None
+        else:
+            # An imported target plan is sufficient to ask for its complete
+            # route; do not require the user to activate progress tracking.
+            last_import = self._load_last_import()
+            with self.get_db() as db:
+                if last_import and last_import.get("plan_id"):
+                    plan_row = db.execute(
+                        "SELECT id, plan_name, ship_model, source_json FROM plans WHERE id = ?",
+                        (last_import["plan_id"],),
+                    ).fetchone()
+                else:
+                    plan_row = db.execute(
+                        "SELECT id, plan_name, ship_model, source_json FROM plans ORDER BY last_modified DESC LIMIT 1"
+                    ).fetchone()
+            if plan_row is None:
+                return "No target build is imported yet. Import a target build in the Plans settings first."
+            plan = dict(plan_row)
+            plan_name = plan["plan_name"]
+            target_steps = self._plan_steps(plan["source_json"])
+            detected = self._detect_ship_from_journal() if not self._current_ship_id else {}
+            ship_instance_id = self._current_ship_id or detected.get("id", "")
+            ship_name = self._current_ship_name or detected.get("name") or None
+            if not ship_instance_id:
+                return "I found the target build, but cannot identify the current ship from the Journal yet."
+        if selected_module:
+            target_steps = [
+                step for step in target_steps
+                if self._step_matches_module_query(step, selected_module)
+            ]
+            if not target_steps:
+                return f"The active target build has no module matching '{selected_module}'."
+        loadout = self._loadout_for_ship(ship_instance_id)
         deltas = analyze_build(target_steps, loadout)
+        # One ephemeral cache per advice calculation. It is discarded on
+        # return, so station data is never persisted or reused across asks.
+        station_request_cache: dict[str, dict[str, Any]] = {}
+        location = None
+        if self.helper is not None:
+            _events, states = self.helper._event_manager.get_current_state()
+            location = states.get("Location")
+
+        def station_search(module_filters, *, distance=50000, size=25, cache_key=None):
+            if self.helper is None:
+                return {"status": "error", "error": "COVAS runtime helper unavailable", "stations": []}
+            return self.helper.search_stations_for_modules(
+                module_filters,
+                distance=distance,
+                size=size,
+                cache=station_request_cache,
+                cache_key=cache_key,
+            )
+
         actions = build_advice(
             deltas,
             self._catalog,
             self._engineer_registry,
             current_position=self._current_position,
-            ship_name=session.get("ship_custom_name") or None,
+            ship_name=ship_name,
+            station_search=station_search,
+            module_filter=self._station_module_filter,
         )
         return render_chain(actions)
 
@@ -1296,6 +1697,87 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
         self._enter_import_state(IMPORT_STATE_IMPORTED)
         log("info", f"Imported Ship Upgrade Manager plan {plan_id} version {record['version']}")
+
+    def _plan_status_action(self) -> str:
+        """Report loaded-target and active-session status without ambiguity."""
+        session = self.get_session()
+        if session is not None:
+            ship = session.get("ship_custom_name") or self._ship_display_name(
+                session.get("ship_model", "")
+            ) or session["ship_instance_id"]
+            return (
+                f"An upgrade plan is active and in progress: {session['plan_name']} "
+                f"for {ship}, with {len(session['completed_steps'])}/"
+                f"{session['total_steps']} tracked steps complete."
+            )
+
+        last_import = self._load_last_import()
+        with self.get_db() as db:
+            if last_import and last_import.get("plan_id"):
+                row = db.execute(
+                    "SELECT plan_name, ship_model FROM plans WHERE id = ?",
+                    (last_import["plan_id"],),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT plan_name, ship_model FROM plans ORDER BY last_modified DESC LIMIT 1"
+                ).fetchone()
+        if row is None:
+            return "No ship-upgrade plan is loaded. Import a target build in Plans settings."
+        ship = self._ship_display_name(row["ship_model"])
+        return (
+            f"A target upgrade plan is loaded but not active: {row['plan_name']} "
+            f"for {ship}. Activate it with the plan's play button to track an in-game session."
+        )
+
+    def _current_loadout_action(
+        self, args: LoadoutQueryParams, _context: dict[str, Any]
+    ) -> str:
+        """Report installed hardware directly from the current loadout projection."""
+        if self.helper is None:
+            return "The current ship loadout is unavailable outside runtime."
+        _events, states = self.helper._event_manager.get_current_state()
+        loadout = states.get("Loadout")
+        if isinstance(loadout, BaseModel):
+            loadout = loadout.model_dump()
+        if not isinstance(loadout, dict):
+            return "The current ship loadout is unavailable."
+        modules = loadout.get("Modules")
+        if not isinstance(modules, list) or not modules:
+            return "The current ship loadout has no module details yet."
+        requested_slot = (args.slot or "").strip().casefold()
+        if requested_slot:
+            matching = [
+                module for module in modules
+                if isinstance(module, dict)
+                and str(module.get("Slot") or "").casefold() == requested_slot
+            ]
+            if not matching:
+                return f"No installed module was found in the {args.slot} slot."
+        else:
+            matching = [module for module in modules if isinstance(module, dict)]
+        descriptions: list[str] = []
+        for module in matching:
+            item_id = str(module.get("Item") or "").strip()
+            slot = str(module.get("Slot") or "").strip()
+            if not item_id:
+                continue
+            display, _key, _grade = self._module_display(item_id)
+            details = f"{slot}: {display} (technical id: {item_id})"
+            engineering = module.get("Engineering")
+            if isinstance(engineering, dict):
+                blueprint = str(engineering.get("BlueprintName") or "").strip()
+                level = engineering.get("Level")
+                if blueprint:
+                    details += f", engineered with {_blueprint_family_display(blueprint)}"
+                if level is not None:
+                    details += f" grade {int(float(level))}"
+            descriptions.append(details)
+        ship_id = str(loadout.get("Ship") or "").strip()
+        ship_name = self._ship_display_name(ship_id) if ship_id else "the current ship"
+        if not descriptions:
+            return f"No installed module details are available for {ship_name}."
+        return f"Installed modules on {ship_name}: " + "; ".join(descriptions) + "."
 
     def _state_query_action(self, args: StateQueryParams, _context: dict[str, Any]) -> str:
         """Detailed state report for the AI (spec intents.state.query)."""
@@ -1623,9 +2105,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _module_matches_step(step: dict[str, Any], module: dict[str, Any]) -> bool:
         item = step.get("item")
         slot = step.get("slot")
-        if not isinstance(item, str) or not item:
+        module_item = module.get("item")
+        if not isinstance(item, str) or not item or not isinstance(module_item, str):
             return False
-        if module.get("item") != item or (slot and module.get("slot") != slot):
+        if canonical_item(module_item) != canonical_item(item) or (slot and module.get("slot") != slot):
             return False
         expected_engineering = step.get("engineering")
         if not expected_engineering:
@@ -1641,27 +2124,74 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def _status_generator(self, _states: dict[str, BaseModel]) -> list[tuple[str, Any]]:
         session = self.get_session()
-        if session is None:
+        if session is not None:
+            remaining = [
+                step for step in session["steps"]
+                if step["id"] not in session["completed_steps"]
+            ]
+            next_step = (
+                self._step_voice_label(remaining[0]) if remaining else "complete"
+            )
+            ship = session["ship_custom_name"] or self._ship_display_name(
+                session.get("ship_model", "")
+            ) or session["ship_instance_id"]
+            return [
+                (
+                    "Ship upgrade",
+                    f"{session['plan_name']} on {ship}: "
+                    f"{len(session['completed_steps'])}/{session['total_steps']} steps tracked; "
+                    f"next: {next_step}",
+                )
+            ]
+
+        # An imported target build is a valid planning goal even before the
+        # player activates progress tracking with the UI/voice goal action.
+        last_import = self._load_last_import()
+        with self.get_db() as db:
+            if last_import and last_import.get("plan_id"):
+                plan_row = db.execute(
+                    "SELECT id, plan_name, ship_model, source_json FROM plans WHERE id = ?",
+                    (last_import["plan_id"],),
+                ).fetchone()
+            else:
+                plan_row = db.execute(
+                    "SELECT id, plan_name, ship_model, source_json FROM plans "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                ).fetchone()
+        if plan_row is None:
             return []
-        remaining = [
-            step for step in session["steps"]
-            if step["id"] not in session["completed_steps"]
-        ]
-        next_step = (
-            self._step_voice_label(remaining[0]) if remaining else "complete"
+        plan = dict(plan_row)
+        ship_id = self._current_ship_id
+        if not ship_id:
+            detected = self._detect_ship_from_journal()
+            ship_id = detected.get("id", "")
+            self._current_ship_id = ship_id
+            self._current_ship_name = detected.get("name", "")
+        if not ship_id:
+            return [("Ship upgrade target", f"Target build {plan['plan_name']} is loaded; current ship not identified yet.")]
+        steps = self._plan_steps(plan["source_json"])
+        metrics = self._progress_metrics(steps, self._loadout_for_ship(ship_id))
+        ship = self._current_ship_name or self._ship_display_name(plan["ship_model"])
+        next_step = next(
+            (step for step in steps if not self._step_satisfied_by_loadout(step, self._loadout_for_ship(ship_id))),
+            None,
         )
-        ship = session["ship_custom_name"] or self._ship_display_name(
-            session.get("ship_model", "")
-        ) or session["ship_instance_id"]
+        next_label = self._step_voice_label(next_step) if next_step else "complete"
+        engineering = (
+            f"; engineering {metrics['eng_current']}/{metrics['eng_target']} levels"
+            if metrics["eng_target"] else ""
+        )
         return [
             (
-                "Ship upgrade",
-                f"{session['plan_name']} on "
-                f"{ship}: "
-                f"{len(session['completed_steps'])}/{session['total_steps']} complete; "
-                f"next: {next_step}",
+                "Ship upgrade target",
+                f"Target build {plan['plan_name']} for {ship}; no progress session has been activated. "
+                f"Current loadout matches {metrics['modules_done']}/{metrics['modules_total']} target modules "
+                f"({metrics['modules_pct']}%){engineering}; suggested first step: {next_label}.",
             )
         ]
+
+    def _step_satisfied_by_loadout(self, step: dict[str, Any], loadout: list[dict[str, Any]]) -> bool:
+        return bool(self._steps_satisfied_by_loadout([step], loadout))
 
     def get_db_path(self) -> Path:
         if self.helper is not None:
@@ -2100,6 +2630,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 str(step.get("item") or step.get("id") or "")
             )
             candidates = loadout.get(item)
+            if not candidates:
+                candidates = [
+                    candidate
+                    for loadout_item, entries in loadout.items()
+                    if canonical_item(loadout_item) == canonical_item(item)
+                    for candidate in entries
+                ]
             if not candidates:
                 continue
             required = step.get("engineering") or {}

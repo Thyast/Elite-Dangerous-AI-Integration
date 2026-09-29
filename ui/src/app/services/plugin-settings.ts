@@ -108,6 +108,7 @@ export interface ListRowProgress {
     next_class?: string;
     next_grade?: number | string;
     next_engineering?: string;
+    next_experimental_effect?: string;
 }
 
 export interface ListRow {
@@ -119,6 +120,7 @@ export interface ListRow {
     params?: { [name: string]: string | number };
     group?: string;
     pending?: boolean;
+    status?: string;
     progress?: ListRowProgress[];
 }
 

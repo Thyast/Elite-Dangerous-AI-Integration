@@ -80,6 +80,11 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
     assert event_manager.projections[0][1] is False
     assert len(event_manager.sideeffects) == 1
     assert len(prompt_generator.status_generators) == 1
+    loadout_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_current_loadout"
+    )
+    assert "modules actually installed on the current ship" in loadout_action["description"]
     assert {
         action["name"] for action in action_manager.actions
     } == {
@@ -93,9 +98,55 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         "ship_upgrade_preview_changes",
         "ship_upgrade_apply_changes",
         "ship_upgrade_build_advice",
+        "ship_upgrade_plan_status",
+        "ship_upgrade_current_loadout",
         "ship_upgrade_state",
         "ship_upgrade_goal",
     }
+
+    next_step_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_next_step"
+    )
+    assert "experimental effect" in next_step_action["description"].lower()
+    next_step_prefills = next_step_action["cache_prefill"]
+    assert "j'ai un plan actif, quel effet expérimental dois-je appliquer" in next_step_prefills
+    assert "what experimental effect should i apply" in next_step_prefills
+
+    advice_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_build_advice"
+    )
+    prefills = advice_action["cache_prefill"]
+    assert "prepare a complete route for all modules" in prefills
+    assert "i want a full route for all modules" in prefills
+    assert "prepare a route to improve my ship" in prefills
+    assert "make me a complete route to improve my entire ship" in prefills
+    assert "prépare une route pour améliorer mon vaisseau" in prefills
+    assert "programme-moi une route complète pour l'amélioration de mon vaisseau" in prefills
+    assert "prépare une route complète pour améliorer l'intégralité de mon vaisseau" in prefills
+    assert "prepare a complete route to improve the entire ship" in prefills
+    assert "je veux une route complète pour tous les modules" in prefills
+    assert advice_action["input_template"]({}, {}) == "Prepare complete ship-upgrade route"
+
+    status_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_plan_status"
+    )
+    status_prefills = status_action["cache_prefill"]
+    assert "est-ce qu un plan d amelioration est charge" in status_prefills
+    assert "quel plan est en cours" in status_prefills
+    assert "mon plan d amelioration est il actif" in status_prefills
+
+    loadout_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_current_loadout"
+    )
+    loadout_prefills = loadout_action["cache_prefill"]
+    assert loadout_prefills["quelle armure est installée"] == {"slot": "Armour"}
+    assert loadout_prefills["what armor module is installed"] == {"slot": "Armour"}
+    assert loadout_prefills["quel est le module d'armure que j'ai déjà"] == {"slot": "Armour"}
+    assert loadout_prefills["et quel est le module d'armure que j'ai déjà"] == {"slot": "Armour"}
 
     assert prompt_generator.status_generators[0]({}) == []
     plugin.on_chat_stop(helper)

@@ -77,7 +77,13 @@ EDCoPilotPanelName = Literal[
 
 
 class EDCoPilotOpenPanelParams(BaseModel):
-    panelName: EDCoPilotPanelName = Field(description="The name of the panel to open in EDCoPilot")
+    panelName: EDCoPilotPanelName = Field(
+        description=(
+            "The name of the panel to open in EDCoPilot. This only navigates the UI; "
+            "it does not query game data. shiplist and storedmodules are visual panels, "
+            "not tools for reporting the currently installed ship loadout."
+        )
+    )
     details: str = Field(default="", description="Additional inputs for panel, like system names")
 
 
@@ -654,7 +660,12 @@ class EDCoPilotPlugin(PluginBase):
         # Register open panel action
         helper.register_action(
             name='edcopilot_open_panel',
-            description="Open a specific panel in EDCoPilot",
+            description=(
+                "Navigate to a visual panel in EDCoPilot. This does not retrieve or answer "
+                "questions about game state; use the relevant data action for those instead. "
+                "For modules installed on the current ship, use ship_upgrade_current_loadout, "
+                "not shiplist or storedmodules."
+            ),
             parameters=EDCoPilotOpenPanelParams,
             method=self.edcopilot_open_panel,
             action_type='global',
