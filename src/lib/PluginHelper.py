@@ -152,11 +152,16 @@ class PluginHelper():
                     break
         local_station = None
         if local_matches:
+            star_pos = reference.get("StarPos")
             local_station = {
                 "id": f"current::{str(station_name).casefold()}",
                 "name": station_name,
                 "system": station_system or reference.get("StarSystem", ""),
                 "distance_ly": 0.0,
+                "coords": (
+                    dict(zip(("x", "y", "z"), star_pos))
+                    if isinstance(star_pos, (list, tuple)) and len(star_pos) >= 3 else None
+                ),
                 "arrival_ls": 0.0,
                 "is_planetary": False,
                 "services": ["outfitting"],
@@ -181,6 +186,29 @@ class PluginHelper():
                 ]
                 if result.get("status") != "ok":
                     result["status"] = "ok"
+        if cache is not None:
+            cache[request_key] = result
+        return result
+
+    def search_material_traders(
+        self,
+        category: str,
+        *,
+        distance: int | float = 50000,
+        size: int = 5,
+        cache: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Nearest material traders of one type (Raw/Manufactured/Encoded).
+
+        ``cache`` is scoped by the caller to one planner calculation, like
+        ``search_stations_for_modules``; it is never persisted."""
+        from .actions.actions_web import search_material_traders
+
+        request_key = f"material_trader:{category.casefold()}:{distance}:{size}"
+        if cache is not None and request_key in cache:
+            return cache[request_key]
+        _events, states = self._event_manager.get_current_state()
+        result = search_material_traders(category, states, distance=distance, size=size)
         if cache is not None:
             cache[request_key] = result
         return result

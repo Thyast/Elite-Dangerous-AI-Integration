@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 from lib.PluginBase import PluginManifest
 from lib.Event import GameEvent
 from plugins.ship_upgrade_manager.ship_upgrade_manager import (
+    MissingModulesParams,
     ShipUpgradeManagerPlugin,
+    StateQueryParams,
 )
 from plugins.ship_upgrade_manager.parsers import PlanParseError, parse_plan_input
 
@@ -1580,6 +1582,56 @@ def test_build_advice_marks_grades_with_missing_materials(tmp_path: Path):
     assert "Materials: 19 material types are missing (84 units)" in reply
 
 
+def test_build_advice_route_adds_trader_stop_and_checks_engineer_progress(tmp_path: Path):
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+    materials = _materials_state(**_KESTREL_STOCK)
+
+    class EventManager:
+        def get_current_state(self):
+            return [], {
+                "Materials": materials,
+                "EngineerProgress": {"Engineers": [
+                    {"Engineer": "Etienne Dorn", "Progress": "Unlocked", "Rank": 5},
+                    {"Engineer": "Petra Olmanova", "Progress": "Unlocked", "Rank": 5},
+                ]},
+            }
+
+    searched = []
+
+    def search_material_traders(category, *, cache=None):
+        searched.append((category, cache is not None))
+        return {"status": "ok", "stations": [{
+            "id": "near::trader", "name": "Near Trader", "system": "Near",
+            "distance_ly": 1.0, "coords": {"x": 1, "y": 0, "z": 0},
+        }]}
+
+    plugin.helper._event_manager = EventManager()
+    plugin.helper.search_material_traders = search_material_traders
+    plugin._current_position = (0.0, 0.0, 0.0)
+
+    reply = plugin._build_advice_action()
+
+    assert searched == [("Manufactured", True)]
+    assert reply.startswith(
+        "First: material trade: Manufactured material trader (Near, 1.0 ly from you), "
+        "trade 24 Heat Exchangers for 4 Heat Vanes, 1 Heat Exchangers for 3 Heat Dispersion Plate. "
+        "Then: engineer visit:"
+    )
+    assert "engineer visit: Etienne Dorn" in reply
+    assert "engineer visit: Petra Olmanova" in reply
+    assert "not unlocked yet" not in reply
+    assert "Engineer unlock status is unknown" not in reply
+    assert "Total route:" in reply
+
+
+def test_build_advice_mentions_unknown_engineer_progress(tmp_path: Path):
+    plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
+
+    reply = plugin._build_advice_action()
+
+    assert "Engineer unlock status is unknown" in reply
+
+
 def test_material_plan_trades_down_surplus_and_flags_storage_cap():
     from plugins.ship_upgrade_manager.materials import (
         MaterialReference,
@@ -1709,6 +1761,76 @@ def test_status_generator_exposes_imported_target_without_active_session(tmp_pat
     assert "Target Build" in status[0][1]
     assert "no progress session has been activated" in status[0][1]
     assert "1/1 target modules (100%)" in status[0][1]
+    assert "All 1 target modules are installed." in status[0][1]
+
+
+def _missing_modules_plugin(tmp_path: Path, installed: list[dict]) -> ShipUpgradeManagerPlugin:
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python",
+        "Target Build",
+        {
+            "steps": [
+                {"id": "mrp", "item": "int_guardianmodulereinforcement_size2_class1", "slot": "Slot07_Size2"},
+                {"id": "cargo", "item": "int_cargorack_size4_class1", "slot": "Slot04_Size4"},
+                {"id": "booster", "item": "hpt_shieldbooster_size0_class5", "slot": "TinyHardpoint1"},
+                {"id": "laser", "item": "hpt_pulselaser_fixed_medium", "slot": "MediumHardpoint1"},
+                {"id": "shield", "item": "int_shieldgenerator_size6_class5", "slot": "Slot01_Size6"},
+                {"id": "pp", "item": "int_powerplant_size6_class5", "slot": "PowerPlant"},
+            ]
+        },
+    )
+    plugin._current_ship_id = "SHIP-7"
+    plugin._current_loadout_modules = installed
+    return plugin
+
+
+_ALL_BUT_MRP = [
+    {"Slot": "Slot04_Size4", "Item": "int_cargorack_size4_class1"},
+    {"Slot": "TinyHardpoint1", "Item": "hpt_shieldbooster_size0_class5"},
+    {"Slot": "MediumHardpoint1", "Item": "hpt_pulselaser_fixed_medium"},
+    {"Slot": "Slot01_Size6", "Item": "int_shieldgenerator_size6_class5"},
+    {"Slot": "PowerPlant", "Item": "int_powerplant_size6_class5"},
+]
+
+
+def test_missing_modules_are_named_when_few(tmp_path: Path):
+    plugin = _missing_modules_plugin(tmp_path, _ALL_BUT_MRP)
+
+    reply = plugin._missing_modules_action(MissingModulesParams(), {})
+    status = plugin._status_generator({})[0][1]
+
+    assert "1 of 6 target modules are not installed yet: Guardian Module Reinforcement 2E." in reply
+    assert "5/6 target modules" in status
+    assert "not installed yet: Guardian Module Reinforcement 2E" in status
+
+
+def test_many_missing_modules_give_count_and_most_important(tmp_path: Path):
+    plugin = _missing_modules_plugin(tmp_path, [])
+
+    reply = plugin._missing_modules_action(MissingModulesParams(), {})
+
+    assert "6 of 6 target modules are not installed yet." in reply
+    top = reply.split("The most important to install first: ")[1].split(". ")[0]
+    assert top.split("; ")[0].startswith("Power Plant")
+    assert top.split("; ")[1].startswith("Shield Generator")
+    assert len(top.split("; ")) == 3
+    assert "Guardian Module Reinforcement" not in reply
+    assert "offer to install these first" in reply
+
+    full = plugin._missing_modules_action(MissingModulesParams(list_all=True), {})
+    assert "Guardian Module Reinforcement 2E" in full
+    assert full.index("Cargo Rack") < full.index("Guardian Module Reinforcement")
+
+
+def test_state_query_names_missing_module(tmp_path: Path):
+    plugin = _missing_modules_plugin(tmp_path, _ALL_BUT_MRP)
+    plugin.start_session("Target Build", "SHIP-7")
+
+    reply = plugin._state_query_action(StateQueryParams(), {})
+
+    assert "5/6 modules installed" in reply
+    assert "not installed yet: Guardian Module Reinforcement 2E" in reply
 
 
 def test_plan_status_reports_no_loaded_plan(tmp_path: Path):
@@ -2105,3 +2227,219 @@ def test_parse_coriolis_compact_url():
     assert normalized["plan_name"] == "Imported Kestrel Mk II"
     assert normalized["steps"][0]["item"] == "int_powerplant_size5_class5"
     assert normalized["steps"][7]["slot"] == "LargeHardpoint1"
+
+
+def _game_event(content: dict) -> GameEvent:
+    return GameEvent(content=content, historic=False)
+
+
+def test_current_plan_follows_ship_id_across_ship_swaps(tmp_path: Path):
+    """Two ships of the same type share one target build at different
+    progress levels; the plan in progress is keyed by ShipID, not type."""
+    plugin = _plugin(tmp_path)
+    plugin.import_plan(
+        "Python", "PvE", {"steps": [{"id": "fsd"}, {"id": "shield"}]}
+    )
+    plugin._handle_ship_event(
+        {"event": "Loadout", "Ship": "python", "ShipID": 1, "ShipName": "Alpha", "Modules": []}
+    )
+    alpha = plugin.start_session("PvE", "1", "Alpha")
+    plugin.complete_step("fsd")
+
+    plugin._handle_ship_event(
+        {"event": "ShipyardSwap", "ShipType": "python", "ShipID": 2, "StoreShipID": 1}
+    )
+    assert plugin._current_ship_id == "2"
+    assert plugin._current_ship_name == ""
+    # The second Python has no plan yet: the first ship's plan is not reused.
+    assert plugin.get_session() is None
+    assert plugin._field("session", "session_summary")["content"] == "plugin.sum.noSession"
+
+    beta = plugin.start_session("PvE", "2", "Beta")
+    assert beta["id"] != alpha["id"]
+    assert plugin.get_session()["completed_steps"] == []
+
+    plugin._handle_ship_event(
+        {"event": "ShipyardSwap", "ShipType": "python", "ShipID": 1, "StoreShipID": 2}
+    )
+    session = plugin.get_session()
+    assert session["id"] == alpha["id"]
+    assert session["completed_steps"] == ["fsd"]
+    summary = plugin._field("session", "session_summary")
+    assert summary["params"]["ship"] == "Alpha"
+    assert summary["params"]["pct"] == 50
+
+    # A new game session starting in the second ship resumes its own plan.
+    plugin._handle_ship_event(
+        {"event": "LoadGame", "Ship": "python", "ShipID": 2, "ShipName": "Beta", "FID": "F1"}
+    )
+    assert plugin.get_session()["id"] == beta["id"]
+    assert plugin._state_query_action(
+        __import__("types").SimpleNamespace(ship="Python"), {}
+    ).startswith("Plan PvE on Beta")
+
+
+def test_ship_type_or_name_is_never_used_as_ship_key(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd", "item": "fsd_item"}]})
+    plugin.start_session("PvE", "1")
+    plugin.start_session("PvE", "2")
+
+    # No ShipID: the ship type must not become the current ship key.
+    plugin._handle_ship_event(
+        {"event": "ModuleStore", "Ship": "python", "ShipName": "Alpha", "StoredItem": "fsd_item"}
+    )
+    assert plugin._current_ship_id == ""
+    assert all(session["completed_steps"] == [] for session in plugin.list_sessions())
+
+    plugin._handle_ship_event({"event": "ModuleBuy", "ShipID": 2, "Ship": "python", "BuyItem": "fsd_item"})
+    by_ship = {s["ship_instance_id"]: s["completed_steps"] for s in plugin.list_sessions()}
+    assert by_ship == {"1": [], "2": ["fsd"]}
+
+
+def test_module_info_without_ship_id_applies_to_current_ship_only(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd", "item": "fsd_item"}]})
+    plugin.start_session("PvE", "1")
+    plugin.start_session("PvE", "2")
+    plugin._handle_ship_event({"event": "Loadout", "Ship": "python", "ShipID": 1, "Modules": []})
+
+    plugin._handle_ship_event(
+        {"event": "ModuleInfo", "Modules": [{"Slot": "FrameShiftDrive", "Item": "fsd_item"}]}
+    )
+
+    by_ship = {s["ship_instance_id"]: s["completed_steps"] for s in plugin.list_sessions()}
+    assert by_ship == {"1": ["fsd"], "2": []}
+
+
+def test_live_loadout_snapshot_is_not_reused_for_another_ship(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    modules = [{"Slot": "FrameShiftDrive", "Item": "fsd_item"}]
+    plugin._handle_ship_event({"event": "Loadout", "Ship": "python", "ShipID": 1, "Modules": modules})
+    assert plugin._loadout_for_ship("1") == modules
+
+    plugin._handle_ship_event({"event": "ModuleBuy", "ShipID": 2, "Ship": "python", "BuyItem": "x"})
+
+    assert plugin._current_ship_id == "2"
+    assert plugin._loadout_for_ship("2") == []
+
+
+def test_set_user_ship_name_updates_the_plan_of_that_ship(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("Python", "PvE", {"steps": [{"id": "fsd"}]})
+    plugin.start_session("PvE", "1", "Old")
+    plugin.start_session("PvE", "2", "Other")
+
+    plugin._handle_ship_event(
+        {"event": "SetUserShipName", "Ship": "python", "ShipID": 1, "UserShipName": "New"}
+    )
+
+    names = {s["ship_instance_id"]: s["ship_custom_name"] for s in plugin.list_sessions()}
+    assert names == {"1": "New", "2": "Other"}
+
+
+def test_journal_detection_ignores_other_ships_and_suits(tmp_path: Path, monkeypatch):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    (journal_dir / "Journal.2026-09-20T120000.01.log").write_text(
+        "\n".join(
+            json.dumps(entry)
+            for entry in (
+                {"event": "Loadout", "Ship": "python", "ShipID": 7, "ShipName": "Seven"},
+                {"event": "LoadGame", "Ship": "TacticalSuit_Class1", "ShipID": 99},
+                {"event": "ShipyardTransfer", "ShipType": "anaconda", "ShipID": 8},
+                {"event": "ShipyardSell", "ShipType": "cobra", "SellShipID": 9},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
+    plugin = _plugin(tmp_path)
+
+    assert plugin._detect_ship_from_journal() == {"id": "7", "name": "Seven", "type": "python"}
+
+
+def _thrusters_plan(plugin: ShipUpgradeManagerPlugin) -> None:
+    plugin.import_plan(
+        "Python",
+        "Agile",
+        {
+            "steps": [
+                {
+                    "id": "thrusters",
+                    "item": "int_engine_size5_class5",
+                    "slot": "MainEngines",
+                    "engineering": {
+                        "BlueprintName": "Engine_Tuned",
+                        "Level": 5,
+                        "ExperimentalEffect": "special_engine_overloaded",
+                    },
+                }
+            ]
+        },
+    )
+
+
+def _load_thrusters(plugin: ShipUpgradeManagerPlugin, engineering: dict | None = None) -> None:
+    module = {"Slot": "MainEngines", "Item": "int_engine_size5_class5"}
+    if engineering:
+        module["Engineering"] = engineering
+    plugin._handle_ship_event(
+        {"event": "Loadout", "Ship": "python", "ShipID": 1, "Modules": [module]}
+    )
+
+
+def test_next_step_does_not_ask_to_install_an_already_installed_module(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    _thrusters_plan(plugin)
+    _load_thrusters(plugin)
+    plugin.start_session("Agile", "1")
+
+    answer = plugin._next_step_action()
+
+    assert "already installed; remaining: engineer it with" in answer
+    assert "grade 5, then apply the experimental effect" in answer
+    status = plugin._status_generator({})[0][1]
+    assert "already installed; remaining:" in status
+
+
+def test_next_step_speaks_only_the_missing_engineering(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    _thrusters_plan(plugin)
+    _load_thrusters(plugin, {"BlueprintName": "Engine_Tuned", "Level": 3, "Quality": 1.0})
+    plugin.start_session("Agile", "1")
+
+    answer = plugin._next_step_action()
+    assert "from grade 3 to grade 5" in answer
+    assert "apply the experimental effect" in answer
+
+    _load_thrusters(
+        plugin,
+        {
+            "BlueprintName": "Engine_Tuned",
+            "Level": 5,
+            "Quality": 1.0,
+            "ExperimentalEffect": "special_engine_overloaded",
+        },
+    )
+    session = plugin.get_session()
+    match = plugin._step_loadout_match(session["steps"][0], session["steps"], "1")
+    assert plugin._step_voice_label(session["steps"][0], match).endswith(
+        "already installed with the target engineering"
+    )
+
+
+def test_next_step_still_asks_to_install_a_missing_module(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    _thrusters_plan(plugin)
+    plugin._handle_ship_event({"event": "Loadout", "Ship": "python", "ShipID": 1, "Modules": []})
+    plugin.start_session("Agile", "1")
+
+    answer = plugin._next_step_action()
+
+    assert "already installed" not in answer
+    assert ", then engineer it with" in answer
+    assert "grade 5, then apply the experimental effect" in answer

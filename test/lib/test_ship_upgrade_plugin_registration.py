@@ -102,6 +102,7 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         "ship_upgrade_current_loadout",
         "ship_upgrade_state",
         "ship_upgrade_goal",
+        "ship_upgrade_missing_modules",
         "ship_upgrade_missing_materials",
         "ship_upgrade_material_shortfall",
         "ship_upgrade_step_materials",

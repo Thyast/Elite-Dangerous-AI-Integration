@@ -428,6 +428,7 @@ Registered in `on_chat_start` via
 | `ship_upgrade_list_plans` | — | Plan inventory line. |
 | `ship_upgrade_preview_changes` | `plan_input` | Diff summary text (plan vs stored plan). |
 | `ship_upgrade_apply_changes` | `plan_input` | Applies the plan (voice equivalent of the import). |
+| `ship_upgrade_missing_modules` | `list_all?`, `session_id?` | Target modules not installed on the current loadout. Up to 3 missing: named directly. More: the count plus the 3 most important (core internals, shield generator, weapons, optional internals by size, utilities), with an offer to install them first. `list_all` names every missing module in that order. The same summary is appended to the status context and `ship_upgrade_state`. |
 | `ship_upgrade_missing_materials` | `count?`, `session_id?` | Without `count`: number of material types still to collect + missing quantity of the top 3. With `count`: the N most missing materials, each with a collection plan (same-family trades from surplus stock, then known sources, storage cap). |
 | `ship_upgrade_material_shortfall` | `material`, `session_id?` | Need / stock / missing for one material, the modules using it and how to obtain the rest. |
 | `ship_upgrade_step_materials` | `module?`, `session_id?` | Per-material need / stock / missing for the next upgrade (or a named plan module). |
@@ -445,6 +446,34 @@ from the core `Materials` projection (Raw / Manufactured / Encoded); unknown
 costs are reported, never counted as zero. `ship_upgrade_build_advice` shows
 the increments per grade, marks grades whose materials are missing and
 appends a stock summary.
+
+`ship_upgrade_build_advice` returns one optimised route (`planner.build_advice`
++ `route.py`):
+
+- **Stops**: outfitting stations (greedy set cover over the missing modules,
+  Spansh), one material trader per category when exchanges from surplus
+  stock are planned (`PluginHelper.search_material_traders`, the candidate
+  adding the smallest detour is kept), and one visit per engineer (greedy
+  set cover over the remaining blueprint grades: one engineer applying
+  several blueprints is preferred, an engineer already on the route is
+  reused).
+- **Engineer access** (journal `EngineerProgress`): only unlocked engineers
+  are proposed; a locked one is a fallback flagged "not unlocked yet" when no
+  unlocked engineer applies a grade; barred engineers are never proposed.
+  Without progress data nothing is filtered and the reply says so.
+- **Order**: shortest open path from the commander's position, chaining
+  straight-line distances stop to stop (exact up to 8 located stops, nearest
+  neighbour + or-opt/2-opt beyond), with precedence constraints: a module is
+  bought before it is engineered, a trader is visited before the engineers
+  consuming its exchanges. Stops without coordinates go as late as their
+  constraints allow.
+- **Output**: each stop gives its distance from the previous stop ("from
+  you" for the first), the chain ends with the total route length; planned
+  trades are applied to the simulated stock, so the "materials missing"
+  flags follow the route order. Landing pad size is filtered by the shared
+  Spansh station request (large ships only get large-pad stations).
+  Materials that must be collected (not traded) stay a collection plan
+  (`ship_upgrade_missing_materials`), not a route stop.
 
 All return plain strings consumed by the LLM (spoken via TTS).
 

@@ -82,12 +82,18 @@ class ListRowProgress(TypedDict, total=False):
     ship: str
     ship_model: str
     paused: bool
-    completed: int
-    total: int
-    pct: int
+    modules_done: int
+    modules_total: int
+    modules_pct: int
+    eng_current: int
+    eng_target: int
+    eng_pct: int
     next_label: str
+    next_key: str
+    next_class: str
     next_grade: int | str
     next_engineering: str
+    next_experimental_effect: str
 
 class ListRow(TypedDict):
     """Defines one row of a list field. Rows sharing the same group value are

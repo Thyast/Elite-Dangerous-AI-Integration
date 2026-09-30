@@ -25,6 +25,7 @@ from lib.PluginSettingDefinitions import (
     ErrorSetting,
     ListAction,
     ListRow,
+    ListRowProgress,
     ListSetting,
     ParagraphSetting,
     PluginSettings,
@@ -34,7 +35,14 @@ from lib.PluginSettingDefinitions import (
     TextSetting,
 )
 from .parsers import PlanParseError, parse_plan_input
-from .planner import analyze_build, build_advice, canonical_item, grade_reached, render_chain
+from .planner import (
+    PlannedTrade,
+    analyze_build,
+    build_advice,
+    canonical_item,
+    grade_reached,
+    render_chain,
+)
 from .materials import (
     MaterialReference,
     StepNeed,
@@ -44,6 +52,7 @@ from .materials import (
     material_status,
     shortfalls,
     step_need,
+    trade_options,
 )
 
 
@@ -224,6 +233,34 @@ MATERIALS_UNAVAILABLE = (
 
 # Class (1-5) to E:D letter grade: 1=E, 2=D, 3=C, 4=B, 5=A.
 CLASS_LETTERS = {1: "E", 2: "D", 3: "C", 4: "B", 5: "A"}
+
+# Up to this many missing target modules are named directly; beyond it the
+# player gets the count and the most important ones to install first.
+MISSING_MODULES_NAMED = 3
+
+# Install importance of missing modules: core internals (in this order), then
+# the shield generator, weapons (largest mount first), optional internals
+# (largest first) and finally utility mounts.
+CORE_SLOT_ORDER = (
+    "powerplant",
+    "mainengines",
+    "frameshiftdrive",
+    "powerdistributor",
+    "armour",
+    "lifesupport",
+    "radar",
+    "fueltank",
+)
+CORE_FAMILY_SLOTS = {
+    "powerplant": "powerplant",
+    "engine": "mainengines",
+    "hyperdrive": "frameshiftdrive",
+    "powerdistributor": "powerdistributor",
+    "lifesupport": "lifesupport",
+    "sensors": "radar",
+    "fueltank": "fueltank",
+}
+HARDPOINT_MOUNT_SIZES = {"huge": 4, "large": 3, "medium": 2, "small": 1}
 
 # Spec module families (normalized) — the i18n keys of the UI module
 # dictionary (module.<family>). Longest-prefix match wins over variants.
@@ -462,6 +499,17 @@ class BuildAdviceParams(BaseModel):
 
 class PlanChangeParams(BaseModel):
     plan_input: str = Field(description="JSON loadout or supported plan URL")
+
+
+class MissingModulesParams(BaseModel):
+    list_all: bool = Field(
+        default=False,
+        description=(
+            "True only when the player explicitly asks for the complete list of "
+            "missing modules; otherwise leave false."
+        ),
+    )
+    session_id: str | None = Field(default=None, description="Optional session id")
 
 
 class MissingMaterialsParams(BaseModel):
@@ -776,20 +824,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return "plugin.sum.category.optionalInternal"
 
     def _session_module_rows(self) -> list[ListRow]:
-        """Per-step detail of the most recently active session: target module
-        vs the module currently carried on the ship, grouped by outfitting
-        category."""
-        with self.get_db() as db:
-            session = db.execute(
-                """
-                SELECT s.id, s.completed_steps, s.ship_instance_id, p.source_json
-                FROM active_session s JOIN plans p ON p.id = s.plan_id
-                ORDER BY s.last_activity DESC LIMIT 1
-                """
-            ).fetchone()
+        """Per-step detail of the current ship's plan in progress: target
+        module vs the module currently carried on the ship, grouped by
+        outfitting category."""
+        session = self.get_session()
         if session is None:
             return []
-        steps = self._plan_steps(session["source_json"])
+        steps = session["steps"]
         loadout = self._loadout_for_ship(session["ship_instance_id"])
         matches = self._match_steps(steps, loadout)
         rows: list[ListRow] = []
@@ -982,6 +1023,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     ),
                     "level": engineering.get("Level") or engineering.get("level"),
                     "quality": engineering.get("Quality"),
+                    "experimental_effect": self._experimental_effect(engineering),
                 }
             )
         used = [False] * len(available)
@@ -1064,6 +1106,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     "eng_current": eng_current,
                     "eng_completed": eng_completed,
                     "eng_blueprint_id": candidate["blueprint"],
+                    "eng_level": current_level,
+                    "eng_experimental_effect": candidate["experimental_effect"],
                     "satisfied": satisfied,
                 }
             )
@@ -1102,36 +1146,110 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "eng_pct": round((eng_current / eng_target) * 100) if eng_target else 0,
         }
 
-    def _plan_progress(self, plan_id: str, ship_model: str) -> list[dict[str, Any]]:
+    def _module_importance(self, step: dict[str, Any]) -> tuple[int, int]:
+        """Sort key of a plan step by install importance (lower first)."""
+        slot = re.sub(r"[^a-z0-9]", "", str(step.get("slot") or "").casefold())
+        item = self._normalize_module_id(str(step.get("item") or ""))
+        family, size, _module_class = self._split_module_id(item) if item else ("", None, None)
+        family_key = re.sub(r"[^a-z0-9]", "", family)
+        core_slot = slot if slot in CORE_SLOT_ORDER else None
+        if core_slot is None and not slot:
+            core_slot = "armour" if "armour" in item else next(
+                (
+                    core for prefix, core in CORE_FAMILY_SLOTS.items()
+                    if family_key.startswith(prefix)
+                ),
+                None,
+            )
+        if core_slot is not None:
+            return (0, CORE_SLOT_ORDER.index(core_slot))
+        if family_key.startswith("shieldgenerator"):
+            return (1, 0)
+        mount = re.search(r"(huge|large|medium|small)hardpoint", slot) or (
+            None if slot else re.search(r"_(huge|large|medium|small)$", item)
+        )
+        if mount:
+            return (2, -HARDPOINT_MOUNT_SIZES[mount.group(1)])
+        if "tinyhardpoint" in slot or item.startswith("hpt_"):
+            return (4, 0)
+        slot_size = re.search(r"size(\d+)", slot)
+        module_size = int(slot_size.group(1)) if slot_size else int(size or 0)
+        return (3, -module_size)
+
+    def _missing_module_steps(
+        self, steps: list[dict[str, Any]], modules: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Plan steps whose target module is not installed at all."""
+        return [match["step"] for match in self._match_steps(steps, modules) if not match["installed"]]
+
+    def _missing_modules_summary(
+        self,
+        steps: list[dict[str, Any]],
+        modules: list[dict[str, Any]],
+        list_all: bool = False,
+    ) -> str:
+        """Spoken summary of the target modules not installed on the ship.
+
+        A few missing modules are named directly; more are counted and the
+        most important ones are proposed first (all of them with list_all)."""
+        missing = self._missing_module_steps(steps, modules)
+        total = len(steps)
+        if not missing:
+            return f"All {total} target modules are installed."
+        ranked = sorted(missing, key=self._module_importance)
+        if list_all or len(missing) <= MISSING_MODULES_NAMED:
+            names = "; ".join(self._step_short_label(step) for step in ranked)
+            return (
+                f"{len(missing)} of {total} target modules are not installed yet: {names}."
+            )
+        top = "; ".join(
+            self._step_short_label(step) for step in ranked[:MISSING_MODULES_NAMED]
+        )
+        return (
+            f"{len(missing)} of {total} target modules are not installed yet. "
+            f"The most important to install first: {top}. Give the player the count "
+            "and offer to install these first."
+        )
+
+    def _plan_progress(
+        self, plan_id: str, ship_model: str, ship_instance_id: str | None = None
+    ) -> list[ListRowProgress]:
+        ship_filter = " AND ship_instance_id = ?" if ship_instance_id is not None else ""
         with self.get_db() as db:
             plan_row = db.execute(
                 "SELECT source_json FROM plans WHERE id = ?", (plan_id,)
             ).fetchone()
             sessions = db.execute(
-                """
+                f"""
                 SELECT ship_custom_name, ship_instance_id, completed_steps, paused, last_activity
-                FROM active_session WHERE plan_id = ? ORDER BY last_activity DESC
+                FROM active_session WHERE plan_id = ?{ship_filter} ORDER BY last_activity DESC
                 """,
-                (plan_id,),
+                (plan_id,) if ship_instance_id is None else (plan_id, ship_instance_id),
             ).fetchall()
         if plan_row is None or not sessions:
             return []
         steps = self._plan_steps(plan_row["source_json"])
         display_model = self._ship_display_name(ship_model)
-        progress: list[dict[str, Any]] = []
+        progress: list[ListRowProgress] = []
         for session in sessions:
             completed = json.loads(session["completed_steps"] or "[]")
             completed_set = set(completed)
             next_step = next((step for step in steps if step["id"] not in completed_set), None)
             custom_name = session["ship_custom_name"] or ""
-            entry: dict[str, Any] = {
+            entry: ListRowProgress = {
                 # No custom name yet: show the public ship model instead of the
                 # raw journal ship id.
                 "ship": custom_name or display_model,
                 "ship_model": display_model if custom_name else "",
                 "paused": bool(session["paused"]),
             }
-            entry.update(self._progress_metrics(steps, self._loadout_for_ship(session["ship_instance_id"])))
+            metrics = self._progress_metrics(steps, self._loadout_for_ship(session["ship_instance_id"]))
+            entry["modules_done"] = metrics["modules_done"]
+            entry["modules_total"] = metrics["modules_total"]
+            entry["modules_pct"] = metrics["modules_pct"]
+            entry["eng_current"] = metrics["eng_current"]
+            entry["eng_target"] = metrics["eng_target"]
+            entry["eng_pct"] = metrics["eng_pct"]
             if next_step is not None:
                 next_item = next_step.get("item")
                 if next_item:
@@ -1324,8 +1442,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "or most recently imported target ship build, even if no tracking "
                 "session has been activated yet. Compare every target module "
                 "against the current loadout; find and group module purchases by "
-                "Spansh outfitting stations; include engineer visits in order with "
-                "system names and distances, then list every blueprint grade and "
+                "Spansh outfitting stations; add material trader stops for planned "
+                "exchanges; include unlocked engineer visits (one per engineer), all "
+                "stops ordered as the shortest route with system names and distances "
+                "from stop to stop, then list every blueprint grade and "
                 "materials status. Call this when the player asks for the full "
                 "route, complete route, all steps, or how to finish the build. "
                 "For a direct question about the next blueprint, grade, or "
@@ -1414,7 +1534,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "compare module display names or localized strings. For an armor/hull "
                 "question, query slot Armour and report its exact installed module id, "
                 "recognized module name, engineering blueprint, and grade. Do not use "
-                "the imported target plan to describe the current installed module."
+                "the imported target plan to describe the current installed module. "
+                "To know which target modules are missing, use "
+                "ship_upgrade_missing_modules instead of comparing lists yourself."
             ),
             parameters=LoadoutQueryParams,
             method=self._current_loadout_action,
@@ -1454,6 +1576,34 @@ class ShipUpgradeManagerPlugin(PluginBase):
             parameters=GoalParams,
             method=self._goal_declare_action,
             action_type="ship",
+        )
+        helper.register_action(
+            name="ship_upgrade_missing_modules",
+            description=(
+                "Tell which target-build modules are not installed on the current "
+                "ship, computed from the live loadout. Relay the answer as given: "
+                "with 3 or fewer missing it names them; with more it gives the "
+                "count and the most important ones, then offer to install those "
+                "first. Never claim every module is installed unless this says so."
+            ),
+            parameters=MissingModulesParams,
+            method=self._missing_modules_action,
+            action_type="ship",
+            input_template=lambda _args, _states: "Check missing target modules",
+            cache_prefill={
+                "quels modules me manquent": {},
+                "quels sont les modules manquants": {},
+                "quel module manque": {},
+                "quel module me manque": {},
+                "est-ce qu il me manque des modules": {},
+                "est-ce qu'il me manque des modules": {},
+                "il me manque des modules": {},
+                "donne-moi la liste de tous les modules manquants": {"list_all": True},
+                "which modules am i missing": {},
+                "which module is missing": {},
+                "am i missing any modules": {},
+                "list all missing modules": {"list_all": True},
+            },
         )
         helper.register_action(
             name="ship_upgrade_missing_materials",
@@ -1590,45 +1740,92 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self.stop_session(session_id, context)
         return "Ship upgrade session stopped."
 
-    def _step_voice_label(self, step: dict[str, Any]) -> str:
+    def _step_voice_label(
+        self, step: dict[str, Any], match: dict[str, Any] | None = None
+    ) -> str:
         """Readable spoken label for a plan step: spec name with grade, plus
-        the engineering target and experimental effect when present."""
+        the engineering target and experimental effect when present.
+
+        With the step's loadout `match` (see _match_steps), a module already
+        installed is announced as such and only the remaining work (blueprint
+        grade, experimental effect) is spoken, so the player is not told to
+        buy a module they already carry."""
         item = step.get("item")
         if item:
             name, _key, grade = self._module_display(str(item))
             label = f"{name} {grade}" if grade else name
         else:
             label = str(step.get("label") or step.get("id", ""))
+        installed = bool(match and match.get("installed"))
         engineering = step.get("engineering") or {}
         blueprint_id = str(
             engineering.get("BlueprintName") or engineering.get("blueprint") or ""
         )
         level = engineering.get("Level") or engineering.get("level")
+        experimental_effect_id = self._experimental_effect(engineering)
+        remaining: list[str] = []
         if blueprint_id and blueprint_id.lower() != "none":
             blueprint_name = _engineering_catalog_display_name(
                 blueprint_id, "blueprints.json", "fdname"
             )
-            if level is not None:
-                label += (
-                    f", then engineer it with {blueprint_name} "
-                    f"grade {int(float(level))}"
-                )
+            current_blueprint = str((match or {}).get("eng_blueprint_id") or "")
+            same_blueprint = bool(current_blueprint) and self._blueprint_key(
+                current_blueprint
+            ) == self._blueprint_key(blueprint_id)
+            current_level = (match or {}).get("eng_level")
+            if installed and same_blueprint and (
+                level is None or (match or {}).get("satisfied")
+            ):
+                pass
+            elif level is None:
+                remaining.append(f"engineer it with {blueprint_name}")
+            elif installed and same_blueprint and current_level:
+                if int(current_level) >= int(float(level)):
+                    remaining.append(
+                        f"complete the {blueprint_name} grade {int(float(level))} rolls"
+                    )
+                else:
+                    remaining.append(
+                        f"engineer it with {blueprint_name} from grade "
+                        f"{int(current_level)} to grade {int(float(level))}"
+                    )
             else:
-                label += f", then engineer it with {blueprint_name}"
-        experimental_effect_id = str(
-            engineering.get("ExperimentalEffect")
-            or engineering.get("experimental_effect")
-            or engineering.get("experimentalEffect")
-            or ""
-        )
+                action = f"engineer it with {blueprint_name} grade {int(float(level))}"
+                if installed and current_blueprint:
+                    current_name = _engineering_catalog_display_name(
+                        current_blueprint, "blueprints.json", "fdname"
+                    )
+                    action += f" (it currently carries {current_name})"
+                remaining.append(action)
         if experimental_effect_id:
-            experimental_effect = _engineering_catalog_display_name(
-                experimental_effect_id, "specials.json", "edname"
-            )
-            label += (
-                f", then apply the experimental effect {experimental_effect}"
-            )
-        return label
+            current_effect = str((match or {}).get("eng_experimental_effect") or "")
+            if not (
+                installed
+                and current_effect.casefold() == experimental_effect_id.casefold()
+            ):
+                experimental_effect = _engineering_catalog_display_name(
+                    experimental_effect_id, "specials.json", "edname"
+                )
+                remaining.append(f"apply the experimental effect {experimental_effect}")
+        if not installed:
+            return label + "".join(f", then {action}" for action in remaining)
+        if not remaining:
+            return f"{label}, already installed with the target engineering"
+        return f"{label}, already installed; remaining: " + ", then ".join(remaining)
+
+    def _step_loadout_match(
+        self, step: dict[str, Any], steps: list[dict[str, Any]], ship_instance_id: str
+    ) -> dict[str, Any] | None:
+        """Loadout match of one plan step, assigned one-to-one against the
+        whole plan so two identical target modules do not claim the same
+        installed module."""
+        if not ship_instance_id:
+            return None
+        matches = self._match_steps(steps, self._loadout_for_ship(ship_instance_id))
+        return next(
+            (match for match in matches if match["step"].get("id") == step.get("id")),
+            None,
+        )
 
     def _next_step_action(self, session_id=None, context=None) -> str:
         session = self.get_session(session_id, context)
@@ -1641,9 +1838,12 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if not remaining:
             return f"Plan {session['plan_name']} is complete."
         step = remaining[0]
+        match = self._step_loadout_match(
+            step, session["steps"], str(session["ship_instance_id"])
+        )
         return (
             f"Next module, {len(session['completed_steps']) + 1} of "
-            f"{session['total_steps']}: {self._step_voice_label(step)}."
+            f"{session['total_steps']}: {self._step_voice_label(step, match)}."
             + self._next_step_materials_warning(step, session["ship_instance_id"])
         )
 
@@ -1732,8 +1932,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if plan_row is None:
             return "No target build is imported yet. Import a target build in the Plans settings first."
         plan = dict(plan_row)
-        detected = self._detect_ship_from_journal() if not self._current_ship_id else {}
-        ship_instance_id = self._current_ship_id or detected.get("id", "")
+        ship_instance_id = self._resolve_current_ship_id()
         if not ship_instance_id:
             return "I found the target build, but cannot identify the current ship from the Journal yet."
         return {
@@ -1741,7 +1940,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "steps": self._plan_steps(plan["source_json"]),
             "completed": set(),
             "ship_instance_id": ship_instance_id,
-            "ship_name": self._current_ship_name or detected.get("name") or None,
+            "ship_name": self._current_ship_name or None,
             "session": False,
         }
 
@@ -1842,6 +2041,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f" Warning: materials are missing for this upgrade, {len(missing)} "
             f"types: {shown}{more}. Ask for this upgrade's materials for details."
             + unknown
+        )
+
+    def _missing_modules_action(
+        self, args: MissingModulesParams, context: dict[str, Any] | None = None
+    ) -> str:
+        target = self._upgrade_target(args.session_id, context)
+        if isinstance(target, str):
+            return target
+        loadout = self._loadout_for_ship(str(target["ship_instance_id"]))
+        return f"{target['plan_name']}: " + self._missing_modules_summary(
+            target["steps"], loadout, list_all=args.list_all
         )
 
     def _missing_materials_action(
@@ -1950,7 +2160,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if step is None:
                 return f"Plan {target['plan_name']} is complete."
         needs = self._step_material_needs([step], target["ship_instance_id"])
-        label = self._step_voice_label(step)
+        label = self._step_voice_label(
+            step,
+            self._step_loadout_match(step, target["steps"], target["ship_instance_id"]),
+        )
         if not needs or not needs[0].engineering:
             return f"{label}: no engineering materials are required."
         need = needs[0]
@@ -2023,6 +2236,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
             )
 
         inventory = self._material_inventory()
+        remaining_steps = [
+            step for step in target_steps if step.get("id") not in target["completed"]
+        ]
+        trades = (
+            self._planned_trades(remaining_steps, ship_instance_id, inventory)
+            if inventory is not None else []
+        )
+        trader_search = None
+        if trades and self.helper is not None and hasattr(self.helper, "search_material_traders"):
+            def trader_search(category):
+                return self.helper.search_material_traders(category, cache=station_request_cache)
+
+        reference = _material_reference()
+        engineer_progress = self._engineer_progress()
         actions = build_advice(
             deltas,
             self._catalog,
@@ -2032,13 +2259,70 @@ class ShipUpgradeManagerPlugin(PluginBase):
             station_search=station_search,
             module_filter=self._station_module_filter,
             inventory=inventory,
+            engineer_progress=engineer_progress,
+            trades=trades,
+            trader_search=trader_search,
+            material_id_of=lambda cost: reference.resolve(
+                cost.get("material_id") or cost.get("material_localised")
+            ),
         )
-        remaining_steps = [
-            step for step in target_steps if step.get("id") not in target["completed"]
-        ]
-        return render_chain(actions) + self._materials_overview(
+        progress_note = ""
+        if engineer_progress is None and any(action.kind == "engineer_visit" for action in actions):
+            progress_note = (
+                " Engineer unlock status is unknown: the game has not reported engineer "
+                "progress yet, so engineers were chosen without checking access."
+            )
+        return render_chain(actions) + progress_note + self._materials_overview(
             remaining_steps, ship_instance_id
         )
+
+    def _engineer_progress(self) -> dict[str, dict[str, Any]] | None:
+        """Engineer name -> journal EngineerProgress entry; None when the game
+        has not reported engineer progress."""
+        event_manager = getattr(self.helper, "_event_manager", None)
+        if event_manager is None:
+            return None
+        _events, states = event_manager.get_current_state()
+        state = states.get("EngineerProgress")
+        if hasattr(state, "model_dump"):
+            state = state.model_dump()
+        if not isinstance(state, dict):
+            return None
+        progress: dict[str, dict[str, Any]] = {}
+        for entry in state.get("Engineers") or []:
+            if hasattr(entry, "model_dump"):
+                entry = entry.model_dump()
+            if isinstance(entry, dict) and entry.get("Engineer"):
+                progress[str(entry["Engineer"])] = entry
+        return progress or None
+
+    def _planned_trades(
+        self, steps: list[dict[str, Any]], ship_instance_id: str, inventory: dict[str, int]
+    ) -> list[PlannedTrade]:
+        """Material trader exchanges from surplus stock covering the shortfalls
+        of the steps; surplus spent by one exchange is not offered twice."""
+        totals = aggregate_needs(self._step_material_needs(steps, ship_instance_id))
+        if not totals:
+            return []
+        reference = _material_reference()
+        stock = dict(inventory)
+        trades: list[PlannedTrade] = []
+        for row in shortfalls(totals, inventory, reference):
+            category = reference.info(row.material_id).category or ""
+            for option in trade_options(row.material_id, row.missing, stock, totals, reference):
+                stock[option.material_id] = stock.get(option.material_id, 0) - option.give
+                trades.append(
+                    PlannedTrade(
+                        category=category,
+                        give_id=option.material_id,
+                        give_name=option.name,
+                        give_quantity=option.give,
+                        receive_id=row.material_id,
+                        receive_name=row.name,
+                        receive_quantity=option.receive,
+                    )
+                )
+        return trades
 
     def _preview_changes_action(
         self, args: PlanChangeParams, _context: dict[str, Any]
@@ -2207,29 +2491,38 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f"Plan {session['plan_name']} on {progress.get('ship', session['ship_custom_name'] or session['ship_instance_id'])}",
             f"{progress.get('modules_done', 0)}/{progress.get('modules_total', 0)} modules installed ({progress.get('modules_pct', 0)}%)",
         ]
+        steps = session.get("steps") or []
+        if steps:
+            parts.append(
+                self._missing_modules_summary(
+                    steps, self._loadout_for_ship(str(session["ship_instance_id"]))
+                ).rstrip(".")
+            )
         if progress.get("eng_target"):
             parts.append(
                 f"engineering {progress.get('eng_current', 0)}/{progress.get('eng_target')} grade levels ({progress.get('eng_pct', 0)}%)"
             )
-        if progress.get("next_label"):
-            next_label = progress["next_label"]
+        next_label = progress.get("next_label")
+        if next_label:
             next_class = progress.get("next_class", "")
             parts.append(f"next module: {next_label} {next_class}".strip())
         if session.get("paused"):
             parts.append("session paused")
         return ". ".join(parts) + "."
 
-    def _plan_progress_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+    def _plan_progress_for_session(self, session: dict[str, Any]) -> ListRowProgress:
         plan_id = session.get("plan_id") or ""
         with self.get_db() as db:
             row = db.execute("SELECT ship_model FROM plans WHERE id = ?", (plan_id,)).fetchone()
         ship_model = row["ship_model"] if row else ""
-        progress_list = self._plan_progress(plan_id, ship_model)
+        progress_list = self._plan_progress(
+            plan_id, ship_model, str(session.get("ship_instance_id") or "")
+        )
         return progress_list[0] if progress_list else {}
 
     def _goal_declare_action(self, args: GoalParams, _context: dict[str, Any]) -> str:
         """Activate a plan as the current build goal (spec intents.goal.declare)."""
-        ship_id = self._current_ship_id or self._detect_ship_from_journal().get("id", "")
+        ship_id = self._resolve_current_ship_id()
         if not ship_id:
             return "No ship detected from the journal — cannot start a build goal."
         existing = next(
@@ -2311,15 +2604,91 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                ship_id = entry.get("ShipID")
-                if ship_id is None:
+                if not isinstance(entry, dict):
                     continue
-                detected: dict[str, str] = {"id": str(ship_id)}
-                ship_name = entry.get("ShipName")
-                if isinstance(ship_name, str) and ship_name.strip():
-                    detected["name"] = ship_name.strip()
-                return detected
+                detected = self._ship_identity(entry)
+                if detected:
+                    return detected
         return {}
+
+    # Journal events that identify the ship the commander is currently flying.
+    # ShipyardTransfer/ShipyardSell also carry ship ids, but of other ships.
+    _SHIP_IDENTITY_EVENTS = frozenset({
+        "LoadGame",
+        "Loadout",
+        "ShipyardSwap",
+        "ShipyardNew",
+        "SetUserShipName",
+        "ModuleBuy",
+        "ModuleSell",
+        "ModuleSwap",
+        "ModuleStore",
+        "ModuleRetrieve",
+        "MassModuleStore",
+        "FetchRemoteModule",
+    })
+
+    @classmethod
+    def _ship_identity(cls, entry: dict[str, Any]) -> dict[str, str]:
+        """Current ship {id, name?, type?} carried by a journal entry.
+
+        The ship instance id (journal ShipID) is the only key of a ship: the
+        type is shared by every ship of the same model and names are
+        player-defined, so neither may identify the upgrade plan in progress."""
+        event_name = entry.get("event")
+        if event_name not in cls._SHIP_IDENTITY_EVENTS:
+            return {}
+        ship_id = entry.get("NewShipID") if event_name == "ShipyardNew" else entry.get("ShipID")
+        if ship_id is None or isinstance(ship_id, bool) or not str(ship_id).strip():
+            return {}
+        ship_type = str(entry.get("ShipType") or entry.get("Ship") or "").strip()
+        lowered_type = ship_type.casefold()
+        # On foot or in an Apex taxi, LoadGame reports the suit/taxi instead.
+        if "suit" in lowered_type or lowered_type.endswith("_taxi"):
+            return {}
+        identity = {"id": str(ship_id).strip()}
+        name = entry.get("UserShipName" if event_name == "SetUserShipName" else "ShipName")
+        if isinstance(name, str) and name.strip():
+            identity["name"] = name.strip()
+        if ship_type:
+            identity["type"] = ship_type
+        return identity
+
+    def _set_current_ship(self, identity: dict[str, str]) -> bool:
+        """Switch the tracked current ship; True when the ship changed.
+
+        The live loadout snapshot belongs to the previous ship, so it is
+        dropped on a change; the new ship's modules are then read from its
+        own Loadout (journal baseline) until a fresh snapshot arrives."""
+        ship_id = str(identity.get("id") or "").strip()
+        if not ship_id:
+            return False
+        changed = ship_id != str(self._current_ship_id)
+        if changed:
+            self._current_ship_id = ship_id
+            self._current_ship_name = ""
+            self._current_loadout_modules = []
+        name = identity.get("name")
+        if name:
+            self._current_ship_name = name
+            with self.get_db() as db:
+                db.execute(
+                    """
+                    UPDATE active_session SET ship_custom_name = ?
+                    WHERE ship_instance_id = ? AND COALESCE(ship_custom_name, '') != ?
+                    """,
+                    (name, ship_id, name),
+                )
+        return changed
+
+    def _resolve_current_ship_id(self) -> str:
+        """Current ship instance id, detected from the journals when no
+        journal event has identified it yet."""
+        if not self._current_ship_id:
+            detected = self._detect_ship_from_journal()
+            if detected:
+                self._set_current_ship(detected)
+        return self._current_ship_id
 
     def _rename_plan_from_settings(self, plan_id: str, new_name: str) -> None:
         try:
@@ -2331,12 +2700,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             )
 
     def _start_plan_session_from_settings(self, plan_id: str) -> None:
-        if not self._current_ship_id:
-            detected = self._detect_ship_from_journal()
-            self._current_ship_id = detected.get("id", "")
-            if detected.get("name") and not self._current_ship_name:
-                self._current_ship_name = detected["name"]
-        if not self._current_ship_id:
+        if not self._resolve_current_ship_id():
             self._set_message_field("plans", "plans_status", "plugin.sum.errNoShip")
             return
         try:
@@ -2393,10 +2757,20 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def _handle_ship_event(self, content: dict[str, Any]) -> None:
         event_name = content.get("event")
+        # Every plan in progress is keyed by the journal ShipID: follow the
+        # ship the commander flies so the matching plan is resumed on a swap.
+        identity = self._ship_identity(content)
+        ship_changed = self._set_current_ship(identity) if identity else False
         if event_name == "LoadGame":
             fid = content.get("FID")
             if fid:
                 self._current_fid = str(fid)
+            if identity:
+                self._publish_status()
+            return
+        if event_name in {"ShipyardSwap", "ShipyardNew", "SetUserShipName"}:
+            if identity:
+                self._publish_status()
             return
         if event_name in {"Location", "FSDJump", "CarrierJump"}:
             star_pos = content.get("StarPos")
@@ -2413,13 +2787,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             blueprint = content.get("BlueprintName") or ""
             level = content.get("Level")
             log("info", f"EngineerCraft: {blueprint} grade {level}")
-            ship_id = self._current_ship_id
-            if not ship_id:
-                detected = self._detect_ship_from_journal()
-                ship_id = detected.get("id", "")
-                if ship_id:
-                    self._current_ship_id = ship_id
-                    self._current_ship_name = detected.get("name", "")
+            ship_id = self._resolve_current_ship_id()
             if ship_id:
                 self._current_loadout_modules = self._apply_engineer_craft(
                     self._loadout_for_ship(ship_id), content
@@ -2432,23 +2800,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "ModuleStore",
             "ModuleRetrieve",
         }:
+            if ship_changed:
+                self._publish_status()
             return
         else:
-            ship_id = str(
-                content.get("ShipID")
-                or content.get("ShipIdent")
-                or content.get("ShipName")
-                or content.get("Ship")
-                or ""
-            )
-            if ship_id:
-                self._current_ship_id = ship_id
-                ship_name = content.get("ShipName")
-                if isinstance(ship_name, str) and ship_name.strip():
-                    self._current_ship_name = ship_name.strip()
-            if event_name in {"Loadout", "ModuleInfo"} and (
-                not ship_id or not self._current_ship_id or ship_id == self._current_ship_id
-            ):
+            # ModuleInfo carries no ShipID: it always describes the current ship.
+            ship_id = identity.get("id") or self._resolve_current_ship_id()
+            if event_name in {"Loadout", "ModuleInfo"}:
                 loadout_modules = content.get("Modules")
                 if isinstance(loadout_modules, list):
                     new_modules = [
@@ -2461,7 +2819,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     self._current_loadout_modules = new_modules
         modules = self._event_modules(content)
         with self.get_db() as db:
-            rows = db.execute("SELECT id, ship_instance_id, ship_custom_name FROM active_session").fetchall()
+            rows = db.execute("SELECT id, ship_instance_id FROM active_session").fetchall()
         if not ship_id and len({str(row["ship_instance_id"]) for row in rows}) > 1:
             log(
                 "warning",
@@ -2473,10 +2831,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             session = self.get_session(row["id"])
             if session is None or session["paused"]:
                 continue
-            if ship_id and ship_id not in {
-                str(session["ship_instance_id"]),
-                str(session.get("ship_custom_name") or ""),
-            }:
+            if ship_id and str(session["ship_instance_id"]) != str(ship_id):
                 continue
             for step in session["steps"]:
                 if step["id"] in session["completed_steps"]:
@@ -2677,17 +3032,26 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 if step["id"] not in session["completed_steps"]
             ]
             next_step = (
-                self._step_voice_label(remaining[0]) if remaining else "complete"
+                self._step_voice_label(
+                    remaining[0],
+                    self._step_loadout_match(
+                        remaining[0], session["steps"], str(session["ship_instance_id"])
+                    ),
+                )
+                if remaining else "complete"
             )
             ship = session["ship_custom_name"] or self._ship_display_name(
                 session.get("ship_model", "")
             ) or session["ship_instance_id"]
+            missing_modules = self._missing_modules_summary(
+                session["steps"], self._loadout_for_ship(str(session["ship_instance_id"]))
+            )
             return [
                 (
                     "Ship upgrade",
                     f"{session['plan_name']} on {ship}: "
                     f"{len(session['completed_steps'])}/{session['total_steps']} steps tracked; "
-                    f"next: {next_step}",
+                    f"next: {next_step}. {missing_modules}",
                 )
             ]
 
@@ -2708,22 +3072,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if plan_row is None:
             return []
         plan = dict(plan_row)
-        ship_id = self._current_ship_id
-        if not ship_id:
-            detected = self._detect_ship_from_journal()
-            ship_id = detected.get("id", "")
-            self._current_ship_id = ship_id
-            self._current_ship_name = detected.get("name", "")
+        ship_id = self._resolve_current_ship_id()
         if not ship_id:
             return [("Ship upgrade target", f"Target build {plan['plan_name']} is loaded; current ship not identified yet.")]
         steps = self._plan_steps(plan["source_json"])
-        metrics = self._progress_metrics(steps, self._loadout_for_ship(ship_id))
+        loadout = self._loadout_for_ship(ship_id)
+        metrics = self._progress_metrics(steps, loadout)
         ship = self._current_ship_name or self._ship_display_name(plan["ship_model"])
         next_step = next(
-            (step for step in steps if not self._step_satisfied_by_loadout(step, self._loadout_for_ship(ship_id))),
+            (step for step in steps if not self._step_satisfied_by_loadout(step, loadout)),
             None,
         )
-        next_label = self._step_voice_label(next_step) if next_step else "complete"
+        next_label = (
+            self._step_voice_label(
+                next_step, self._step_loadout_match(next_step, steps, ship_id)
+            )
+            if next_step else "complete"
+        )
         engineering = (
             f"; engineering {metrics['eng_current']}/{metrics['eng_target']} levels"
             if metrics["eng_target"] else ""
@@ -2733,7 +3098,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 "Ship upgrade target",
                 f"Target build {plan['plan_name']} for {ship}; no progress session has been activated. "
                 f"Current loadout matches {metrics['modules_done']}/{metrics['modules_total']} target modules "
-                f"({metrics['modules_pct']}%){engineering}; suggested first step: {next_label}.",
+                f"({metrics['modules_pct']}%){engineering}; suggested first step: {next_label}. "
+                + self._missing_modules_summary(steps, loadout),
             )
         ]
 
@@ -3330,12 +3696,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def get_session(
         self, session_id: str | None = None, context: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
-        """Active session by id, else the most recently active one.
+        """Active session by id, else the plan in progress on the current ship.
+
+        Sessions are keyed by the journal ShipID: without an explicit id the
+        current ship's most recently active session is returned (None when
+        that ship has no plan in progress), so swapping ships resumes the
+        plan of the ship now flown. Only when no ship is identified yet does
+        it fall back to the most recently active session.
 
         The AI does not know the internal session hash and passes whatever
         label it has (plan name, ship name/model, journal ShipID), so an
-        unknown identifier is resolved against those labels, then falls back
-        to the only active session."""
+        unknown identifier is resolved against those labels (the current
+        ship's sessions first), then falls back to the only active session."""
         session_id = session_id or (context or {}).get("session_id")
         identifier = str(
             session_id or (context or {}).get("ship_instance_id") or ""
@@ -3347,19 +3719,32 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 FROM active_session s
                 JOIN plans p ON p.id = s.plan_id
             """
-            if identifier:
-                row = db.execute(query + " WHERE s.id = ?", (identifier,)).fetchone()
-                if row is None:
+            row = (
+                db.execute(query + " WHERE s.id = ?", (identifier,)).fetchone()
+                if identifier else None
+            )
+        if row is None:
+            current_ship_id = self._resolve_current_ship_id()
+            with self.get_db() as db:
+                if identifier:
                     rows = db.execute(
-                        query + " ORDER BY s.last_activity DESC"
+                        query
+                        + " ORDER BY s.ship_instance_id = ? DESC, s.last_activity DESC",
+                        (current_ship_id,),
                     ).fetchall()
                     row = self._match_session_label(rows, identifier)
                     if row is None and len(rows) == 1:
                         row = rows[0]
-            else:
-                row = db.execute(
-                    query + " ORDER BY s.last_activity DESC LIMIT 1"
-                ).fetchone()
+                elif current_ship_id:
+                    row = db.execute(
+                        query
+                        + " WHERE s.ship_instance_id = ? ORDER BY s.last_activity DESC LIMIT 1",
+                        (current_ship_id,),
+                    ).fetchone()
+                else:
+                    row = db.execute(
+                        query + " ORDER BY s.last_activity DESC LIMIT 1"
+                    ).fetchone()
         if row is None:
             return None
         session = dict(row)
@@ -3659,23 +4044,12 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _publish_status(self) -> None:
         self._set_plan_rows(self._make_plan_rows())
 
-        with self.get_db() as db:
-            session = db.execute(
-                """
-                SELECT p.plan_name, s.ship_custom_name, s.ship_instance_id,
-                       s.current_step, s.completed_steps, s.plan_id
-                FROM active_session s
-                JOIN plans p ON p.id = s.plan_id
-                ORDER BY s.last_activity DESC
-                LIMIT 1
-                """
-            ).fetchone()
-
+        session = self.get_session()
         if session is None:
             self._set_message_field("session", "session_summary", "plugin.sum.noSession")
         else:
-            total = self._plan_module_count(session["plan_id"])
-            completed = len(json.loads(session["completed_steps"] or "[]"))
+            total = session["total_steps"]
+            completed = len(session["completed_steps"])
             percent = round((completed / total) * 100) if total else 0
             ship = session["ship_custom_name"] or session["ship_instance_id"]
             self._set_message_field(

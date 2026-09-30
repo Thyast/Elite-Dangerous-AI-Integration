@@ -2144,6 +2144,13 @@ def filter_station_response(
             "orbit": result["distance_to_arrival"],
             "is_planetary": result["is_planetary"]
         }
+        if include_match_metadata:
+            # Structured (plugin) rows only: the LLM-facing output is unchanged.
+            coords = [result.get("system_x"), result.get("system_y"), result.get("system_z")]
+            if all(isinstance(value, (int, float)) for value in coords):
+                filtered_result["coords"] = dict(zip(("x", "y", "z"), coords))
+            if result.get("material_trader"):
+                filtered_result["material_trader"] = result["material_trader"]
 
         if "market" in result:
             if unfiltered_markets:
@@ -2325,6 +2332,7 @@ def search_stations_for_modules(
                 "name": station.get("name", ""),
                 "system": station.get("system", ""),
                 "distance_ly": station.get("distance"),
+                "coords": station.get("coords"),
                 "arrival_ls": station.get("orbit"),
                 "is_planetary": station.get("is_planetary", False),
                 "services": station.get("services", []),
@@ -2357,6 +2365,52 @@ def search_stations_for_modules(
             "stations": [],
             "count": 0,
             "stock_status": "unknown",
+        }
+
+
+def search_material_traders(
+    category: str,
+    projected_states: Any,
+    *,
+    distance: int | float = 50000,
+    size: int = 5,
+) -> dict[str, Any]:
+    """Structured Spansh lookup of the nearest material traders of one type
+    (Raw, Manufactured or Encoded), sharing the station request path and its
+    landing pad filter with station_finder."""
+    request_body = prepare_station_request(
+        {
+            "material_trader": [category],
+            "distance": distance,
+            "sort_by": "distance",
+            "size": size,
+        },
+        projected_states,
+    )
+    try:
+        filtered = _execute_station_search(request_body)
+        rows = [
+            {
+                "id": f"{station.get('system', '').casefold()}::{station.get('name', '').casefold()}",
+                "name": station.get("name", ""),
+                "system": station.get("system", ""),
+                "distance_ly": station.get("distance"),
+                "coords": station.get("coords"),
+                "arrival_ls": station.get("orbit"),
+                "is_planetary": station.get("is_planetary", False),
+                "material_trader": station.get("material_trader") or category,
+                "source": "spansh",
+            }
+            for station in filtered.get("results", [])
+        ]
+        return {"status": "ok", "stations": rows, "count": filtered.get("amount_total", len(rows))}
+    except Exception as error:
+        log('error', error, traceback.format_exc())
+        return {
+            "status": "error",
+            "error": format_web_request_error("station finder", error),
+            "stations": [],
+            "count": 0,
         }
 
 

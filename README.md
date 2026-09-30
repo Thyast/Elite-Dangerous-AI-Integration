@@ -258,10 +258,8 @@ type/rendering only when the field shape requires it.
 
 ## Import Flow (Implemented)
 
-The Ship Upgrade Manager settings were redesigned with the user on 2026-09-20
-and implemented on this branch. The interactive mockup
-`maquette-import-flow.html` (untracked, repository root) remains the visual
-reference and can be deleted once the UI is validated.
+The Ship Upgrade Manager settings were redesigned with the user on 2026-09-20,
+implemented on this branch, and validated on 2026-09-29.
 
 Structure:
 
@@ -358,7 +356,8 @@ At minimum, add or update tests for:
 - Legacy singleton database migration.
 - Real journal field variants and localized module identifiers.
 - Every newly supported external plan format.
-- The import tunnel states (analyze, confirm, cancel, invalid input).
+- The import tunnel states (direct import, cancel, invalid input, header
+  entry point visibility, persistence of the last import).
 - Per-row plan deletion through the list field.
 
 The global suite (`python -m pytest -q`) reports 155 passing tests but does

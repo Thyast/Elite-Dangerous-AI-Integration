@@ -521,6 +521,78 @@ def test_station_response_reports_effective_commodity_market_data_age() -> None:
     assert response["market_data_max_age_days"] == 7
 
 
+def _spansh_station(**extra) -> dict:
+    return {
+        "name": "Broglie Terminal",
+        "system_name": "61 Cygni",
+        "system_x": -11.2,
+        "system_y": -1.2,
+        "system_z": 1.4,
+        "distance": 11.4,
+        "distance_to_arrival": 10,
+        "is_planetary": False,
+        "services": [],
+        **extra,
+    }
+
+
+def test_structured_station_rows_expose_system_coordinates() -> None:
+    request = {"filters": {}}
+    response = {"count": 1, "size": 1, "results": [_spansh_station(material_trader="Raw")]}
+
+    structured = actions_web.filter_station_response(request, response, include_match_metadata=True)
+    llm_facing = actions_web.filter_station_response(request, response)
+
+    assert structured["results"][0]["coords"] == {"x": -11.2, "y": -1.2, "z": 1.4}
+    assert structured["results"][0]["material_trader"] == "Raw"
+    assert "coords" not in llm_facing["results"][0]
+    assert "material_trader" not in llm_facing["results"][0]
+
+
+def test_material_trader_search_filters_type_and_large_pad(monkeypatch) -> None:
+    posted: list[dict] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"count": 1, "size": 5, "results": [_spansh_station(material_trader="Encoded")]}
+
+    monkeypatch.setattr(
+        actions_web.requests, "post",
+        lambda url, json, timeout: posted.append(json) or FakeResponse(),
+    )
+
+    result = actions_web.search_material_traders(
+        "Encoded",
+        {"ShipInfo": {"LandingPadSize": "L"}, "Location": {"StarSystem": "Sol", "StarPos": [0, 0, 0]}},
+    )
+
+    filters = posted[0]["filters"]
+    assert filters["material_trader"] == {"value": ["Encoded"]}
+    assert filters["has_large_pad"] == {"value": True}
+    assert posted[0]["sort"] == [{"distance": {"direction": "asc"}}]
+    assert result["status"] == "ok"
+    station = result["stations"][0]
+    assert station["system"] == "61 Cygni"
+    assert station["coords"] == {"x": -11.2, "y": -1.2, "z": 1.4}
+    assert station["material_trader"] == "Encoded"
+
+
+def test_material_trader_search_returns_errors_as_data(monkeypatch) -> None:
+    def fail(_request):
+        raise RuntimeError("Spansh unavailable")
+
+    monkeypatch.setattr(actions_web, "_execute_station_search", fail)
+
+    result = actions_web.search_material_traders("Raw", {})
+
+    assert result["status"] == "error"
+    assert result["stations"] == []
+    assert "Spansh unavailable" in result["error"]
+
+
 def test_resolve_plot_target_queries_all_spansh_endpoints(monkeypatch) -> None:
     posted_urls: list[str] = []
 

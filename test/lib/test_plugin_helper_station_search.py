@@ -108,3 +108,40 @@ def test_station_search_calculation_cache_avoids_duplicate_requests(monkeypatch)
     helper.search_stations_for_modules(modules, cache=cache, cache_key="module:beam")
 
     assert len(calls) == 2
+
+
+def test_local_outfitting_station_carries_current_coordinates(monkeypatch):
+    helper = _helper({
+        "Location": SimpleNamespace(model_dump=lambda: {"StarSystem": "Sol", "StarPos": [1.0, 2.0, 3.0]}),
+        "Outfitting": SimpleNamespace(model_dump=lambda: {
+            "StationName": "Abraham Lincoln",
+            "StarSystem": "Sol",
+            "timestamp": "now",
+            "Items": [{"Name": "Beam Laser", "Class": 3, "Rating": "A", "Price": 100}],
+        }),
+    })
+
+    result = helper.search_stations_for_modules(
+        [{"name": "Beam Laser", "class": ["3"], "rating": ["A"]}], cache={}
+    )
+
+    assert result["stations"][0]["coords"] == {"x": 1.0, "y": 2.0, "z": 3.0}
+
+
+def test_material_trader_search_is_cached_per_calculation(monkeypatch):
+    import lib.actions.actions_web as web
+
+    calls = []
+    monkeypatch.setattr(
+        web,
+        "search_material_traders",
+        lambda category, states, **kwargs: calls.append(category) or {"status": "ok", "stations": []},
+    )
+    helper = _helper({})
+    cache = {}
+
+    helper.search_material_traders("Raw", cache=cache)
+    helper.search_material_traders("Raw", cache=cache)
+    helper.search_material_traders("Encoded", cache=cache)
+
+    assert calls == ["Raw", "Encoded"]
