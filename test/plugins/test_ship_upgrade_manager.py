@@ -2362,6 +2362,33 @@ def test_journal_detection_ignores_other_ships_and_suits(tmp_path: Path, monkeyp
     assert plugin._detect_ship_from_journal() == {"id": "7", "name": "Seven", "type": "python"}
 
 
+def test_journal_reads_follow_the_configured_journal_path(tmp_path: Path, monkeypatch):
+    import lib.Config
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lib.Config.get_ed_journals_path)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for folder, ship_id in ((first, 1), (second, 2)):
+        folder.mkdir()
+        (folder / "Journal.2026-09-20T120000.01.log").write_text(
+            json.dumps({"event": "Loadout", "Ship": "python", "ShipID": ship_id}) + "\n",
+            encoding="utf-8",
+        )
+    plugin = _plugin(tmp_path)
+
+    class _Manager(_PluginManager):
+        config = {"ed_journal_path": str(first)}
+
+    manager = _Manager()
+    plugin._manager = manager  # type: ignore[assignment]
+    assert plugin._detect_ship_from_journal()["id"] == "1"
+
+    # The options are read live: a new path applies without a restart.
+    manager.config = {"ed_journal_path": str(second)}
+    assert plugin._detect_ship_from_journal()["id"] == "2"
+
+
 def _thrusters_plan(plugin: ShipUpgradeManagerPlugin) -> None:
     plugin.import_plan(
         "Python",

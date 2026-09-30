@@ -9,6 +9,7 @@ from .PluginSettingDefinitions import PluginSettings, ModelProviderDefinition
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .PluginHelper import PluginHelper
+    from .PluginManager import PluginManager
     from .Models import LLMModel, STTModel, TTSModel, EmbeddingModel
 
 
@@ -71,7 +72,7 @@ class PluginBase(ABC):
         self.settings: dict[str, Any] = {}
         # Set by the PluginManager when settings are registered; lets plugins
         # broadcast UI updates even in config state (before the runtime runs).
-        self._manager = None
+        self._manager: 'PluginManager | None' = None
         
     def on_chat_start(self, helper: 'PluginHelper'):
         """

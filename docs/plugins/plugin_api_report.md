@@ -310,7 +310,10 @@ from lib.PluginSettingDefinitions import (
   `config.json` (via `self.config` on the manager, or `self.settings`).
 - **File watching**: no built-in watcher API — the Ship Upgrade Manager
   ships `_JournalWatcher` (daemon thread, binary tail with offset +
-  remainder, 1 s poll) as the in-repo pattern to copy.
+  remainder, 1 s poll) as the in-repo pattern to copy. It resolves the
+  folder on every poll from the live `ed_journal_path` option
+  (`self._manager.config`, set in config state too), so a path change in
+  the COVAS:NEXT options applies without a restart.
 - **SQLite**: yes — used in production by the plugin
   (`plugin_data/<guid>/ship_upgrade_manager.db`, `sqlite3` stdlib,
   `PRAGMA foreign_keys`, one short-lived connection per operation via a

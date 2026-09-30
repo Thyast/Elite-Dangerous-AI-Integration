@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, ClassVar, cast, override
+from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
 from pydantic import BaseModel, Field
 
@@ -53,6 +53,9 @@ from .materials import (
     step_need,
     trade_options,
 )
+
+if TYPE_CHECKING:
+    from lib.PluginManager import PluginManager
 
 
 PLUGIN_GUID = "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e"
@@ -353,10 +356,13 @@ def _spec_module_key(family_key: str) -> str:
     )
 
 
-def _journal_files() -> list[str]:
-    """Journal.*.log files of the default Elite Dangerous journal folder."""
-    # Only ed_journal_path is read from the config: empty selects the default folder.
-    journals_path = get_ed_journals_path(cast(Config, cast(object, {})))
+def _journal_files(config: Config | None) -> list[str]:
+    """Journal.*.log files of the configured (ed_journal_path) or default
+    Elite Dangerous journal folder."""
+    # Without the host config, an empty one selects the default folder.
+    journals_path = get_ed_journals_path(
+        config if config is not None else cast(Config, cast(object, {}))
+    )
     return [
         os.path.join(journals_path, name)
         for name in os.listdir(journals_path)
@@ -392,7 +398,7 @@ class _JournalWatcher(threading.Thread):
 
     def _poll(self) -> None:
         try:
-            log_files = _journal_files()
+            log_files = self.plugin.journal_files()
         except (OSError, FileNotFoundError):
             return
         latest = max(log_files, key=os.path.getmtime) if log_files else ""
@@ -2589,7 +2595,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         are scanned from the newest file backwards: the first ship id found is
         the most recently recorded one."""
         try:
-            log_files = _journal_files()
+            log_files = self.journal_files()
         except (OSError, FileNotFoundError) as error:
             log("warn", f"Ship Upgrade Manager journal detection failed: {error}")
             return {}
@@ -3483,7 +3489,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         """Most recent Loadout modules for the given ship, from the journals,
         with the EngineerCraft results recorded after that Loadout applied."""
         try:
-            log_files = _journal_files()
+            log_files = self.journal_files()
         except (OSError, FileNotFoundError) as error:
             log("warn", f"Ship Upgrade Manager loadout baseline failed: {error}")
             return []
@@ -4078,12 +4084,21 @@ class ShipUpgradeManagerPlugin(PluginBase):
         Broadcast-only (no config write), so it is safe from the journal
         watcher thread. The manager backref is available in config state;
         without it (no registration) there is nothing to update."""
-        manager = self._manager
-        if manager is None and self.helper is not None:
-            manager = getattr(self.helper, "_plugin_manager", None)
+        manager = self._plugin_manager()
         if manager is None:
             return
         manager.republish_settings()
+
+    def _plugin_manager(self) -> "PluginManager | None":
+        """Manager backref (config state), else the runtime helper's one."""
+        if self._manager is not None:
+            return self._manager
+        return getattr(self.helper, "_plugin_manager", None)
+
+    def journal_files(self) -> list[str]:
+        """Journal files of the folder set in the COVAS:NEXT options
+        (ed_journal_path), read live so a path change applies at once."""
+        return _journal_files(getattr(self._plugin_manager(), "config", None))
 
     def _plan_module_count(self, plan_id: str) -> int:
         with self.get_db() as db:
