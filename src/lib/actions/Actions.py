@@ -726,9 +726,15 @@ def fsd_jump(args, projected_states):
     else:
         keys.send('HyperSuperCombination')
 
-    keys.send('SetSpeed100')
+    return_message += "Frame Shift Drive is now charging for a jump"
 
-    return return_message + "Frame Shift Drive is now charging for a jump"
+    # The jump is already underway; a missing throttle binding must not report the action as failed.
+    if 'SetSpeed100' in keys.keys:
+        keys.send('SetSpeed100')
+    else:
+        return_message += ". Throttle was not set to 100% because SetSpeed100 has no keyboard binding"
+
+    return return_message
 
 
 def next_system_in_route(args, projected_states):
