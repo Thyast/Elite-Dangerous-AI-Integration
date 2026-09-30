@@ -1,41 +1,40 @@
 import hashlib
-from html import escape
 import json
 import os
 import re
 import sqlite3
 import threading
 import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, ClassVar, cast, override
 
 from pydantic import BaseModel, Field
 
 from lib.Event import Event, GameEvent, ProjectedEvent
 from lib.EventManager import Projection
 from lib.Logger import log
-from lib.Config import get_asset_path, get_ed_journals_path
+from lib.Config import Config, get_asset_path, get_ed_journals_path
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginHelper import PluginHelper
 from lib.PluginSettingDefinitions import (
     ButtonSetting,
-    ErrorSetting,
-    ListAction,
+    FilterSetting,
     ListRow,
     ListRowProgress,
     ListSetting,
     ParagraphSetting,
     PluginSettings,
+    SettingField,
     SettingsGrid,
-    SettingBase,
     TextAreaSetting,
-    TextSetting,
 )
 from .parsers import PlanParseError, parse_plan_input
 from .planner import (
+    CLASS_LETTERS,
     PlannedTrade,
     analyze_build,
     build_advice,
@@ -197,7 +196,7 @@ def _specials_catalog() -> dict[str, Any]:
         with catalog_path.open(encoding="utf-8") as handle:
             catalog = json.load(handle)
     except (OSError, json.JSONDecodeError) as error:
-        log("warning", f"Ship Upgrade Manager specials catalog load failed: {error}")
+        log("warn", f"Ship Upgrade Manager specials catalog load failed: {error}")
         return {}
     return catalog if isinstance(catalog, dict) else {}
 
@@ -230,9 +229,6 @@ MATERIALS_UNAVAILABLE = (
     "stock cannot be compared with the upgrade needs."
 )
 
-
-# Class (1-5) to E:D letter grade: 1=E, 2=D, 3=C, 4=B, 5=A.
-CLASS_LETTERS = {1: "E", 2: "D", 3: "C", 4: "B", 5: "A"}
 
 # Up to this many missing target modules are named directly; beyond it the
 # player gets the count and the most important ones to install first.
@@ -357,6 +353,18 @@ def _spec_module_key(family_key: str) -> str:
     )
 
 
+def _journal_files() -> list[str]:
+    """Journal.*.log files of the default Elite Dangerous journal folder."""
+    # Only ed_journal_path is read from the config: empty selects the default folder.
+    journals_path = get_ed_journals_path(cast(Config, cast(object, {})))
+    return [
+        os.path.join(journals_path, name)
+        for name in os.listdir(journals_path)
+        if os.path.isfile(os.path.join(journals_path, name))
+        and name.startswith("Journal.")
+    ]
+
+
 class _JournalWatcher(threading.Thread):
     """Tails the Elite journals while the runtime is not running.
 
@@ -368,28 +376,23 @@ class _JournalWatcher(threading.Thread):
 
     def __init__(self, plugin: "ShipUpgradeManagerPlugin"):
         super().__init__(daemon=True, name="ship-upgrade-journal-watcher")
-        self.plugin = plugin
-        self._path = ""
-        self._offset = 0
-        self._remainder = ""
+        self.plugin: ShipUpgradeManagerPlugin = plugin
+        self._path: str = ""
+        self._offset: int = 0
+        self._remainder: str = ""
 
+    @override
     def run(self) -> None:
         while True:
             try:
                 self._poll()
             except Exception as error:
-                log("warning", f"Ship Upgrade Manager journal watcher error: {error}")
+                log("warn", f"Ship Upgrade Manager journal watcher error: {error}")
             time.sleep(1.0)
 
     def _poll(self) -> None:
         try:
-            journals_path = get_ed_journals_path({})
-            log_files = [
-                os.path.join(journals_path, name)
-                for name in os.listdir(journals_path)
-                if os.path.isfile(os.path.join(journals_path, name))
-                and name.startswith("Journal.")
-            ]
+            log_files = _journal_files()
         except (OSError, FileNotFoundError):
             return
         latest = max(log_files, key=os.path.getmtime) if log_files else ""
@@ -425,9 +428,8 @@ class _JournalWatcher(threading.Thread):
             entry = json.loads(line)
         except json.JSONDecodeError:
             return
-        if not isinstance(entry, dict) or not self.plugin._watch_active:
-            return
-        self.plugin._handle_ship_event(entry)
+        if isinstance(entry, dict):
+            self.plugin.handle_watched_journal_entry(entry)
 
 
 class ShipUpgradeState(BaseModel):
@@ -443,9 +445,11 @@ class ShipUpgradeState(BaseModel):
 
 
 class ShipUpgradeProjection(Projection[ShipUpgradeState]):
-    StateModel = ShipUpgradeState
+    StateModel: type[BaseModel] = ShipUpgradeState
+    state: ShipUpgradeState
 
-    def process(self, event: Event) -> None:
+    @override
+    def process(self, event: Event[Any]) -> None:
         if not isinstance(event, ProjectedEvent):
             return
         if event.content.get("projection") != "ship_upgrade_manager":
@@ -544,26 +548,26 @@ class StepMaterialsParams(BaseModel):
 class ShipUpgradeManagerPlugin(PluginBase):
     """Persist generic ship plans and per-ship upgrade sessions."""
 
-    settings_schema_version = 1
+    settings_schema_version: ClassVar[int] = 1
 
     def __init__(self, plugin_manifest: PluginManifest):
         super().__init__(plugin_manifest)
         self.helper: PluginHelper | None = None
-        self._current_ship_id = ""
-        self._current_ship_name = ""
-        self._current_fid = ""
+        self._current_ship_id: str = ""
+        self._current_ship_name: str = ""
+        self._current_fid: str = ""
         self._current_position: tuple[float, float, float] | None = None
         self._current_loadout_modules: list[dict[str, Any]] = []
-        self._last_plan_filter = ""
-        self._watch_active = True
+        self._last_plan_filter: str = ""
+        self._watch_active: bool = True
         self._catalog: dict[str, Any] = {}
         self._engineer_registry: dict[str, Any] = {}
         self._module_names: dict[str, str] = {}
         self._load_catalog()
         self._initialize_database()
-        self._last_import = self._load_last_import()
-        self._import_state = IMPORT_STATE_IMPORTED if self._last_import else IMPORT_STATE_IDLE
-        self.settings_config = self._build_settings_config()
+        self._last_import: dict[str, Any] | None = self._load_last_import()
+        self._import_state: str = IMPORT_STATE_IMPORTED if self._last_import else IMPORT_STATE_IDLE
+        self.settings_config: PluginSettings | None = self._build_settings_config()
         _JournalWatcher(self).start()
 
     def _load_catalog(self) -> None:
@@ -573,21 +577,21 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 Path(get_asset_path("module_catalog.json")).read_text(encoding="utf-8")
             )
         except (OSError, json.JSONDecodeError) as error:
-            log("warning", f"Ship Upgrade Manager catalog load failed: {error}")
+            log("warn", f"Ship Upgrade Manager catalog load failed: {error}")
             self._catalog = {"engineering_blueprints": []}
         try:
             self._engineer_registry = json.loads(
                 Path(get_asset_path("ship_engineers.json")).read_text(encoding="utf-8")
             )
         except (OSError, json.JSONDecodeError) as error:
-            log("warning", f"Ship Upgrade Manager engineer registry load failed: {error}")
+            log("warn", f"Ship Upgrade Manager engineer registry load failed: {error}")
             self._engineer_registry = {}
         try:
             self._module_names = json.loads(
                 Path(get_asset_path("module_names.json")).read_text(encoding="utf-8")
             ).get("names", {})
         except (OSError, json.JSONDecodeError) as error:
-            log("warning", f"Ship Upgrade Manager module names load failed: {error}")
+            log("warn", f"Ship Upgrade Manager module names load failed: {error}")
             self._module_names = {}
 
     # ------------------------------------------------------------------
@@ -632,24 +636,27 @@ class ShipUpgradeManagerPlugin(PluginBase):
             plans_grid.pop("header_action", None)
         return grids
 
+    def _settings_config(self) -> PluginSettings:
+        config = self.settings_config
+        assert config is not None, "settings_config is built in __init__"
+        return config
+
     def _sync_grids(self, error: tuple[str, dict[str, str | int | float]] | None = None) -> None:
-        self.settings_config["grids"] = self._build_grids(error)
-        for grid in self.settings_config["grids"]:
+        config = self._settings_config()
+        config["grids"] = self._build_grids(error)
+        for grid in config["grids"]:
             for field in grid["fields"]:
                 if field["type"] in {"paragraph", "error"}:
                     self.settings[field["key"]] = field.get("content", "")
 
-    def _base_field(self, key: str, type_: str, label: str | None = None) -> SettingBase:
-        return {
+    def _button(self, key: str, label: str, icon: str | None = None) -> ButtonSetting:
+        field: ButtonSetting = {
             "key": key,
             "label": label,
-            "type": type_,  # type: ignore[typeddict-item]
-            "readonly": type_ in {"paragraph", "error", "list"},
+            "type": "button",
+            "readonly": False,
             "placeholder": None,
         }
-
-    def _button(self, key: str, label: str, icon: str | None = None) -> ButtonSetting:
-        field: ButtonSetting = self._base_field(key, "button", label)  # type: ignore[assignment]
         if icon:
             field["icon"] = icon
         return field
@@ -661,8 +668,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
         label: str | None = None,
         params: dict[str, str | int | float] | None = None,
     ) -> ParagraphSetting:
-        field: ParagraphSetting = self._base_field(key, "paragraph", label)  # type: ignore[assignment]
-        field["content"] = content
+        field: ParagraphSetting = {
+            "key": key,
+            "label": label,
+            "type": "paragraph",
+            "readonly": True,
+            "placeholder": None,
+            "content": content,
+        }
         if params:
             field["params"] = params
         return field
@@ -670,21 +683,24 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _import_fields(
         self,
         error: tuple[str, dict[str, str | int | float]] | None = None,
-    ) -> list[SettingBase]:
+    ) -> list[SettingField]:
         state = self._import_state
         if state == IMPORT_STATE_IDLE:
             # The import entry point lives in the plans grid header action;
             # the tunnel grid itself only exists while a flow is open.
             return []
         if state == IMPORT_STATE_DATA:
-            textarea: TextAreaSetting = self._base_field("plan_input", "textarea", "plugin.sum.planDataLabel")  # type: ignore[assignment]
-            textarea.update({
+            textarea: TextAreaSetting = {
+                "key": "plan_input",
+                "label": "plugin.sum.planDataLabel",
+                "type": "textarea",
+                "readonly": False,
                 "placeholder": "plugin.sum.planDataPlaceholder",
                 "default_value": "",
                 "rows": 8,
                 "cols": 60,
-            })
-            fields: list[SettingBase] = [
+            }
+            fields: list[SettingField] = [
                 textarea,
                 self._button("save_plan", "plugin.sum.btn.import"),
                 self._button("cancel_import", "common.cancel"),
@@ -710,17 +726,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
             fields.append(self._paragraph("import_error", error[0], params=error[1]))
         return fields
 
-    def _plans_fields(self) -> list[SettingBase]:
-        plan_filter: TextSetting = self._base_field("plan_filter", "filter", "plugin.sum.search")  # type: ignore[assignment]
-        plan_filter.update({
+    def _plans_fields(self) -> list[SettingField]:
+        plan_filter: FilterSetting = {
+            "key": "plan_filter",
+            "label": "plugin.sum.search",
+            "type": "filter",
+            "readonly": False,
             "placeholder": "plugin.sum.searchPlaceholder",
             "default_value": "",
             "max_length": 100,
             "min_length": 0,
             "hidden": False,
-        })
-        plans_list: ListSetting = self._base_field("available_plans", "list", None)  # type: ignore[assignment]
-        plans_list.update({
+        }
+        plans_list: ListSetting = {
+            "key": "available_plans",
+            "label": None,
+            "type": "list",
+            "readonly": True,
             "placeholder": "plugin.sum.noPlans",
             "items": self._make_plan_rows(),
             "unit": "plan",
@@ -743,18 +765,21 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     "danger": True,
                 }
             ],
-        })
+        }
         delete_status = self._paragraph("plans_status", str(self.settings.get("plans_status", "") or ""))
         return [plan_filter, plans_list, delete_status]
 
-    def _session_fields(self) -> list[SettingBase]:
-        session_modules: ListSetting = self._base_field("session_modules", "list", None)  # type: ignore[assignment]
-        session_modules.update({
+    def _session_fields(self) -> list[SettingField]:
+        session_modules: ListSetting = {
+            "key": "session_modules",
+            "label": None,
+            "type": "list",
+            "readonly": True,
             "placeholder": "plugin.sum.noSession",
             "items": self._session_module_rows(),
             "row_actions": [],
             "unit": "module",
-        })
+        }
         return [
             self._paragraph(
                 "session_summary",
@@ -916,12 +941,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return rows
 
     def _grid(self, key: str) -> SettingsGrid:
-        return next(grid for grid in self.settings_config["grids"] if grid["key"] == key)
+        return next(grid for grid in self._settings_config()["grids"] if grid["key"] == key)
 
-    def _field(self, grid_key: str, field_key: str) -> SettingBase:
+    def _field(self, grid_key: str, field_key: str) -> SettingField:
         return next(
             field for field in self._grid(grid_key)["fields"] if field["key"] == field_key
         )
+
+    def _list_field(self, grid_key: str, field_key: str) -> ListSetting:
+        field = self._field(grid_key, field_key)
+        assert field["type"] == "list", f"{grid_key}.{field_key} is not a list field"
+        return cast(ListSetting, field)
 
     def _enter_import_state(
         self,
@@ -1290,11 +1320,10 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return progress
 
     def _set_plan_rows(self, rows: list[ListRow]) -> None:
-        field: ListSetting = self._field("plans", "available_plans")  # type: ignore[assignment]
-        field["items"] = rows
+        self._list_field("plans", "available_plans")["items"] = rows
 
     def _set_message_field(self, grid_key: str, field_key: str, content: str, params: dict[str, str | int | float] | None = None) -> None:
-        field = self._field(grid_key, field_key)
+        field = cast(ParagraphSetting, self._field(grid_key, field_key))
         field["content"] = content
         if params:
             field["params"] = params
@@ -1345,6 +1374,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             return
         self._sync_grids()
 
+    @override
     def on_chat_start(self, helper: PluginHelper) -> None:
         self.helper = helper
         self._watch_active = False
@@ -1676,15 +1706,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
         helper.register_status_generator(self._status_generator)
         self._publish_status()
 
+    @override
     def on_chat_stop(self, helper: PluginHelper) -> None:
         self.helper = None
         self._watch_active = True
 
+    @override
     def on_settings_changed(self) -> None:
         plan_filter = self.settings.get("plan_filter", "")
         if plan_filter != getattr(self, "_last_plan_filter", ""):
             self._publish_status()
 
+    @override
     def on_settings_button(self, key: str, value: str | None = None) -> None:
         if key == "import_plan":
             self._enter_import_state(IMPORT_STATE_DATA)
@@ -1703,7 +1736,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         elif key.startswith("delete_plan:"):
             self._delete_plan_by_id(key.split(":", 1)[1])
         else:
-            log("warning", f"Unknown Ship Upgrade Manager settings button: {key}")
+            log("warn", f"Unknown Ship Upgrade Manager settings button: {key}")
 
     def _start_session_action(
         self, args: StartSessionParams, _context: dict[str, Any]
@@ -1728,15 +1761,15 @@ class ShipUpgradeManagerPlugin(PluginBase):
             f"Progress: {len(session['completed_steps'])}/{session['total_steps']}."
         )
 
-    def _session_pause_action(self, session_id=None, context=None) -> str:
+    def _session_pause_action(self, session_id: str | None = None, context: dict[str, Any] | None = None) -> str:
         self.set_session_paused(True, session_id, context)
         return "Ship upgrade session paused."
 
-    def _session_resume_action(self, session_id=None, context=None) -> str:
+    def _session_resume_action(self, session_id: str | None = None, context: dict[str, Any] | None = None) -> str:
         self.set_session_paused(False, session_id, context)
         return "Ship upgrade session resumed."
 
-    def _session_stop_action(self, session_id=None, context=None) -> str:
+    def _session_stop_action(self, session_id: str | None = None, context: dict[str, Any] | None = None) -> str:
         self.stop_session(session_id, context)
         return "Ship upgrade session stopped."
 
@@ -1827,7 +1860,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
             None,
         )
 
-    def _next_step_action(self, session_id=None, context=None) -> str:
+    def _next_step_action(self, session_id: str | None = None, context: dict[str, Any] | None = None) -> str:
         session = self.get_session(session_id, context)
         if session is None:
             return "There is no active ship upgrade session."
@@ -1856,39 +1889,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             for plan in plans
         )
 
-    def _station_module_filter(self, item: str) -> dict[str, Any] | None:
-        """Map an internal item id to an exact station_finder module filter."""
-        from lib.actions.data import known_modules
-
-        module_id = self._normalize_module_id(item)
-        family, size, module_class = self._split_module_id(module_id)
-        family_key = re.sub(r"[^a-z0-9]", "", family)
-        i18n_key = f"module.{_spec_module_key(family_key)}"
-        display = (
-            "Reactive Surface Composite"
-            if canonical_item(module_id) == "reactive_surface_composite"
-            else self._module_names.get(i18n_key.removeprefix("module."))
-        )
-        if not display:
-            return None
-
-        # station_finder expects the canonical known_modules spelling, not a
-        # substring and not an arbitrary localized string.
-        exact = next(
-            (candidate for candidate in known_modules if candidate.casefold() == display.casefold()),
-            None,
-        )
-        if exact is None:
-            return None
-        request: dict[str, Any] = {"name": exact}
-        if size and size != "0":
-            request["class"] = [str(int(size))]
-        if module_class:
-            rating = CLASS_LETTERS.get(int(module_class))
-            if rating:
-                request["rating"] = [rating]
-        return request
-
     def _step_matches_module_query(self, step: dict[str, Any], query: str) -> bool:
         normalized_query = re.sub(r"[^a-z0-9]", "", query.casefold())
         item = str(step.get("item") or "")
@@ -1903,7 +1903,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         label = str(step.get("label") or step.get("id", ""))
         return normalized_query in re.sub(r"[^a-z0-9]", "", label.casefold())
 
-    def _upgrade_target(self, session_id=None, context=None) -> dict[str, Any] | str:
+    def _upgrade_target(self, session_id: str | None = None, context: dict[str, Any] | None = None) -> dict[str, Any] | str:
         """Active session target, else the latest imported plan for the
         current ship; a spoken explanation when neither is usable."""
         session = self.get_session(session_id, context)
@@ -1963,11 +1963,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _material_inventory(self) -> dict[str, int] | None:
         """Ship engineering materials (Raw/Manufactured/Encoded) from the
         runtime Materials projection; None when unavailable."""
+        states = self._projected_states()
+        if states is None:
+            return None
+        return inventory_from_state(states.get("Materials"))
+
+    def _projected_states(self) -> dict[str, Any] | None:
+        """Current runtime projection states; None outside the runtime."""
         event_manager = getattr(self.helper, "_event_manager", None)
         if event_manager is None:
             return None
         _events, states = event_manager.get_current_state()
-        return inventory_from_state(states.get("Materials"))
+        return states
 
     def _step_material_needs(
         self, steps: list[dict[str, Any]], ship_instance_id: str
@@ -2189,8 +2196,8 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _build_advice_action(
         self,
         args: BuildAdviceParams | None = None,
-        context=None,
-        session_id=None,
+        context: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Full DAG route from the active session or latest imported goal.
 
@@ -2219,12 +2226,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
         # One ephemeral cache per advice calculation. It is discarded on
         # return, so station data is never persisted or reused across asks.
         station_request_cache: dict[str, dict[str, Any]] = {}
-        location = None
-        if self.helper is not None:
-            _events, states = self.helper._event_manager.get_current_state()
-            location = states.get("Location")
 
-        def station_search(module_filters, *, distance=50000, size=25, cache_key=None):
+        def station_search(
+            module_filters: list[dict[str, Any]],
+            *,
+            distance: int | float = 50000,
+            size: int = 25,
+            cache_key: str | None = None,
+        ) -> dict[str, Any]:
             if self.helper is None:
                 return {"status": "error", "error": "COVAS runtime helper unavailable", "stations": []}
             return self.helper.search_stations_for_modules(
@@ -2243,10 +2252,13 @@ class ShipUpgradeManagerPlugin(PluginBase):
             self._planned_trades(remaining_steps, ship_instance_id, inventory)
             if inventory is not None else []
         )
-        trader_search = None
-        if trades and self.helper is not None and hasattr(self.helper, "search_material_traders"):
-            def trader_search(category):
-                return self.helper.search_material_traders(category, cache=station_request_cache)
+        trader_search: Callable[[str], dict[str, Any]] | None = None
+        helper = self.helper
+        if trades and helper is not None and hasattr(helper, "search_material_traders"):
+            def search_traders(category: str) -> dict[str, Any]:
+                return helper.search_material_traders(category, cache=station_request_cache)
+
+            trader_search = search_traders
 
         reference = _material_reference()
         engineer_progress = self._engineer_progress()
@@ -2257,7 +2269,6 @@ class ShipUpgradeManagerPlugin(PluginBase):
             current_position=self._current_position,
             ship_name=ship_name,
             station_search=station_search,
-            module_filter=self._station_module_filter,
             inventory=inventory,
             engineer_progress=engineer_progress,
             trades=trades,
@@ -2279,18 +2290,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
     def _engineer_progress(self) -> dict[str, dict[str, Any]] | None:
         """Engineer name -> journal EngineerProgress entry; None when the game
         has not reported engineer progress."""
-        event_manager = getattr(self.helper, "_event_manager", None)
-        if event_manager is None:
+        states = self._projected_states()
+        if states is None:
             return None
-        _events, states = event_manager.get_current_state()
         state = states.get("EngineerProgress")
-        if hasattr(state, "model_dump"):
+        if isinstance(state, BaseModel):
             state = state.model_dump()
         if not isinstance(state, dict):
             return None
         progress: dict[str, dict[str, Any]] = {}
         for entry in state.get("Engineers") or []:
-            if hasattr(entry, "model_dump"):
+            if isinstance(entry, BaseModel):
                 entry = entry.model_dump()
             if isinstance(entry, dict) and entry.get("Engineer"):
                 progress[str(entry["Engineer"])] = entry
@@ -2435,9 +2445,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self, args: LoadoutQueryParams, _context: dict[str, Any]
     ) -> str:
         """Report installed hardware directly from the current loadout projection."""
-        if self.helper is None:
+        states = self._projected_states()
+        if states is None:
             return "The current ship loadout is unavailable outside runtime."
-        _events, states = self.helper._event_manager.get_current_state()
         loadout = states.get("Loadout")
         if isinstance(loadout, BaseModel):
             loadout = loadout.model_dump()
@@ -2579,22 +2589,16 @@ class ShipUpgradeManagerPlugin(PluginBase):
         are scanned from the newest file backwards: the first ship id found is
         the most recently recorded one."""
         try:
-            journals_path = get_ed_journals_path({})
-            log_files = [
-                os.path.join(journals_path, name)
-                for name in os.listdir(journals_path)
-                if os.path.isfile(os.path.join(journals_path, name))
-                and name.startswith("Journal.")
-            ]
+            log_files = _journal_files()
         except (OSError, FileNotFoundError) as error:
-            log("warning", f"Ship Upgrade Manager journal detection failed: {error}")
+            log("warn", f"Ship Upgrade Manager journal detection failed: {error}")
             return {}
         for log_file in sorted(log_files, key=os.path.getmtime, reverse=True):
             try:
                 with open(log_file, encoding="utf-8", errors="ignore") as handle:
                     lines = handle.readlines()
             except OSError as error:
-                log("warning", f"Ship Upgrade Manager journal read failed: {error}")
+                log("warn", f"Ship Upgrade Manager journal read failed: {error}")
                 continue
             for line in reversed(lines):
                 line = line.strip()
@@ -2613,7 +2617,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     # Journal events that identify the ship the commander is currently flying.
     # ShipyardTransfer/ShipyardSell also carry ship ids, but of other ships.
-    _SHIP_IDENTITY_EVENTS = frozenset({
+    _SHIP_IDENTITY_EVENTS: ClassVar[frozenset[str]] = frozenset({
         "LoadGame",
         "Loadout",
         "ShipyardSwap",
@@ -2721,7 +2725,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def rename_plan(self, plan_id: str, new_name: str) -> bool:
         """Rename a plan in place, keeping its stable plan id."""
-        if not isinstance(new_name, str) or not new_name.strip():
+        if not new_name or not new_name.strip():
             raise ValueError("a new plan name is required")
         with self.get_db() as db:
             row = db.execute(
@@ -2750,10 +2754,16 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._publish_status()
         return True
 
-    def _on_event(self, event: Event, _context: dict[str, Any]) -> None:
+    def _on_event(self, event: Event[Any], _context: dict[str, Any]) -> None:
         if not isinstance(event, GameEvent):
             return
-        self._handle_ship_event(event.content)
+        self._handle_ship_event(dict(event.content))
+
+    def handle_watched_journal_entry(self, entry: dict[str, Any]) -> None:
+        """Journal entry tailed by the watcher; dropped while the runtime
+        delivers the same events through the EventManager."""
+        if self._watch_active:
+            self._handle_ship_event(entry)
 
     def _handle_ship_event(self, content: dict[str, Any]) -> None:
         event_name = content.get("event")
@@ -2776,9 +2786,11 @@ class ShipUpgradeManagerPlugin(PluginBase):
             star_pos = content.get("StarPos")
             if isinstance(star_pos, list) and len(star_pos) == 3:
                 try:
-                    self._current_position = tuple(float(value) for value in star_pos)
+                    x, y, z = (float(value) for value in star_pos)
                 except (TypeError, ValueError):
                     pass
+                else:
+                    self._current_position = (x, y, z)
             return
         if event_name == "EngineerCraft":
             # The game does not write a Loadout after each craft (often not
@@ -2821,8 +2833,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         with self.get_db() as db:
             rows = db.execute("SELECT id, ship_instance_id FROM active_session").fetchall()
         if not ship_id and len({str(row["ship_instance_id"]) for row in rows}) > 1:
-            log(
-                "warning",
+            log("warn",
                 "Skipping ship upgrade detection because the event has no ship identifier "
                 "and multiple ships have active sessions",
             )
@@ -2842,7 +2853,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                             step["id"], "Detected from Loadout event", session["id"]
                         )
                     except ValueError as error:
-                        log("warning", f"Could not auto-complete ship upgrade step: {error}")
+                        log("warn", f"Could not auto-complete ship upgrade step: {error}")
         # The progress bars reflect the ship's current loadout, so refresh
         # whenever a relevant journal event changes that state.
         self._publish_status()
@@ -3120,7 +3131,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return Path(data_path) / "ship_upgrade_manager.db"
 
     @contextmanager
-    def get_db(self) -> Iterator[sqlite3.Connection]:
+    def get_db(self) -> Generator[sqlite3.Connection]:
         connection = sqlite3.connect(self.get_db_path())
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -3450,7 +3461,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     def delete_plan(self, plan_name: str) -> bool:
         """Delete a plan and its applications/session through foreign keys."""
-        if not isinstance(plan_name, str) or not plan_name.strip():
+        if not plan_name or not plan_name.strip():
             raise ValueError("plan_name is required")
         with self.get_db() as db:
             plan = db.execute(
@@ -3472,15 +3483,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
         """Most recent Loadout modules for the given ship, from the journals,
         with the EngineerCraft results recorded after that Loadout applied."""
         try:
-            journals_path = get_ed_journals_path({})
-            log_files = [
-                os.path.join(journals_path, name)
-                for name in os.listdir(journals_path)
-                if os.path.isfile(os.path.join(journals_path, name))
-                and name.startswith("Journal.")
-            ]
+            log_files = _journal_files()
         except (OSError, FileNotFoundError) as error:
-            log("warning", f"Ship Upgrade Manager loadout baseline failed: {error}")
+            log("warn", f"Ship Upgrade Manager loadout baseline failed: {error}")
             return []
         # Newest first: crafts seen before reaching a Loadout happened after it.
         # A Loadout of another ship means those crafts belong to that ship.
@@ -3490,7 +3495,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 with open(log_file, encoding="utf-8", errors="ignore") as handle:
                     lines = handle.readlines()
             except OSError as error:
-                log("warning", f"Ship Upgrade Manager loadout baseline read failed: {error}")
+                log("warn", f"Ship Upgrade Manager loadout baseline read failed: {error}")
                 continue
             for line in reversed(lines):
                 line = line.strip()
@@ -4064,8 +4069,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
                     "pct": percent,
                 },
             )
-        module_rows_field: ListSetting = self._field("session", "session_modules")  # type: ignore[assignment]
-        module_rows_field["items"] = self._session_module_rows()
+        self._list_field("session", "session_modules")["items"] = self._session_module_rows()
         self._republish()
 
     def _republish(self) -> None:
@@ -4076,7 +4080,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         without it (no registration) there is nothing to update."""
         manager = self._manager
         if manager is None and self.helper is not None:
-            manager = self.helper._plugin_manager
+            manager = getattr(self.helper, "_plugin_manager", None)
         if manager is None:
             return
         manager.republish_settings()

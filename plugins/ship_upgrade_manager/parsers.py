@@ -24,7 +24,7 @@ def _slef_plan_name(header: dict[str, Any] | None) -> str | None:
     return name or None
 
 
-def parse_plan_input(value: str | dict[str, Any]) -> dict[str, Any]:
+def parse_plan_input(value: str | dict[str, Any] | None) -> dict[str, Any]:
     """Parse a Coriolis, EDSY, Inara, or normalized plan export."""
     if isinstance(value, dict):
         source = value
@@ -295,15 +295,14 @@ def _normalize_steps(source: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(explicit, list):
         return [_normalize_step(step, index) for index, step in enumerate(explicit)]
 
-    modules = source.get("modules") or source.get("Modules")
-    if isinstance(modules, dict):
-        modules = list(modules.values())
+    raw_modules = source.get("modules") or source.get("Modules")
+    if isinstance(raw_modules, dict):
+        raw_modules = list(raw_modules.values())
     elif isinstance(source.get("components"), dict):
-        modules = _flatten_component_modules(source["components"])
+        raw_modules = _flatten_component_modules(source["components"])
     elif isinstance(source.get("loadout"), dict):
-        modules = _flatten_component_modules(source["loadout"])
-    if not isinstance(modules, list):
-        modules = []
+        raw_modules = _flatten_component_modules(source["loadout"])
+    modules: list[Any] = raw_modules if isinstance(raw_modules, list) else []
 
     steps: list[dict[str, Any]] = []
     for index, module in enumerate(modules):

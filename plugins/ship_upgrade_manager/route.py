@@ -12,8 +12,9 @@ distance: they are inserted as late as their constraints allow.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 Coords = tuple[float, float, float]
 

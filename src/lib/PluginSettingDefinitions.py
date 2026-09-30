@@ -100,6 +100,8 @@ class ListRow(TypedDict):
     rendered under a common group header."""
     key: str
     title: str
+    title_key: NotRequired[str]
+    grade: NotRequired[str]
     meta: NotRequired[str]
     params: NotRequired[dict[str, str | int | float]]
     group: NotRequired[str]
@@ -119,11 +121,14 @@ class GridHeaderAction(TypedDict):
     icon: NotRequired[str]
     label: NotRequired[str]
 
+SettingField = TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting | FilterSetting
+
+
 class SettingsGrid(TypedDict):
     """Defines a grid of settings for a plugin."""
     key: str
     label: str
-    fields: list[TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting | FilterSetting]
+    fields: list[SettingField]
     collapsible: NotRequired[bool]
     default_collapsed: NotRequired[bool]
     header_action: NotRequired[GridHeaderAction]

@@ -34,7 +34,7 @@ def normalize_item(item: str) -> str:
     return cleaned
 
 
-def norm_slot(slot: str) -> str:
+def norm_slot(slot: str | None) -> str:
     return (slot or "").strip().lower()
 
 
@@ -182,7 +182,7 @@ class StationSearchRun:
     search: Any
     cache: dict[Any, dict[str, Any]] = field(default_factory=dict)
 
-    def __call__(self, filters: list[dict[str, Any]], **kwargs) -> dict[str, Any]:
+    def __call__(self, filters: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
         explicit = kwargs.get("cache_key")
         key = explicit if explicit is not None else tuple(sorted(_module_filter_key(item) for item in filters))
         if key not in self.cache:
@@ -311,7 +311,7 @@ def select_station_route_from_search(module_filters: list[dict[str, Any]], run: 
     return select_station_route(module_filters, run)
 
 
-def _station_module_filter(item: str, module_filter=None) -> dict[str, Any] | None:
+def _station_module_filter(item: str) -> dict[str, Any] | None:
     """Map an FD item id to the exact host station_finder allow-list name.
 
     No fuzzy guessing: every mapping is a deliberate family alias and is
@@ -382,12 +382,6 @@ def _station_module_filter(item: str, module_filter=None) -> dict[str, Any] | No
     return result
 
 
-def _grade_letter(module_class: int | None) -> str | None:
-    if module_class is None:
-        return None
-    return CLASS_LETTERS.get(int(module_class))
-
-
 # Journal Quality of a completed grade is 1.0; tolerate float noise.
 QUALITY_COMPLETE = 0.999
 
@@ -424,19 +418,6 @@ def engineering_increments(delta: SlotDelta) -> list[tuple[int, int]]:
             plan.append((delta.current_level, remaining))
     plan.extend((grade, grade) for grade in delta.grades_needed)
     return plan
-
-
-def _item_grade(item: str) -> tuple[str | None, str | None]:
-    """Size and letter grade encoded in an FD item id (5A / D / None)."""
-    match = re.search(r"_size(\d+)_class(\d+)", item)
-    if match:
-        size, module_class = int(match.group(1)), int(match.group(2))
-        letter = _grade_letter(module_class)
-        return f"{size}{letter or '?'}", letter
-    class_match = re.search(r"_class(\d+)$", item)
-    if class_match:
-        return None, _grade_letter(int(class_match.group(1)))
-    return None, None
 
 
 def analyze_build(
@@ -515,7 +496,7 @@ def analyze_build(
     return deltas
 
 
-def _catalog_entry(
+def catalog_entry(
     catalog: dict[str, Any], blueprint_name: str | None
 ) -> dict[str, Any] | None:
     """Join a journal BlueprintName against the catalog by fdname effect key."""
@@ -529,7 +510,7 @@ def _catalog_entry(
     return None
 
 
-def _grade_costs(entry: dict[str, Any], grade: int) -> tuple[list[dict[str, Any]], str]:
+def grade_costs(entry: dict[str, Any], grade: int) -> tuple[list[dict[str, Any]], str]:
     """Material costs for one blueprint grade, with an aggregate cost_status.
 
     Any unknown material makes the whole grade 'unknown' (never zero)."""
@@ -552,7 +533,7 @@ def _engineers_for_blueprint(
     names = ((entry.get("grades") or {}).get(str(grade)) or {}).get("engineers") or []
     found: list[dict[str, Any]] = []
     for name in names:
-        for engineer_id, engineer in engineer_registry.items():
+        for engineer in engineer_registry.values():
             if engineer.get("Engineer") == name:
                 found.append(
                     {
@@ -566,7 +547,7 @@ def _engineers_for_blueprint(
     return found
 
 
-def _distance_ly(origin: tuple | None, coords: dict | None) -> float | None:
+def _distance_ly(origin: tuple[float, ...] | None, coords: dict[str, Any] | None) -> float | None:
     if not origin or not coords:
         return None
     dx = origin[0] - float(coords.get("x", 0))
@@ -690,7 +671,7 @@ def _engineering_units(
     single unit (one visit), otherwise each grade is its own unit."""
     per_grade: list[tuple[int, int, dict[str, dict[str, Any]]]] = []
     for grade, increments in engineering_increments(delta):
-        costs, status = _grade_costs(entry, grade)
+        costs, status = grade_costs(entry, grade)
         known = _engineers_for_blueprint(entry, grade, engineer_registry)
         engineers = {
             engineer["name"]: engineer for engineer in known
@@ -771,14 +752,18 @@ def _rounded(value: float | None) -> float | None:
     return None if value is None else round(value, 1)
 
 
+def _distance_or_inf(row: dict[str, Any]) -> float:
+    distance = row.get("distance_ly")
+    return float(distance) if isinstance(distance, (int, float)) else float("inf")
+
+
 def build_advice(
     deltas: list[SlotDelta],
     catalog: dict[str, Any],
     engineer_registry: dict[str, Any],
-    current_position: tuple | None = None,
+    current_position: tuple[float, ...] | None = None,
     ship_name: str | None = None,
-    station_search=None,
-    module_filter=None,
+    station_search: Callable[..., dict[str, Any]] | None = None,
     inventory: dict[str, int] | None = None,
     engineer_progress: dict[str, dict[str, Any]] | None = None,
     trades: list[PlannedTrade] | None = None,
@@ -822,7 +807,7 @@ def build_advice(
     filter_keys: set[tuple[str, tuple[str, ...], tuple[str, ...]]] = set()
     if acquisition_slots and station_search is not None:
         for delta in acquisition_slots:
-            request = _station_module_filter(delta.target_item, module_filter)
+            request = _station_module_filter(delta.target_item)
             if request is None:
                 continue
             request_by_slot[delta.slot] = request
@@ -865,7 +850,7 @@ def build_advice(
         if delta.status == "installed":
             continue
         if delta.status in {"missing", "module_different"} and station_search is not None:
-            request = request_by_slot.get(delta.slot)
+            request = request_by_slot.get(delta.slot) or {}
             request_key = _module_filter_key(request) if request else None
             if request_key is not None and request_key in stop_key_by_filter:
                 purchase_stop_by_slot[delta.slot] = stop_key_by_filter[request_key]
@@ -907,7 +892,7 @@ def build_advice(
             )
         if not delta.target_blueprint:
             continue
-        entry = _catalog_entry(catalog, delta.target_blueprint)
+        entry = catalog_entry(catalog, delta.target_blueprint)
         if entry is None:
             leading.append(
                 PlannedAction(
@@ -932,7 +917,7 @@ def build_advice(
         materials_used = {
             material_id_of(cost)
             for unit in assigned for grade, _increments in unit.grades
-            for cost in _grade_costs(unit.entry, grade)[0]
+            for cost in grade_costs(unit.entry, grade)[0]
         } - {None}
         engineer_stops.append(
             RouteStop(
@@ -987,11 +972,7 @@ def build_advice(
         latest = min(dependents) if dependents else None
         choice = best_insertion(order, origin, candidates, latest)
         if choice is None:
-            station = min(
-                stations,
-                key=lambda row: row.get("distance_ly")
-                if isinstance(row.get("distance_ly"), (int, float)) else float("inf"),
-            )
+            station = min(stations, key=_distance_or_inf)
             trader, index = RouteStop(key, None), latest if latest is not None else len(order)
         else:
             candidate, index = choice
@@ -1085,7 +1066,7 @@ def build_advice(
             for unit in sorted(assigned, key=lambda item: item.delta.slot):
                 delta = unit.delta
                 for grade, increments in unit.grades:
-                    costs, status = _grade_costs(unit.entry, grade)
+                    costs, status = grade_costs(unit.entry, grade)
                     stock_status = "unknown"
                     if remaining_stock is not None and status == "verified":
                         stock_status = "sufficient"

@@ -28,6 +28,9 @@
     "reportUnknownVariableType": false,
     "reportUnknownArgumentType": false,
     "reportMissingTypeArgument": "warning",
+    "reportAny": false,
+    "reportExplicitAny": false,
+    "reportImplicitStringConcatenation": false,
     "pythonVersion": "3.12",
     "pythonPlatform": "Windows",
     "executionEnvironments": [

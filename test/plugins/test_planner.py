@@ -276,15 +276,13 @@ def test_station_route_greedily_selects_station_covering_most_modules():
 
 
 def test_station_module_mapping_uses_exact_host_allowlist_names():
-    assert _station_module_filter(
-        "int_powerplant_size5_class5", lambda item: {"name": "Power Plant"}
-    ) == {"name": "Power Plant", "class": ["5"], "rating": ["A"]}
-    assert _station_module_filter(
-        "hpt_beamlaser_gimbal_large", lambda item: {"name": "Beam Laser"}
-    ) == {"name": "Beam Laser", "class": ["3"]}
-    assert _station_module_filter(
-        "some_unknown_module", lambda item: None
-    ) is None
+    assert _station_module_filter("int_powerplant_size5_class5") == {
+        "name": "Power Plant", "class": ["5"], "rating": ["A"],
+    }
+    assert _station_module_filter("hpt_beamlaser_gimbal_large") == {
+        "name": "Beam Laser", "class": ["3"],
+    }
+    assert _station_module_filter("some_unknown_module") is None
 
 
 def test_build_advice_emits_one_station_purchase_for_shared_stop(catalog, engineers):
@@ -308,10 +306,7 @@ def test_build_advice_emits_one_station_purchase_for_shared_stop(catalog, engine
     def search(query, *, cache_key=None):
         return {"status": "ok", "stations": [station]}
 
-    actions = build_advice(
-        deltas, catalog, engineers, station_search=search,
-        module_filter=lambda item: filters.get("beam laser" if "beamlaser" in item else "power plant"),
-    )
+    actions = build_advice(deltas, catalog, engineers, station_search=search)
     purchases = [action for action in actions if action.kind == "station_purchase"]
     assert len(purchases) == 1
     assert purchases[0].station == "Jameson Memorial"
@@ -429,16 +424,11 @@ def test_build_advice_uses_multi_module_station_route(catalog, engineers):
         search_calls.append((modules, cache_key))
         return {"status": "ok", "stations": stations}
 
-    mapped = {
-        "hpt_beamlaser_fixed_large": requests[0],
-        "int_powerplant_size5_class5": requests[1],
-    }
     actions = build_advice(
         deltas,
         catalog,
         engineers,
         station_search=search,
-        module_filter=lambda item: mapped.get(item),
     )
     purchases = [action for action in actions if action.kind == "station_purchase"]
     assert len(purchases) == 1

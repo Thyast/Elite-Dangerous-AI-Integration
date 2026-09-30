@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
-from .planner import SlotDelta, _catalog_entry, _grade_costs, engineering_increments
+from .planner import SlotDelta, catalog_entry, grade_costs, engineering_increments
 
 MATERIAL_CATEGORIES = ("Raw", "Manufactured", "Encoded")
 # In-game storage cap per material, by material grade.
@@ -246,12 +247,12 @@ def step_need(
     )
     if increments_plan:
         need.engineering = True
-        entry = _catalog_entry(catalog, delta.target_blueprint)
+        entry = catalog_entry(catalog, delta.target_blueprint)
         if entry is None:
             need.unknown.append(f"blueprint {delta.target_blueprint}")
         else:
             for grade, increments in increments_plan:
-                costs, status = _grade_costs(entry, grade)
+                costs, status = grade_costs(entry, grade)
                 if status == "unknown":
                     need.unknown.append(f"{delta.target_blueprint} grade {grade}")
                     continue
@@ -362,7 +363,8 @@ def trade_options(
     """Same-family material trader exchanges using only stock the plan does
     not need, nearest grade first."""
     info = reference.info(material_id)
-    if not info.tradeable or info.grade is None or missing <= 0:
+    target_grade = info.grade
+    if not info.tradeable or target_grade is None or missing <= 0:
         return []
     remaining = missing
     options: list[TradeOption] = []
@@ -370,7 +372,7 @@ def trade_options(
     # before rarer higher grades.
     candidates = sorted(
         (member for member in info.family_members if member[1] != material_id),
-        key=lambda member: (abs(member[0] - info.grade), member[0] > info.grade),
+        key=lambda member: (abs(member[0] - target_grade), member[0] > target_grade),
     )
     for grade, other in candidates:
         if remaining <= 0:
@@ -378,8 +380,8 @@ def trade_options(
         surplus = inventory.get(other, 0) - (totals[other].needed if other in totals else 0)
         if surplus <= 0:
             continue
-        distance = abs(grade - info.grade)
-        if grade > info.grade:
+        distance = abs(grade - target_grade)
+        if grade > target_grade:
             per_unit = TRADE_DOWN_RATIO ** distance
             give = min(surplus, math.ceil(remaining / per_unit))
             receive = give * per_unit

@@ -215,9 +215,9 @@ class PluginHelper():
 
     _ActionModelT = TypeVar('_ActionModelT', bound=BaseModel)
 
-    def register_action(self, name: str, description: str, parameters: type[_ActionModelT], method: Callable[[_ActionModelT, dict], str], action_type="ship", input_template: Callable[[dict, dict], str]|None=None, cache_prefill: dict[str, dict[str, Any]] | None=None):
+    def register_action(self, name: str, description: str, parameters: type[_ActionModelT], method: Callable[[_ActionModelT, dict[str, Any]], str], action_type="ship", input_template: Callable[[dict[str, Any], dict[str, Any]], str]|None=None, cache_prefill: dict[str, dict[str, Any]] | None=None):
         """Register an action"""
-        def _wrapper(args: dict, context: dict) -> str:
+        def _wrapper(args: dict[str, Any], context: dict[str, Any]) -> str:
             try:
                 model = parameters(**args)
                 return method(model, context)
