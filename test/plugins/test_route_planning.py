@@ -209,6 +209,45 @@ def test_without_trader_stop_the_shortfall_stays_missing():
     assert actions[1].stock_status == "missing"
 
 
+def test_experimental_only_target_still_has_an_engineer_stop():
+    delta = _delta("a", "widget_strong", [1, 2, 3])
+    delta.status = "experimental_behind"
+    delta.current_blueprint = "widget_strong"
+    delta.current_level = 3
+    delta.grades_needed = []
+    delta.target_experimental = "special_widget"
+
+    actions = build_advice([delta], CATALOG, REGISTRY)
+
+    assert [action.kind for action in actions] == ["engineer_visit", "experimental"]
+    assert actions[-1].target == "special_widget"
+
+
+def test_already_fitted_experimental_is_reported_with_remaining_grades():
+    delta = _delta("a", "widget_strong", [2, 3])
+    delta.target_experimental = "special_widget"
+    delta.current_experimental = "special_widget"
+
+    actions = build_advice([delta], CATALOG, REGISTRY)
+
+    assert [(action.kind, action.stock_status) for action in actions if action.kind == "experimental"] == [
+        ("experimental", "installed")
+    ]
+
+
+def test_rank_limit_prefers_available_engineer_and_warns_when_no_alternative():
+    progress = {"Alice": {"Progress": "Unlocked", "Rank": 1},
+                "Bob": {"Progress": "Unlocked", "Rank": 3}}
+    actions = build_advice([_delta("a", "widget_strong", [1, 2])], CATALOG, REGISTRY,
+                           engineer_progress=progress)
+    assert _visits(actions) == ["Bob"]
+
+    only_low_rank = {"Bob": {"Progress": "Unlocked", "Rank": 1}}
+    actions = build_advice([_delta("a", "widget_strong", [3])], CATALOG, REGISTRY,
+                           engineer_progress=only_low_rank)
+    assert "rank 1/3" in next(action.access for action in actions if action.kind == "engineer_visit")
+
+
 def test_missing_trader_is_reported_as_blocking():
     trades = [PlannedTrade("Encoded", "a", "A", 6, "b", "B", 1)]
 

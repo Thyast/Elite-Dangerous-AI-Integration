@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from queue import Queue
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
@@ -25,6 +26,7 @@ class _EventManager:
     def __init__(self):
         self.projections = []
         self.sideeffects = []
+        self.incoming = Queue()
 
     def register_projection(self, projection, raise_error=False):
         self.projections.append((projection, raise_error))
@@ -36,9 +38,21 @@ class _EventManager:
 class _PromptGenerator:
     def __init__(self):
         self.status_generators = []
+        self.event_handlers = []
 
     def register_status_generator(self, generator):
         self.status_generators.append(generator)
+
+    def register_prompt_event_handler(self, handler):
+        self.event_handlers.append(handler)
+
+
+class _Assistant:
+    def __init__(self):
+        self.should_reply_handlers = []
+
+    def register_should_reply_handler(self, handler):
+        self.should_reply_handlers.append(handler)
 
 
 class _PluginDataHelper(PluginHelper):
@@ -65,7 +79,7 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         None,
         None,
         None,
-        None,
+        _Assistant(),
         data_path=tmp_path,
     )
     plugin = ShipUpgradeManagerPlugin(
@@ -85,6 +99,13 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         if action["name"] == "ship_upgrade_current_loadout"
     )
     assert "modules actually installed on the current ship" in loadout_action["description"]
+    workshop_action = next(
+        action for action in action_manager.actions
+        if action["name"] == "ship_upgrade_workshop_upgrades"
+    )
+    assert "quelles améliorations je peux faire ici" in workshop_action["cache_prefill"]
+    assert "quelle amélioration est-ce que je peux faire ici" in workshop_action["cache_prefill"]
+    assert "outside the plan" in workshop_action["description"]
     assert {
         action["name"] for action in action_manager.actions
     } == {
@@ -94,6 +115,7 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         "ship_upgrade_resume_session",
         "ship_upgrade_stop_session",
         "ship_upgrade_next_step",
+        "ship_upgrade_workshop_upgrades",
         "ship_upgrade_list_plans",
         "ship_upgrade_preview_changes",
         "ship_upgrade_apply_changes",
@@ -182,7 +204,7 @@ def test_registered_sideeffect_completes_module_from_game_event(tmp_path: Path):
         None,
         None,
         None,
-        None,
+        _Assistant(),
         data_path=tmp_path,
     )
     plugin = ShipUpgradeManagerPlugin(

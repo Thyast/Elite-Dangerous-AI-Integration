@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 from lib.PluginBase import PluginManifest
 from lib.Event import GameEvent
 from plugins.ship_upgrade_manager.ship_upgrade_manager import (
+    BuildAdviceParams,
     MissingModulesParams,
     ShipUpgradeManagerPlugin,
     StateQueryParams,
@@ -41,6 +42,7 @@ class _Helper:
     def __init__(self, data_path: Path):
         self.data_path = data_path
         self._event_manager = None
+        self.events = []
 
     def get_plugin_data_path(self, _manifest):
         return str(self.data_path)
@@ -53,6 +55,12 @@ class _Helper:
 
     def register_sideeffect(self, _sideeffect):
         pass
+
+    def register_event(self, *_args):
+        pass
+
+    def dispatch_event(self, event):
+        self.events.append(event)
 
     def register_status_generator(self, _generator):
         pass
@@ -1575,10 +1583,10 @@ def test_incomplete_target_grade_does_not_complete_step(tmp_path: Path):
 def test_build_advice_marks_grades_with_missing_materials(tmp_path: Path):
     plugin = _kestrel_materials_plugin(tmp_path, _materials_state(**_KESTREL_STOCK))
 
-    reply = plugin._build_advice_action()
+    reply = plugin._build_advice_action(BuildAdviceParams(detailed=True))
 
-    assert "armour_thermic, grade 2 (materials missing)" in reply
-    assert "armour_thermic, grade 5 (5 increments) (materials missing)" in reply
+    assert "Thermal resistant grade 2 (materials missing)" in reply
+    assert "Thermal resistant grade 5 (5 increments) (materials missing)" in reply
     assert "Materials: 19 material types are missing (84 units)" in reply
 
 
@@ -1609,19 +1617,16 @@ def test_build_advice_route_adds_trader_stop_and_checks_engineer_progress(tmp_pa
     plugin.helper.search_material_traders = search_material_traders
     plugin._current_position = (0.0, 0.0, 0.0)
 
-    reply = plugin._build_advice_action()
+    reply = plugin._build_advice_action(BuildAdviceParams(detailed=True))
 
     assert searched == [("Manufactured", True)]
-    assert reply.startswith(
-        "First: material trade: Manufactured material trader (Near, 1.0 ly from you), "
-        "trade 24 Heat Exchangers for 4 Heat Vanes, 1 Heat Exchangers for 3 Heat Dispersion Plate. "
-        "Then: engineer visit:"
-    )
-    assert "engineer visit: Etienne Dorn" in reply
-    assert "engineer visit: Petra Olmanova" in reply
+    assert "Near / Near Trader: Manufactured material trader" in reply
+    assert "trade 24 Heat Exchangers for 4 Heat Vanes, 1 Heat Exchangers for 3 Heat Dispersion Plate" in reply
+    assert "Etienne Dorn" in reply
+    assert "Petra Olmanova" in reply
     assert "not unlocked yet" not in reply
     assert "Engineer unlock status is unknown" not in reply
-    assert "Total route:" in reply
+    assert "ly from previous stop" in reply
 
 
 def test_build_advice_mentions_unknown_engineer_progress(tmp_path: Path):
@@ -2454,8 +2459,8 @@ def test_next_step_speaks_only_the_missing_engineering(tmp_path: Path):
     )
     session = plugin.get_session()
     match = plugin._step_loadout_match(session["steps"][0], session["steps"], "1")
-    assert plugin._step_voice_label(session["steps"][0], match).endswith(
-        "already installed with the target engineering"
+    assert "Experimental effect Drag Drives already installed" in plugin._step_voice_label(
+        session["steps"][0], match
     )
 
 
@@ -2470,3 +2475,433 @@ def test_next_step_still_asks_to_install_a_missing_module(tmp_path: Path):
     assert "already installed" not in answer
     assert ", then engineer it with" in answer
     assert "grade 5, then apply the experimental effect" in answer
+
+
+def test_reaching_module_target_announces_next_step_once(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "thrusters", "slot": "MainEngines", "item": "int_engine_size5_class5",
+         "engineering": {"BlueprintName": "Engine_Tuned", "Level": 5}},
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5,
+                         "ExperimentalEffect": "special_fsd_fuelcapacity"}},
+    ]})
+    plugin.start_session("Build", "1")
+    loadout = {"event": "Loadout", "Ship": "python", "ShipID": 1,
+               "Modules": [{"Slot": "MainEngines", "Item": "int_engine_size5_class5",
+                            "Engineering": {"BlueprintName": "Engine_Tuned", "Level": 5, "Quality": 1}}]}
+
+    plugin._handle_ship_event(loadout)
+    assert len(plugin.helper.events) == 1
+    assert plugin.get_session()["completed_steps"] == ["thrusters"]
+    assert "has reached its plan target" in plugin.helper.events[0].plugin_event_content
+    assert "Deep Charge" in plugin.helper.events[0].plugin_event_content
+    plugin._handle_ship_event(loadout)
+    assert len(plugin.helper.events) == 1
+
+
+def test_historical_completion_does_not_trigger_speech(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "thrusters", "slot": "MainEngines", "item": "int_engine_size5_class5"}
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._on_event(GameEvent(content={
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [{"Slot": "MainEngines", "Item": "int_engine_size5_class5"}],
+    }, historic=True), {})
+    assert plugin.get_session()["completed_steps"] == ["thrusters"]
+    assert plugin.helper.events == []
+
+
+def test_one_loadout_module_does_not_complete_two_identical_plan_steps(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    steps = [
+        {"id": "first", "item": "hpt_shieldbooster_size0_class5"},
+        {"id": "second", "item": "hpt_shieldbooster_size0_class5"},
+    ]
+    loadout = [{"Slot": "TinyHardpoint1", "Item": "hpt_shieldbooster_size0_class5"}]
+    assert plugin._steps_satisfied_by_loadout(steps, loadout) == ["first"]
+
+
+def test_engineer_craft_recommends_remaining_local_boosters_before_fsd(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    booster = "hpt_shieldbooster_size0_class5"
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "booster-1", "slot": "TinyHardpoint1", "item": booster,
+         "engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 3}},
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+        {"id": "booster-2", "slot": "TinyHardpoint2", "item": booster,
+         "engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 3}},
+        {"id": "booster-3", "slot": "TinyHardpoint3", "item": booster,
+         "engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 3}},
+    ]})
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [
+            {"Slot": "TinyHardpoint1", "Item": booster},
+            {"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5"},
+            {"Slot": "TinyHardpoint2", "Item": booster},
+            {"Slot": "TinyHardpoint3", "Item": booster},
+        ],
+    })
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC",
+    })
+
+    plugin._handle_ship_event({
+        "event": "EngineerCraft",
+        "Slot": "TinyHardpoint1",
+        "Module": booster,
+        "BlueprintName": "ShieldBooster_Resistive",
+        "Level": 3,
+        "Quality": 1,
+    })
+
+    assert plugin.get_session()["completed_steps"] == ["booster-1"]
+    assert len(plugin.helper.events) == 1
+    notice = plugin.helper.events[0].plugin_event_content
+    assert "Next: Shield Booster" in notice
+    assert "Frame Shift Drive" not in notice
+
+
+def test_craft_keeps_already_installed_effect_and_completes_grade(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5,
+                         "ExperimentalEffect": "special_fsd_fuelcapacity"}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5",
+                     "Engineering": {"BlueprintName": "FSD_LongRange", "Level": 4,
+                                     "ExperimentalEffect": "special_fsd_fuelcapacity"}}],
+    })
+    plugin._handle_ship_event({
+        "event": "EngineerCraft", "Slot": "FrameShiftDrive", "Module": "int_hyperdrive_size4_class5",
+        "BlueprintName": "FSD_LongRange", "Level": 5, "Quality": 1,
+    })
+    assert plugin.get_session()["completed_steps"] == ["fsd"]
+    assert len(plugin.helper.events) == 1
+
+
+def test_experimental_effect_can_be_only_work_remaining(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5,
+                         "ExperimentalEffect": "special_fsd_fuelcapacity"}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5",
+                     "Engineering": {"BlueprintName": "FSD_LongRange", "Level": 5, "Quality": 1}}],
+    })
+    assert plugin.get_session()["completed_steps"] == []
+    assert "apply the experimental effect Deep Charge" in plugin._next_step_action()
+    assert "complete the" not in plugin._next_step_action()
+    assert "experimental effect Deep Charge to apply" in plugin._build_advice_action(
+        BuildAdviceParams(detailed=True)
+    )
+
+
+def test_workshop_prioritizes_local_shields_and_explains_limit(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+        {"id": "shield", "slot": "Slot01_Size5", "item": "int_shieldgenerator_size5_class5",
+         "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({"event": "Loadout", "Ship": "python", "ShipID": 1,
+                               "Modules": [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5"},
+                                           {"Slot": "Slot01_Size5", "Item": "int_shieldgenerator_size5_class5"}]})
+    plugin._handle_ship_event({"event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC"})
+    assert "Shield Generator" in plugin._next_step_action()
+    assert "maximum grade 3" in plugin._next_step_action()
+    assert "At Didi Vatermann" in plugin._next_step_action()
+    assert "Frame Shift Drive" in plugin._next_step_action()
+    assert "cannot be upgraded at this workshop" in plugin._next_step_action()
+
+
+def test_workshop_question_uses_current_location_projection_after_restart(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+        {"id": "shield", "slot": "Slot01_Size5", "item": "int_shieldgenerator_size5_class5",
+         "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5}},
+        {"id": "booster", "slot": "TinyHardpoint1", "item": "hpt_shieldbooster_size0_class5",
+         "engineering": {"BlueprintName": "ShieldBooster_HeavyDuty", "Level": 5,
+                         "ExperimentalEffect": "special_shieldbooster_shieldstrength"}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1, "Modules": [
+            {"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5"},
+            {"Slot": "Slot01_Size5", "Item": "int_shieldgenerator_size5_class5"},
+            {"Slot": "TinyHardpoint1", "Item": "hpt_shieldbooster_size0_class5"},
+        ],
+    })
+
+    class EventManager:
+        def get_current_state(self):
+            return [], {"Location": {
+                "StarSystem": "Leesti", "Station": "Vatermann LLC", "Docked": True,
+            }, "EngineerProgress": {"Engineers": [
+                {"Engineer": "Didi Vatermann", "Progress": "Unlocked", "Rank": 4},
+            ]}}
+
+    plugin.helper._event_manager = EventManager()
+    assert plugin._current_workshop is None
+    answer = plugin._workshop_upgrades_action()
+    assert "Didi Vatermann" in answer
+    assert "planned upgrades for Build" in answer
+    assert "Shield Generator" in answer
+    assert "Shield Booster" in answer
+    assert "grade 3" in answer
+    assert "grade 4" in answer
+    assert "experimental effect" in answer
+    planned, alternatives = answer.split("Other options at this workshop, NOT in the active plan")
+    assert "Frame Shift Drive" not in planned
+    assert "Frame Shift Drive" not in alternatives
+    assert "Thermal resistant (up to grade 3)" in alternatives
+    assert "Heavy duty" not in alternatives
+    assert "Shield Generator" in plugin._next_step_action()
+    status = plugin._status_generator({
+        "Location": {
+            "StarSystem": "Leesti", "Station": "Vatermann LLC", "Docked": True,
+        }
+    })[0][1]
+    assert "at Didi Vatermann, planned upgrades supported here" in status
+    assert "Reinforced up to grade 3" in status
+    assert "Heavy duty up to grade 4" in status
+    assert "Frame Shift Drive" not in status
+
+
+def test_workshop_recommends_exact_plan_before_nonplan_options(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "booster", "slot": "TinyHardpoint1", "item": "hpt_shieldbooster_size0_class5",
+         "engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 5}},
+        {"id": "shield", "slot": "Slot01_Size5", "item": "int_shieldgenerator_size5_class5",
+         "engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 3}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [
+            {"Slot": "TinyHardpoint1", "Item": "hpt_shieldbooster_size0_class5"},
+            {"Slot": "Slot01_Size5", "Item": "int_shieldgenerator_size5_class5"},
+        ],
+    })
+    plugin._handle_ship_event({
+        "event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC",
+    })
+
+    planned, alternatives = plugin._workshop_upgrades_action().split(
+        "Other options at this workshop, NOT in the active plan"
+    )
+    assert "Shield Booster A with Resistance augmented up to grade 5" in planned
+    assert "Shield Generator 5A with Thermal resistant up to grade 3" in planned
+    assert "Heavy duty" not in planned
+    assert "Reinforced" not in planned
+    assert "Heavy duty (up to grade 5)" in alternatives
+    assert "Reinforced (up to grade 3)" in alternatives
+    assert "Shield Booster A" in plugin._next_step_action()
+
+
+def test_workshop_without_planned_work_separates_local_options(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+        {"id": "shield", "slot": "Slot01_Size5", "item": "int_shieldgenerator_size5_class5",
+         "engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [
+            {"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5"},
+            {"Slot": "Slot01_Size5", "Item": "int_shieldgenerator_size5_class5",
+             "Engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 3,
+                             "Quality": 1}},
+        ],
+    })
+    plugin._handle_ship_event({
+        "event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC",
+    })
+    answer = plugin._workshop_upgrades_action()
+    assert "no remaining planned upgrades can be performed" in answer
+    assert "Other options at this workshop, NOT in the active plan" in answer
+    assert "Reinforced (up to grade 3)" in answer
+    assert "Frame Shift Drive" not in answer
+    assert "no remaining planned upgrades can be performed" in plugin._next_step_action()
+    assert "grade availability is conditional" in answer
+
+
+def test_workshop_alternatives_respect_rank_and_installed_modules(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "booster", "slot": "TinyHardpoint1", "item": "hpt_shieldbooster_size0_class5",
+         "engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 5}},
+        {"id": "missing", "slot": "Slot01_Size5", "item": "int_shieldgenerator_size5_class5",
+         "engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 3}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [{"Slot": "TinyHardpoint1", "Item": "hpt_shieldbooster_size0_class5"}],
+    })
+    plugin._handle_ship_event({
+        "event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC",
+    })
+
+    class EventManager:
+        def get_current_state(self):
+            return [], {"EngineerProgress": {"Engineers": [
+                {"Engineer": "Didi Vatermann", "Progress": "Unlocked", "Rank": 2},
+            ]}}
+
+    plugin.helper._event_manager = EventManager()
+    answer = plugin._workshop_upgrades_action()
+    planned, alternatives = answer.split("Other options at this workshop, NOT in the active plan")
+    assert "Resistance augmented up to grade 2" in planned
+    assert "your unlocked rank is 2" in planned
+    assert "Heavy duty (up to grade 2)" in alternatives
+    assert "Shield Generator" not in alternatives
+    assert "grade availability is conditional" not in answer
+
+
+def test_workshop_question_does_not_fall_back_to_fsd_if_location_unknown(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+    answer = plugin._workshop_upgrades_action()
+    assert "cannot identify" in answer.lower()
+    assert "FSD" not in answer
+
+
+def test_next_step_at_confirmed_workshop_does_not_suggest_unsupported_fsd(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5"}],
+    })
+    plugin._handle_ship_event({
+        "event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC",
+    })
+    answer = plugin._next_step_action()
+    assert "no remaining planned upgrades can be performed" in answer
+    assert "Frame Shift Drive" not in answer
+
+
+def test_jump_range_change_only_proposes_recalculation(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+
+    def report(ship_id, value):
+        plugin._handle_ship_event({"event": "Loadout", "Ship": "python", "ShipID": ship_id,
+                                   "MaxJumpRange": value, "Modules": []})
+
+    report(1, 30.0)
+    report(1, 30.05)
+    report(2, 70.0)
+    assert plugin.helper.events == []
+    report(1, 30.2)
+    assert len(plugin.helper.events) == 1
+    assert "recalculate" in plugin.helper.events[0].plugin_event_content
+    assert plugin._maximum_jump_range_by_ship["1"] == 30.2
+
+
+def test_small_range_changes_accumulate_and_detailed_route_estimates_jumps(tmp_path: Path):
+    from plugins.ship_upgrade_manager.planner import PlannedAction
+
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+    for value in (20.0, 20.05, 20.11):
+        plugin._handle_ship_event({
+            "event": "Loadout", "Ship": "python", "ShipID": 1,
+            "MaxJumpRange": value, "Modules": [],
+        })
+    assert len(plugin.helper.events) == 1
+    assert "20.0 to 20.1" in plugin.helper.events[0].plugin_event_content
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "MaxJumpRange": 20.01, "Modules": [],
+    })
+    assert len(plugin.helper.events) == 2
+    leg = PlannedAction("engineer_visit", "fsd", "Felicity Farseer",
+                        system="Deciat", station="Farseer Inc", leg_distance_ly=41)
+    assert "at least 3 estimated jumps" in plugin._detailed_route([leg], "1", [])
+    assert "jumps unknown" in plugin._detailed_route([leg], "2", [])
+
+
+def test_workshop_respects_player_rank_even_when_registry_supports_higher_grade(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "shield", "slot": "Slot01_Size5", "item": "int_shieldgenerator_size5_class5",
+         "engineering": {"BlueprintName": "ShieldGenerator_Reinforced", "Level": 5}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({
+        "event": "Loadout", "Ship": "python", "ShipID": 1,
+        "Modules": [{"Slot": "Slot01_Size5", "Item": "int_shieldgenerator_size5_class5"}],
+    })
+    plugin._handle_ship_event({"event": "Docked", "StarSystem": "Leesti", "StationName": "Vatermann LLC"})
+
+    class EventManager:
+        def get_current_state(self):
+            return [], {"EngineerProgress": {"Engineers": [
+                {"Engineer": "Didi Vatermann", "Progress": "Unlocked", "Rank": 2},
+            ]}}
+
+    plugin.helper._event_manager = EventManager()
+    answer = plugin._next_step_action()
+    assert "up to grade 2" in answer
+    assert "maximum grade 3; your unlocked rank is 2" in answer
+
+
+def test_route_default_summary_and_detailed_jump_estimate(tmp_path: Path):
+    plugin = _plugin(tmp_path)
+    plugin.import_plan("python", "Build", {"steps": [
+        {"id": "fsd", "slot": "FrameShiftDrive", "item": "int_hyperdrive_size4_class5",
+         "engineering": {"BlueprintName": "FSD_LongRange", "Level": 5,
+                         "ExperimentalEffect": "special_fsd_fuelcapacity"}},
+    ]})
+    plugin.start_session("Build", "1")
+    plugin._handle_ship_event({"event": "Loadout", "Ship": "python", "ShipID": 1,
+                               "MaxJumpRange": 20.0, "Modules": [
+                                   {"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_size4_class5"}
+                               ]})
+    plugin._current_position = (0, 0, 0)
+    summary = plugin._build_advice_action()
+    detailed = plugin._build_advice_action(BuildAdviceParams(detailed=True))
+
+    assert "Route ready to upgrade 1 remaining module" in summary
+    assert "Ask for the detailed route" in summary
+    assert "estimated jumps" in detailed
+    assert "Deep Charge to apply" in detailed

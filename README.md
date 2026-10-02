@@ -190,6 +190,46 @@ The plugin listens to:
 - `ModuleStore`
 - `ModuleRetrieve`
 
+During an active, unpaused upgrade session, the plugin also follows
+`EngineerCraft` and the ship's reported `MaxJumpRange` in `Loadout`.
+When a module reaches its planned blueprint, full target grade, and requested
+experimental effect, COVAS:NEXT announces the completion and the next module
+once. Historical journal replay does not trigger these announcements. If the
+reported maximum jump range for the same ship changes by at least 0.1 ly,
+it offers to recalculate the route; it never initiates a station search just
+because a module or the jump range changed. Fuel/cargo-dependent jump range
+variations are not used for this notification.
+
+Ask for an optimized upgrade route to get a concise summary (remaining module
+count and, for three or fewer modules, names and ordered engineer visits).
+Ask **"detail the entire ship upgrade route"** or
+**"détaille toute la route d'amélioration"** for all stops with destinations,
+engineers, blueprints, grades, experimental effects, leg distances and minimum
+estimated jumps. Jump estimates use the latest known reported maximum range:
+they are straight-line lower bounds, not navigable routes. Missing range or
+coordinates are reported as unknown. The complete route is computed again
+when requested; station lookup results are not retained between requests.
+
+At a known engineer workshop (identified by the `Location` or `Docked`
+journal events), "next upgrade" favors unfinished work available there and
+reports the engineer's module-grade cap and the commander's known rank cap.
+It still names an alternative engineer when work must be completed elsewhere.
+Ask **"quelles améliorations je peux faire ici ?"** or **"what can I upgrade
+here?"** to hear the exact remaining upgrades from the active plan first
+(blueprint, achievable grade, and any planned experimental effect). Other
+blueprints available to that engineer on the same installed plan modules
+are identified separately as **outside the plan**; they do not replace its
+targets. If none of the planned work is possible there, the response says so
+before listing those alternatives. Other ship modules are not suggested.
+The answer checks the current Location projection even when docking preceded
+plugin startup; if the docked workshop cannot be identified, it says so
+instead of falling back to the next module in the plan.
+Experimental effects are drawn strictly from the imported plan: an effect
+already fitted is identified as such, and if the export specifies none the
+plugin says so rather than guessing. Compact external URLs with no engineering
+data cannot establish an experimental target; import the full JSON/SLEF
+export to include it.
+
 `EDJournal` reads the actual Elite Dangerous journal files directly. EDDI and
 EDMC are optional; they are not required for module detection.
 

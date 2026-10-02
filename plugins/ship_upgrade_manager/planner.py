@@ -461,8 +461,16 @@ def analyze_build(
                 status = "installed"
             elif current_blueprint == target_blueprint and grade_reached(
                 current_level, current_quality, target_level
+            ) and (
+                not experimental_effect(engineering)
+                or normalize_item(experimental_effect(current_engineering) or "")
+                == normalize_item(experimental_effect(engineering) or "")
             ):
                 status = "installed"
+            elif current_blueprint == target_blueprint and grade_reached(
+                current_level, current_quality, target_level
+            ):
+                status = "experimental_behind"
             elif current_blueprint == target_blueprint:
                 status = "grade_behind"
             else:
@@ -535,6 +543,17 @@ def _engineers_for_blueprint(
     for name in names:
         for engineer in engineer_registry.values():
             if engineer.get("Engineer") == name:
+                families = {
+                    normalize_item(str(family)).replace(" ", "")
+                    for family in entry.get("module_names") or []
+                }
+                limits = [
+                    limit for family, limit in (engineer.get("Modifies") or {}).items()
+                    if normalize_item(str(family)).replace(" ", "") in families
+                    and isinstance(limit, int)
+                ]
+                if limits and grade > max(limits):
+                    break
                 found.append(
                     {
                         "name": name,
@@ -597,7 +616,16 @@ def render_chain(actions: list[PlannedAction]) -> str:
                 known_legs += 1
                 total += action.leg_distance_ly
         if action.access:
-            detail += f" (not unlocked yet: {action.access})"
+            detail += (
+                f" (requires {action.access})"
+                if action.access.startswith("rank ")
+                else f" (not unlocked yet: {action.access})"
+            )
+        if action.kind == "experimental":
+            detail += (
+                " (already installed)"
+                if action.stock_status == "installed" else " (to apply)"
+            )
         if action.kind == "material_trade" and action.materials:
             detail += ", trade " + ", ".join(
                 f"{trade['give_quantity']} {trade['give_name']} for "
@@ -700,7 +728,13 @@ def _engineering_units(
             name: engineer for name, engineer in engineers.items()
             if _engineer_access(name, engineer_progress) in _USABLE_ACCESS
         }
-        per_grade.append((grade, increments, usable or engineers))
+        candidates = usable or engineers
+        ranked = {
+            name: engineer for name, engineer in candidates.items()
+            if not isinstance((engineer_progress or {}).get(name, {}).get("Rank"), int)
+            or (engineer_progress or {})[name]["Rank"] >= grade
+        }
+        per_grade.append((grade, increments, ranked or candidates))
     if not per_grade:
         return []
     shared = set.intersection(*(set(candidates) for _grade, _increments, candidates in per_grade))
@@ -891,6 +925,11 @@ def build_advice(
                 )
             )
         if not delta.target_blueprint:
+            if delta.target_experimental and delta.status != "installed":
+                leading.append(PlannedAction(
+                    kind="blocking", slot=delta.slot, target=f"experimental effect {delta.target_experimental} has no target blueprint",
+                    citations=["target build"],
+                ))
             continue
         entry = catalog_entry(catalog, delta.target_blueprint)
         if entry is None:
@@ -908,9 +947,23 @@ def build_advice(
                 )
             )
             continue
-        units.extend(
-            _engineering_units(delta, entry, engineer_registry, engineer_progress, leading)
-        )
+        delta_units = _engineering_units(delta, entry, engineer_registry, engineer_progress, leading)
+        if delta.target_experimental and not delta_units and delta.status == "experimental_behind":
+            grade = delta.target_level or 1
+            candidates = {
+                engineer["name"]: engineer
+                for engineer in _engineers_for_blueprint(entry, grade, engineer_registry)
+                if _engineer_access(engineer["name"], engineer_progress) != "barred"
+            }
+            if candidates:
+                delta_units = [_EngineeringUnit(delta, entry, [], candidates)]
+            else:
+                leading.append(PlannedAction(
+                    kind="blocking", slot=delta.slot,
+                    target=f"no engineer available for experimental effect {delta.target_experimental}",
+                    citations=["module_catalog.json", "ship_engineers.json"],
+                ))
+        units.extend(delta_units)
 
     engineer_stops: list[RouteStop] = []
     for name, (engineer, assigned) in _assign_engineers(units, origin, engineer_progress).items():
@@ -1047,6 +1100,15 @@ def build_advice(
         else:
             name, engineer, assigned, _materials = stop.payload
             access = _engineer_access(name, engineer_progress)
+            rank = (engineer_progress or {}).get(name, {}).get("Rank")
+            required_grade = max(
+                (grade for unit in assigned for grade, _increments in unit.grades),
+                default=0,
+            )
+            rank_warning = (
+                f"rank {rank}/{required_grade}; gain reputation before grade {required_grade}"
+                if isinstance(rank, int) and rank < required_grade else None
+            )
             blueprints = list(dict.fromkeys(str(unit.delta.target_blueprint) for unit in assigned))
             route_actions.append(
                 PlannedAction(
@@ -1057,7 +1119,7 @@ def build_advice(
                     station=engineer.get("station"),
                     distance_ly=_distance_ly(current_position, engineer.get("coords")),
                     leg_distance_ly=leg,
-                    access=None if access in _USABLE_ACCESS else access,
+                    access=rank_warning or (None if access in _USABLE_ACCESS else access),
                     rationale=f"Visit for blueprint {', '.join(blueprints)}",
                     citations=["ship_engineers.json"]
                     + (["EngineerProgress"] if engineer_progress is not None else []),
@@ -1098,4 +1160,15 @@ def build_advice(
                             citations=["module_catalog.json", "current Loadout"],
                         )
                     )
+                if delta.target_experimental:
+                    effect_installed = normalize_item(delta.current_experimental or "") == normalize_item(delta.target_experimental)
+                    last_grade = max(engineering_increments(delta), default=(0, 0))[0]
+                    if (unit.grades and unit.grades[-1][0] == last_grade) or not unit.grades:
+                        route_actions.append(PlannedAction(
+                            kind="experimental",
+                            slot=delta.slot,
+                            target=delta.target_experimental,
+                            stock_status="installed" if effect_installed else "unknown",
+                            citations=["target build", "current Loadout"],
+                        ))
     return leading + route_actions
