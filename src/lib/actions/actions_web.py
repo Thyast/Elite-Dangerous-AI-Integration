@@ -341,9 +341,11 @@ def web_search_agent(
 
     If you are uncertain if something is a material or a commodity, search for both.
     If the user asks for a specific commodity or module, search explicitly for that in stations, rather than with fitting economies or service that could supply that.
+    For Technology Broker module unlock requirements, treat trade goods as commodities, not engineering materials. Check the required quantity against the matching item in the current cargo inventory (shown as CargoContents in the game state), then report the quantity held and the amount still needed. If the cargo inventory is unavailable, say so instead of assuming the commander has none.
+    When some quantity is still needed, call station_finder for that commodity with transaction "Buy" and amount equal to the missing quantity. Do not send commodities to material_finder. If asked for a broker location as well, search for the appropriate Guardian or Human Technology Broker separately.
     Explore both options for commodity procurement: mining from planet ring's hotspots or buying it from a station's market.
     
-    material_finder returns inventory counts, trade-in calculations, and drop locations.
+    material_finder returns inventory counts, trade-in calculations, and drop locations for engineering materials.
     blueprint_finder lists material costs per grade, calculates missing materials from inventory, and lists capable engineers.
     engineer_finder reports unlock status (known/invited/unlocked), rank progress, and workshop locations.
     station_finder can locate Material Traders and Technology Brokers. body_finder finds biological signals and mining hotspots.

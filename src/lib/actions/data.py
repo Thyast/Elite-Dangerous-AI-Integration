@@ -953,6 +953,7 @@ known_commodities = [
     "Lucan Onionhead",
     "Lyrae Weed",
     "Magnetic Emitter Coil",
+    "Magnetic Emitter Housing",
     "Marine Equipment",
     "Master Chefs",
     "Mechucos High Tea",
@@ -1352,7 +1353,7 @@ ship_encoded_materials_map = {
         2: ['ancientculturaldata'],
         3: ['ancienthistoricaldata'],
         4: ['ancienttechnologicaldata'],
-        5: ['guardian_vesselblueprint'],
+        5: ['guardian_moduleblueprint', 'guardian_weaponblueprint', 'guardian_vesselblueprint'],
         'source': 'Guardian obelisks: Synuefe XR-H D11-102, planet 1 B (4 obelisks together)'
     },
     'Thargoid Data': {

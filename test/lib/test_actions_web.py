@@ -42,6 +42,40 @@ class FailingLLMModel:
         raise RuntimeError("model unavailable")
 
 
+class BrokerPromptGenerator:
+    def generate_status_message(self, projected_states: dict) -> str:
+        return "CargoContents: 2 X Reinforced Mounting Plate"
+
+
+class BrokerLLMModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, messages: list, tools: list, tool_choice: str):
+        self.calls += 1
+        if self.calls == 1:
+            system_prompt = messages[0]["content"]
+            assert "Technology Broker module unlock requirements" in system_prompt
+            assert "CargoContents" in system_prompt
+            assert "Do not send commodities to material_finder" in system_prompt
+            assert "CargoContents: 2 X Reinforced Mounting Plate" in messages[1]["content"]
+            return "", [ChatCompletionMessageFunctionToolCall(
+                type="function",
+                id="station_call_1",
+                function={
+                    "name": "station_finder",
+                    "arguments": json.dumps({
+                        "commodities": [{
+                            "name": "Reinforced Mounting Plate",
+                            "amount": 3,
+                            "transaction": "Buy",
+                        }],
+                    }),
+                },
+            )], {}
+        return "Need 5; you have 2. Buy 3 more.", None, {}
+
+
 def consume_generator(generator):
     values = []
     while True:
@@ -113,6 +147,34 @@ def test_web_search_agent_yields_internal_tool_processing_events(monkeypatch) ->
         },
     ]
     assert final_result == "Final report"
+
+
+def test_web_search_agent_routes_broker_commodity_and_checks_cargo(monkeypatch) -> None:
+    station_calls = []
+
+    def fake_station_finder(args, projected_states):
+        station_calls.append(args)
+        return "Market results"
+
+    monkeypatch.setattr(actions_web, "station_finder", fake_station_finder)
+
+    updates, final_result = consume_generator(actions_web.web_search_agent(
+        {"query": "I need 5 Reinforced Mounting Plates to unlock a Guardian module at a Technology Broker"},
+        {"Cargo": {"Inventory": [{"Name": "Reinforced Mounting Plate", "Count": 2}]}},
+        prompt_generator=BrokerPromptGenerator(),
+        llm_model=BrokerLLMModel(),
+        max_loops=3,
+    ))
+
+    assert station_calls == [{
+        "commodities": [{
+            "name": "Reinforced Mounting Plate",
+            "amount": 3,
+            "transaction": "Buy",
+        }],
+    }]
+    assert updates[2]["result"] == "Market results"
+    assert final_result == "Need 5; you have 2. Buy 3 more."
 
 
 def test_web_search_agent_returns_actionable_loop_error() -> None:
