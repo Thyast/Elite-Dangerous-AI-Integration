@@ -12,6 +12,7 @@ from .actions_web import register_web_actions
 from .Plotter import Plotter
 from .actions_ui import register_ui_actions
 from .actions_genui import register_genui_actions
+from .actions_guardian import register_guardian_actions
 
 from ..Logger import log, show_chat_message
 from ..Screenshot import get_windows_game_window_handle, screenshot_game_window, set_game_window_active
@@ -2702,6 +2703,8 @@ def register_actions(actionManager: ActionManager, eventManager: EventManager, p
     register_ui_actions(
         actionManager, eventManager
     )
+
+    register_guardian_actions(actionManager)
 
     if overlay_show_hud:
         register_genui_actions(

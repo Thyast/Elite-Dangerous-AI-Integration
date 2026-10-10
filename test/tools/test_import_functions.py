@@ -2,6 +2,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import pytest
 
 REPO = Path(__file__).parents[2]
 TOOLS = REPO / "tools" / "import_catalog.py"
@@ -91,3 +92,54 @@ def test_technology_broker_module_i18n_keys_have_english_and_french_entries():
         assert product["name_en"]
         assert product["name_fr"]
         assert product.get("journal_item_id") or product.get("journal_item_pattern") is None or product["journal_item_status"] in {"family_pattern", "unverified"}
+
+
+def test_parse_outfitting_keeps_duplicate_symbols_and_sorts_by_symbol_and_id():
+    module = _load_module()
+    header = ",".join(module.OUTFITTING_FIELDS)
+    data = (header + "\n"
+            "2,Int_Z,internal,Guardian FSD Booster,,,,1,E,\n"
+            "3,Int_A,mercgear,Modified Booster,,,,1,E,\n"
+            "1,Int_A,internal,Guardian FSD Booster,,,,1,E,\n").encode()
+
+    assert [row["id"] for row in module.parse_outfitting(data)] == ["1", "3", "2"]
+
+
+def test_parse_outfitting_rejects_invalid_input():
+    module = _load_module()
+    header = ",".join(module.OUTFITTING_FIELDS)
+    valid = "1,Int_A,internal,Guardian FSD Booster,,,,1,E,"
+    with pytest.raises(ValueError, match="columns"):
+        module.parse_outfitting(b"id,symbol\n1,Int_A\n")
+    with pytest.raises(ValueError, match="empty"):
+        module.parse_outfitting((header + "\n").encode())
+    with pytest.raises(ValueError, match="Duplicate"):
+        module.parse_outfitting((header + "\n" + valid + "\n" + valid + "\n").encode())
+    with pytest.raises(ValueError, match="Invalid"):
+        module.parse_outfitting((header + "\n" + valid.replace("Guardian FSD Booster", "") + "\n").encode())
+
+
+def test_outfitting_only_updates_separate_catalog_and_report(tmp_path, monkeypatch):
+    module = _load_module()
+    report_path = tmp_path / "catalog_report.json"
+    blueprints_path = tmp_path / "module_catalog.json"
+    outfitting_path = tmp_path / "outfitting_catalog.json"
+    report_path.write_text(json.dumps({
+        "sources": [{"id": "coriolis-data"}, {"id": "FDevIDs/outfitting.csv", "revision": "old"}],
+        "counts": {"catalog_blueprints": 81, "outfitting_modules": 0}
+    }), encoding="utf-8")
+    blueprints_path.write_text('{"engineering_blueprints": []}', encoding="utf-8")
+    monkeypatch.setattr(module, "REPORT", report_path)
+    monkeypatch.setattr(module, "OUT", blueprints_path)
+    monkeypatch.setattr(module, "OUTFITTING_OUT", outfitting_path)
+    monkeypatch.setattr(module, "fetch_outfitting", lambda: ([{"id": "1", "symbol": "Int_A", "name": "Module"}], "abc"))
+    monkeypatch.setattr(module, "fetch", lambda _: pytest.fail("Engineering source must not be fetched"))
+
+    assert module.main(outfitting_only=True) == 0
+    assert module.main(outfitting_only=True) == 0
+
+    assert json.loads(blueprints_path.read_text(encoding="utf-8")) == {"engineering_blueprints": []}
+    assert json.loads(outfitting_path.read_text(encoding="utf-8"))["modules"][0]["symbol"] == "Int_A"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["counts"] == {"catalog_blueprints": 81, "outfitting_modules": 1}
+    assert [source["id"] for source in report["sources"]] == ["coriolis-data", "FDevIDs/outfitting.csv"]

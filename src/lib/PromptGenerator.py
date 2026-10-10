@@ -14,6 +14,7 @@ import json
 from .Projections import get_state_dict, ProjectedStates
 from .Config import get_asset_path
 from .Database import QuestDatabase
+from .projections.guardian_unlocks import get_unlocked_guardian_modules, get_unrecognized_guardian_modules
 
 from .EventModels import (
     ApproachBodyEvent, ApproachSettlementEvent, BookTaxiEvent, BountyEvent, BuyExplorationDataEvent, CodexEntryEvent, CommanderEvent, CommitCrimeEvent,
@@ -3628,6 +3629,14 @@ class PromptGenerator:
 
             if available_engineers:
                 status_entries.append(("Available Engineers and their home system", available_engineers))
+
+        unlocked_guardian_modules = get_unlocked_guardian_modules(projected_states)
+        if unlocked_guardian_modules:
+            status_entries.append(("Unlocked Guardian modules", unlocked_guardian_modules))
+        unrecognized_guardian_modules = get_unrecognized_guardian_modules(projected_states)
+        if unrecognized_guardian_modules:
+            status_entries.append(("Guardian broker modules not recognized as standard unlocks",
+                                   unrecognized_guardian_modules))
         
         # Process plugin status messages
         for status_generator in self.registered_status_generators:

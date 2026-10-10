@@ -16,6 +16,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 CATALOG_PATH = REPO / "src" / "assets" / "module_catalog.json"
 REPORT_PATH = REPO / "src" / "assets" / "catalog_report.json"
+OUTFITTING_PATH = REPO / "src" / "assets" / "outfitting_catalog.json"
 
 
 @pytest.fixture(scope="module")
@@ -26,6 +27,11 @@ def catalog() -> dict:
 @pytest.fixture(scope="module")
 def report() -> dict:
     return json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def outfitting() -> dict:
+    return json.loads(OUTFITTING_PATH.read_text(encoding="utf-8"))
 
 
 def test_catalog_has_schema_version_and_provenance_sources(catalog: dict):
@@ -80,3 +86,15 @@ def test_report_counts_are_consistent(catalog: dict, report: dict):
     assert report["counts"]["unknown_material_names"] == 0, (
         "all Coriolis materials must resolve to journal symbols"
     )
+
+
+def test_outfitting_catalog_is_separate_and_has_source_provenance(catalog: dict, outfitting: dict, report: dict):
+    assert "modules" not in catalog and "outfitting_modules" not in catalog
+    assert outfitting["schema_version"] == 1
+    assert outfitting["sources"][0]["id"] == "FDevIDs/outfitting.csv"
+    assert outfitting["sources"][0]["revision"].startswith("sha256:")
+    modules = outfitting["modules"]
+    assert len(modules) >= 1200
+    assert report["counts"]["outfitting_modules"] == len(modules)
+    assert len({row["id"] for row in modules}) == len(modules)
+    assert all(row["id"] and row["symbol"] and row["name"] for row in modules)

@@ -1,15 +1,22 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-24T15:19:50.067191+00:00",
+  "generated_at": "2026-10-10T09:51:48.649775+00:00",
   "sources": [
     {
       "id": "coriolis-data",
       "revision": "master",
       "license": "MIT"
+    },
+    {
+      "id": "FDevIDs/outfitting.csv",
+      "revision": "sha256:ba1fe474737ea00fae7f55ffd335c444eb05fadd3699ddd91df54041e4d2a0ca",
+      "url": "https://raw.githubusercontent.com/EDCD/FDevIDs/master/outfitting.csv",
+      "license": "not specified"
     }
   ],
   "counts": {
     "catalog_blueprints": 81,
+    "outfitting_modules": 1236,
     "local_blueprint_names": 119,
     "local_module_families": 54,
     "materials_known": 138,
