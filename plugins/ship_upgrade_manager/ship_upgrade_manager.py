@@ -34,6 +34,7 @@ from lib.PluginSettingDefinitions import (
     TextAreaSetting,
 )
 from .parsers import PlanParseError, parse_plan_input
+from .broker import match_product, product_from_journal, recipe_needs
 from .planner import (
     CLASS_LETTERS,
     PlannedAction,
@@ -561,6 +562,16 @@ class StepMaterialsParams(BaseModel):
     session_id: str | None = Field(default=None, description="Optional session id")
 
 
+class BrokerQueryParams(BaseModel):
+    module: str | None = Field(default=None, description="Technology Broker product; omit to resume the selected unlock")
+    find_stations: bool = Field(default=False, description="Find stations for missing commodities and the appropriate Technology Broker")
+
+
+class BrokerConfirmParams(BaseModel):
+    module: str = Field(description="Technology Broker product to correct")
+    status: str = Field(description="Explicit confirmation: unlocked, locked, or unknown")
+
+
 class ShipUpgradeManagerPlugin(PluginBase):
     """Persist generic ship plans and per-ship upgrade sessions."""
 
@@ -583,6 +594,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self._catalog: dict[str, Any] = {}
         self._engineer_registry: dict[str, Any] = {}
         self._module_names: dict[str, str] = {}
+        self._broker_products: list[dict[str, Any]] = []
         self._load_catalog()
         self._initialize_database()
         self._last_import: dict[str, Any] | None = self._load_last_import()
@@ -613,6 +625,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
         except (OSError, json.JSONDecodeError) as error:
             log("warn", f"Ship Upgrade Manager module names load failed: {error}")
             self._module_names = {}
+        self._broker_products = json.loads(
+            Path(get_asset_path("technology_broker_unlocks.json")).read_text(encoding="utf-8")
+        )["products"]
 
     # ------------------------------------------------------------------
     # Settings UI construction (import tunnel state machine)
@@ -649,6 +664,14 @@ class ShipUpgradeManagerPlugin(PluginBase):
             "key": "session",
             "label": "plugin.sum.grid.session",
             "fields": self._session_fields(),
+        })
+        grids.append({
+            "key": "broker",
+            "label": "plugin.sum.broker.grid",
+            "fields": [
+                self._broker_settings_field(),
+                self._paragraph("broker_status", str(self.settings.get("broker_status", "") or "")),
+            ],
         })
         # The import entry point lives in the plans grid header; it is
         # redundant while the tunnel itself is open.
@@ -1256,18 +1279,23 @@ class ShipUpgradeManagerPlugin(PluginBase):
         if not missing:
             return f"All {total} target modules are installed."
         ranked = sorted(missing, key=self._module_importance)
+        notes = " ".join(
+            self._step_short_label(step) + self._broker_step_note(step) + "."
+            for step in ranked[:MISSING_MODULES_NAMED]
+            if self._broker_step_note(step)
+        )
         if list_all or len(missing) <= MISSING_MODULES_NAMED:
             names = "; ".join(self._step_short_label(step) for step in ranked)
             return (
                 f"{len(missing)} of {total} target modules are not installed yet: {names}."
+                + (f" {notes}" if notes else "")
             )
-        top = "; ".join(
-            self._step_short_label(step) for step in ranked[:MISSING_MODULES_NAMED]
-        )
+        top = "; ".join(self._step_short_label(step) for step in ranked[:MISSING_MODULES_NAMED])
         return (
             f"{len(missing)} of {total} target modules are not installed yet. "
             f"The most important to install first: {top}. Give the player the count "
             "and offer to install these first."
+            + (f" {notes}" if notes else "")
         )
 
     def _plan_progress(
@@ -1408,6 +1436,7 @@ class ShipUpgradeManagerPlugin(PluginBase):
         self.helper = helper
         self._watch_active = False
         self._initialize_database()
+        self._recover_broker_history()
         self._reload_state_from_database()
         helper.register_projection(ShipUpgradeProjection())
         helper.register_event(
@@ -1706,6 +1735,26 @@ class ShipUpgradeManagerPlugin(PluginBase):
             },
         )
         helper.register_action(
+            name="technology_broker_unlock",
+            description=(
+                "Check a Guardian/Human Technology Broker module unlock recipe, actual unlock "
+                "status (unknown unless confirmed), material and cargo shortfalls and ship capacity. "
+                "Select a named module or omit it to resume a prior unlock after changing ships. "
+                "Set find_stations only when asked to locate vendors or prepare a procurement route; "
+                "returns candidate stations, not a globally optimal route."
+            ),
+            parameters=BrokerQueryParams,
+            method=self._broker_query_action,
+            action_type="ship",
+        )
+        helper.register_action(
+            name="technology_broker_confirm",
+            description="Record the commander's explicit confirmation that a Technology Broker product is unlocked, locked, or unknown.",
+            parameters=BrokerConfirmParams,
+            method=self._broker_confirm_action,
+            action_type="ship",
+        )
+        helper.register_action(
             name="ship_upgrade_missing_materials",
             description=(
                 "Compare the commander's engineering material stock with every "
@@ -1789,7 +1838,15 @@ class ShipUpgradeManagerPlugin(PluginBase):
 
     @override
     def on_settings_button(self, key: str, value: str | None = None) -> None:
-        if key == "import_plan":
+        if key.startswith(("broker_unlocked:", "broker_locked:", "broker_unknown:")):
+            status, broker_id = key.split(":", 1)
+            try:
+                self._broker_set_status(broker_id, status.removeprefix("broker_"))
+            except ValueError as error:
+                log("error", f"Broker status change failed: {error}")
+                self._set_message_field("broker", "broker_status", "plugin.sum.broker.error", {"detail": str(error)})
+            self._publish_status()
+        elif key == "import_plan":
             self._enter_import_state(IMPORT_STATE_DATA)
         elif key == "save_plan":
             self._import_from_settings()
@@ -2201,9 +2258,17 @@ class ShipUpgradeManagerPlugin(PluginBase):
         match = self._step_loadout_match(
             step, session["steps"], str(session["ship_instance_id"])
         )
+        broker_product = product_from_journal(
+            self._broker_products, str(step.get("item") or "")
+        )
+        broker_note = (
+            f" Technology Broker unlock status: {self._broker_status(broker_product['broker_id'])}."
+            if broker_product else ""
+        )
         return (
             f"Next module, {len(session['completed_steps']) + 1} of "
             f"{session['total_steps']}: {self._step_voice_label(step, match)}."
+            + broker_note
             + workshop_note
             + self._next_step_materials_warning(step, session["ship_instance_id"])
         )
@@ -2388,6 +2453,263 @@ class ShipUpgradeManagerPlugin(PluginBase):
         return f"{target['plan_name']}: " + self._missing_modules_summary(
             target["steps"], loadout, list_all=args.list_all
         )
+
+    def _broker_fid(self) -> str:
+        if self._current_fid:
+            return self._current_fid
+        try:
+            files = sorted(self.journal_files(), key=os.path.getmtime, reverse=True)
+        except OSError as error:
+            log("warning", f"Cannot identify Technology Broker commander: {error}")
+            return ""
+        for path in files:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                for line in reversed(handle.readlines()):
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(entry, dict) and entry.get("event") == "LoadGame" and entry.get("FID"):
+                        self._current_fid = str(entry["FID"])
+                        return self._current_fid
+        return ""
+
+    def _broker_status(self, broker_id: str) -> str:
+        fid = self._broker_fid()
+        if not fid:
+            return "unknown"
+        with self.get_db() as db:
+            row = db.execute(
+                "SELECT status FROM broker_unlocks WHERE fid = ? AND broker_id = ?",
+                (fid, broker_id),
+            ).fetchone()
+        return row["status"] if row else "unknown"
+
+    def _broker_set_status(self, broker_id: str, status: str) -> None:
+        if status not in {"unlocked", "locked", "unknown"}:
+            raise ValueError("Status must be unlocked, locked or unknown.")
+        if broker_id not in {p["broker_id"] for p in self._broker_products}:
+            raise ValueError(f"Unknown Technology Broker product: {broker_id}")
+        fid = self._broker_fid()
+        if not fid:
+            raise ValueError("Commander FID is unavailable; load the game before recording unlocks.")
+        with self.get_db() as db:
+            db.execute(
+                "INSERT INTO broker_unlocks(fid, broker_id, status, source) VALUES(?, ?, ?, 'manual') "
+                "ON CONFLICT(fid, broker_id) DO UPDATE SET status = excluded.status, source = excluded.source",
+                (fid, broker_id, status),
+            )
+
+    def _record_broker_event(self, entry: dict[str, Any], *, historic: bool = False) -> None:
+        fid = self._current_fid
+        if not fid:
+            log("warning", "TechnologyBroker event without a known commander FID; unlock state not recorded")
+            return
+        for unlocked in entry.get("ItemsUnlocked") or []:
+            if not isinstance(unlocked, dict):
+                continue
+            name = unlocked.get("Name")
+            product = product_from_journal(self._broker_products, name) if isinstance(name, str) else None
+            if product is None and isinstance(unlocked.get("Name_Localised"), str):
+                product = product_from_journal(self._broker_products, unlocked["Name_Localised"])
+            if product is None:
+                log("warning", f"Unrecognized TechnologyBroker item: {name}")
+                continue
+            with self.get_db() as db:
+                if historic:
+                    db.execute(
+                        "INSERT OR IGNORE INTO broker_unlocks(fid, broker_id, status, source) "
+                        "VALUES(?, ?, 'unlocked', 'journal')",
+                        (fid, product["broker_id"]),
+                    )
+                else:
+                    db.execute(
+                        "INSERT INTO broker_unlocks(fid, broker_id, status, source) "
+                        "VALUES(?, ?, 'unlocked', 'journal') ON CONFLICT(fid, broker_id) "
+                        "DO UPDATE SET status = 'unlocked', source = 'journal'",
+                        (fid, product["broker_id"]),
+                    )
+
+    def _recover_broker_history(self) -> None:
+        try:
+            paths = sorted(self.journal_files())
+        except OSError as error:
+            log("warning", f"Cannot scan Technology Broker history: {error}")
+            return
+        active_fid = ""
+        for path in paths:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    for line in handle:
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(entry, dict):
+                            continue
+                        if entry.get("event") == "LoadGame":
+                            active_fid = str(entry.get("FID") or "")
+                        elif entry.get("event") == "TechnologyBroker" and active_fid:
+                            self._current_fid = active_fid
+                            self._record_broker_event(entry, historic=True)
+            except OSError as error:
+                log("warning", f"Cannot read Technology Broker history in {path}: {error}")
+        if active_fid:
+            self._current_fid = active_fid
+
+    def _broker_step_note(self, step: dict[str, Any]) -> str:
+        item = step.get("item")
+        if not isinstance(item, str):
+            return ""
+        product = product_from_journal(self._broker_products, item)
+        if product is None:
+            return ""
+        return f" (Technology Broker unlock status: {self._broker_status(product['broker_id'])})"
+
+    def _broker_settings_field(self) -> ListSetting:
+        fid = self._broker_fid()
+        rows: list[ListRow] = [
+            {
+                "key": p["broker_id"],
+                "title": p["name_en"],
+                "title_key": "plugin.sum.broker.products." + p["broker_id"],
+                "meta": "plugin.sum.broker." + (
+                    self._broker_status(p["broker_id"]) if fid else "noCommander"
+                ),
+            }
+            for p in self._broker_products
+        ]
+        return {
+            "key": "broker_unlocks",
+            "label": "plugin.sum.broker.list",
+            "type": "list",
+            "readonly": True,
+            "placeholder": None,
+            "items": rows,
+            "row_actions": [
+                {"action": "broker_unlocked", "label": "plugin.sum.broker.markUnlocked", "icon": "check"},
+                {"action": "broker_locked", "label": "plugin.sum.broker.markLocked", "icon": "lock"},
+                {"action": "broker_unknown", "label": "plugin.sum.broker.markUnknown", "icon": "help"},
+            ],
+        }
+
+    def _broker_confirm_action(self, args: BrokerConfirmParams, _context: dict[str, Any]) -> str:
+        product = match_product(self._broker_products, args.module)
+        self._broker_set_status(product["broker_id"], args.status)
+        self._publish_status()
+        return f"{product['name_en']}: unlock status recorded as {args.status} for this commander."
+
+    def _broker_query_action(self, args: BrokerQueryParams, _context: dict[str, Any]) -> str:
+        fid = self._broker_fid()
+        if args.module:
+            product = match_product(self._broker_products, args.module)
+            if fid:
+                with self.get_db() as db:
+                    db.execute(
+                        "INSERT INTO broker_targets(fid, broker_id) VALUES(?, ?) "
+                        "ON CONFLICT(fid) DO UPDATE SET broker_id = excluded.broker_id",
+                        (fid, product["broker_id"]),
+                    )
+        else:
+            if not fid:
+                return "Commander FID unavailable; name the broker module to check its recipe."
+            with self.get_db() as db:
+                target = db.execute(
+                    "SELECT broker_id FROM broker_targets WHERE fid = ?", (fid,)
+                ).fetchone()
+            if target is None:
+                return "No Technology Broker unlock has been selected. Name a module first."
+            product = next(p for p in self._broker_products if p["broker_id"] == target["broker_id"])
+        status = self._broker_status(product["broker_id"])
+        if status == "unlocked":
+            return f"{product['name_en']} is already unlocked for this commander."
+        parts = [f"{product['name_en']}: unlock status {status}." + (
+            " Commander FID unavailable; this target cannot be saved."
+            if not fid else ""
+        )]
+        needs = recipe_needs(product, self._projected_states())
+        for need in needs:
+            kind = "commodity" if need["type"] == "commodity" else "material/data"
+            if need["missing"] is None:
+                parts.append(f"{need['item_en']}: need {need['quantity']} ({kind}); inventory unavailable.")
+            else:
+                parts.append(
+                    f"{need['item_en']}: need {need['quantity']}, have {need['have']}, "
+                    f"missing {need['missing']} ({kind})."
+                )
+        states = self._projected_states()
+        cargo = states.get("Cargo") if states else None
+        if isinstance(cargo, BaseModel):
+            cargo = cargo.model_dump()
+        commodities = [n for n in needs if n["type"] == "commodity"]
+        if isinstance(cargo, dict) and cargo.get("timestamp") and cargo.get("Vessel") != "SRV" and (cargo.get("Capacity") or cargo.get("CapacityKnown")):
+            capacity = int(cargo["Capacity"])
+            total = sum(n["quantity"] for n in commodities)
+            free = capacity - int(cargo.get("TotalItems") or 0)
+            shortage = sum(n["missing"] for n in commodities if n["missing"] is not None)
+            if total > capacity:
+                parts.append(f"This ship has {capacity} t of cargo capacity, but {total} t of commodities are required together; use a ship with at least {total} t or make separate trips.")
+            elif shortage > free:
+                parts.append(f"Only {free} t of cargo space is free; {shortage} t of commodities are still needed. Free space or make separate trips.")
+        elif commodities:
+            parts.append("Cargo capacity or current hold is unavailable; cannot verify the ship's carrying ability.")
+        if args.find_stations:
+            parts.append(self._broker_station_candidates(product, needs, states))
+        return " ".join(parts)
+
+    def _broker_station_candidates(
+        self, product: dict[str, Any], needs: list[dict[str, Any]], states: dict[str, Any] | None
+    ) -> str:
+        if states is None:
+            return "Station search unavailable without current game location."
+        location = states.get("Location")
+        if isinstance(location, BaseModel):
+            location = location.model_dump()
+        if not isinstance(location, dict) or not (
+            location.get("StarSystem") or location.get("StarPos")
+        ):
+            return "Station search unavailable: current star system is unknown."
+        from lib.actions.actions_web import _execute_station_search, prepare_station_request
+        from requests.exceptions import RequestException
+
+        findings = []
+        for need in needs:
+            if need["type"] != "commodity" or need["missing"] == 0:
+                continue
+            amount = need["missing"] if need["missing"] is not None else need["quantity"]
+            try:
+                request = prepare_station_request({
+                    "commodities": [{"name": need["market_name"], "amount": amount, "transaction": "Buy"}],
+                    "sort_by": "distance", "size": 3, "market_days_old": 2,
+                }, states)
+                response = _execute_station_search(request)
+                stations = response.get("results") or []
+                findings.append(
+                    f"{need['item_en']}" + (
+                        f" (searching for up to {amount}; inventory unknown)"
+                        if need["missing"] is None else ""
+                    ) + ": " + (
+                        ", ".join(f"{s['name']} ({s['system']})" for s in stations[:3])
+                        if stations else "no candidate station found"
+                    )
+                )
+            except (OSError, ValueError, KeyError, RequestException) as error:
+                log("error", f"Broker commodity station search failed: {error}")
+                findings.append(f"{need['item_en']}: station search failed ({error})")
+        broker_type = "Guardian" if product["broker_id"].startswith(("guardian_", "xg")) else "Human"
+        try:
+            request = prepare_station_request({"technology_broker": [broker_type], "sort_by": "distance", "size": 3}, states)
+            stations = _execute_station_search(request).get("results") or []
+            findings.append(
+                f"{broker_type} Technology Broker: " + (
+                    ", ".join(f"{s['name']} ({s['system']})" for s in stations[:3])
+                    if stations else "no candidate station found"
+                )
+            )
+        except (OSError, ValueError, KeyError, RequestException) as error:
+            log("error", f"Technology Broker station search failed: {error}")
+            findings.append(f"Broker station search failed ({error})")
+        return "Candidate stations (external market data, not guaranteed current stock or an optimal route): " + "; ".join(findings) + "."
 
     def _missing_materials_action(
         self, args: MissingMaterialsParams, context: dict[str, Any] | None = None
@@ -3244,6 +3566,9 @@ class ShipUpgradeManagerPlugin(PluginBase):
             if identity:
                 self._publish_status()
             return
+        if event_name == "TechnologyBroker":
+            self._record_broker_event(content)
+            return
         if event_name in {"ShipyardSwap", "ShipyardNew", "SetUserShipName"}:
             if identity:
                 self._publish_status()
@@ -3853,6 +4178,18 @@ class ShipUpgradeManagerPlugin(PluginBase):
                 CREATE TABLE IF NOT EXISTS plugin_meta (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS broker_unlocks (
+                    fid TEXT NOT NULL,
+                    broker_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('unlocked', 'locked', 'unknown')),
+                    source TEXT NOT NULL,
+                    PRIMARY KEY(fid, broker_id)
+                );
+                CREATE TABLE IF NOT EXISTS broker_targets (
+                    fid TEXT PRIMARY KEY,
+                    broker_id TEXT NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_plan_applications_ship

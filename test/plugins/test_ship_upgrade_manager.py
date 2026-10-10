@@ -1806,8 +1806,12 @@ def test_missing_modules_are_named_when_few(tmp_path: Path):
     status = plugin._status_generator({})[0][1]
 
     assert "1 of 6 target modules are not installed yet: Guardian Module Reinforcement 2E." in reply
+    assert "Technology Broker unlock status: unknown" in reply
     assert "5/6 target modules" in status
     assert "not installed yet: Guardian Module Reinforcement 2E" in status
+    plugin._current_fid = "F1"
+    plugin._broker_set_status("guardian_module_reinforcement_package", "unlocked")
+    assert "Technology Broker unlock status: unlocked" in plugin._missing_modules_action(MissingModulesParams(), {})
 
 
 def test_many_missing_modules_give_count_and_most_important(tmp_path: Path):

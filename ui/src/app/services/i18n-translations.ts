@@ -10,6 +10,34 @@ export const TRANSLATIONS: Record<string, object> = {
     "plugin": {
       "sum": {
         "label": "Ship Upgrade Manager",
+        "broker": {
+          "grid": "Technology Broker",
+          "list": "Module unlocks (for the current commander)",
+          "unknown": "Not confirmed",
+          "unlocked": "Unlocked",
+          "locked": "Not unlocked",
+          "noCommander": "Load the game to identify the commander",
+          "markUnlocked": "Confirm unlocked",
+          "markLocked": "Confirm not unlocked",
+          "markUnknown": "Mark unknown",
+          "error": "Could not update unlock status: {{detail}}",
+          "products": {
+            "guardian_fsd_booster": "Guardian FSD Booster",
+            "guardian_module_reinforcement_package": "Guardian Module Reinforcement Package",
+            "guardian_shield_reinforcement_package": "Guardian Shield Reinforcement Package",
+            "guardian_hull_reinforcement_package": "Guardian Hull Reinforcement Package",
+            "guardian_hybrid_power_plant": "Guardian Hybrid Power Plant",
+            "guardian_hybrid_power_distributor": "Guardian Hybrid Power Distributor",
+            "guardian_gauss_cannon_medium_fixed": "Guardian Gauss Cannon (Class 2 Fixed)",
+            "guardian_plasma_charger_medium_fixed": "Guardian Plasma Charger (Class 2 Fixed)",
+            "guardian_shard_cannon_medium_fixed": "Guardian Shard Cannon (Class 2 Fixed)",
+            "xg7_trident": "XG7 Trident",
+            "xg8_javelin": "XG8 Javelin",
+            "xg9_lance": "XG9 Lance",
+            "corrosion_resistant_cargo_rack_size_4": "Corrosion Resistant Cargo Rack (Class 4)",
+            "engineered_fsd_v1_size_5": "Engineered FSD V1 (Class 5A)"
+          }
+        },
         "grid": {
           "import": "Import plan",
           "plans": "Plans",
@@ -188,6 +216,34 @@ export const TRANSLATIONS: Record<string, object> = {
     "plugin": {
       "sum": {
         "label": "Ship Upgrade Manager",
+        "broker": {
+          "grid": "Courtier technologique",
+          "list": "Déblocages de modules (commandant actuel)",
+          "unknown": "Non confirmé",
+          "unlocked": "Débloqué",
+          "locked": "Non débloqué",
+          "noCommander": "Chargez le jeu pour identifier le commandant",
+          "markUnlocked": "Confirmer débloqué",
+          "markLocked": "Confirmer non débloqué",
+          "markUnknown": "Marquer inconnu",
+          "error": "Impossible de mettre à jour le déblocage : {{detail}}",
+          "products": {
+            "guardian_fsd_booster": "Survolteur FSD Guardian",
+            "guardian_module_reinforcement_package": "Pack de renfort de module Guardian",
+            "guardian_shield_reinforcement_package": "Pack de renfort de bouclier Guardian",
+            "guardian_hull_reinforcement_package": "Pack de renfort de coque Guardian",
+            "guardian_hybrid_power_plant": "Générateur hybride Guardian",
+            "guardian_hybrid_power_distributor": "Répartiteur de puissance hybride Guardian",
+            "guardian_gauss_cannon_medium_fixed": "Canon de Gauss Guardian (Classe 2 Fixe)",
+            "guardian_plasma_charger_medium_fixed": "Chargeur à plasma Guardian (Classe 2 Fixe)",
+            "guardian_shard_cannon_medium_fixed": "Canon à fragmentation Guardian (Classe 2 Fixe)",
+            "xg7_trident": "XG7 Trident",
+            "xg8_javelin": "XG8 Javelin",
+            "xg9_lance": "XG9 Lance",
+            "corrosion_resistant_cargo_rack_size_4": "Soute anti-corrosion (Classe 4)",
+            "engineered_fsd_v1_size_5": "FSD pré-ingénieré V1 (Classe 5A)"
+          }
+        },
         "grid": {
           "import": "Import de plan",
           "plans": "Plans",

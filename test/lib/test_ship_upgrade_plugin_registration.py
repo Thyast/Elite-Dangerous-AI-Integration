@@ -65,7 +65,12 @@ class _PluginDataHelper(PluginHelper):
         return str(self.data_path)
 
 
-def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
+def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path, monkeypatch):
+    import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journal_dir))
     action_manager = _ActionManager()
     event_manager = _EventManager()
     prompt_generator = _PromptGenerator()
@@ -128,6 +133,8 @@ def test_ship_upgrade_plugin_registers_with_real_plugin_helper(tmp_path: Path):
         "ship_upgrade_missing_materials",
         "ship_upgrade_material_shortfall",
         "ship_upgrade_step_materials",
+        "technology_broker_unlock",
+        "technology_broker_confirm",
     }
 
     materials_action = next(

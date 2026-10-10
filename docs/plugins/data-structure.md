@@ -12,6 +12,38 @@ to the code that builds it.
 
 ## 1. Overview — four data layers
 
+### Technology Broker unlocks
+
+The Ship Upgrade Manager reads `src/assets/technology_broker_unlocks.json` for
+product names, verified journal patterns, and recipe costs. Recipes are not
+proof that a commander owns an unlock. `broker_unlocks` in the plugin database
+stores `(fid, broker_id, status, source)` independently of ship plans; status
+is `unlocked`, `locked` (explicit confirmation), or `unknown` (manual
+retraction). Missing rows also mean **unknown**, not locked. Journal
+`TechnologyBroker.ItemsUnlocked` provides positive evidence only: accessible
+historical journals are scanned on chat start and live events are recorded,
+but missing history cannot prove an item is locked. Historical evidence does
+not overwrite a manual correction. A newly observed live unlock supersedes
+the correction. Unverified catalogue module identifiers are not inferred from
+installed modules.
+
+`broker_targets` stores the selected `broker_id` per FID. The
+`technology_broker_unlock` assistant action can resume this selection after a
+ship swap, recalculating requirements against the current `Materials` and
+`Cargo` projections. `technology_broker_confirm` and the Technology Broker
+settings grid let the commander correct unlock status. Without a journal FID,
+the plugin refuses to attribute a status or target to a commander.
+
+Recipe materials are counted from the material inventory, while commodities
+use the **internal** cargo names; localized cargo names are kept separately.
+Missing inventory snapshots are reported as unavailable rather than zero.
+Cargo snapshots are reset when the commander changes ships. Cargo capacity
+includes all required commodities and current free space,
+not the weight of materials/data. The optional station lookup searches
+candidate commodity vendors and a matching Technology Broker via the existing
+station API; external market data and reported stock can change, and these
+candidates are not a globally optimized multi-stop route.
+
 | Layer | Location | Lifetime | Produced by |
 | :--- | :--- | :--- | :--- |
 | SQLite database | `plugin_data/<guid>/ship_upgrade_manager.db` | Persistent (survives app restarts and plugin updates) | `_initialize_database`, `import_plan`, `start_session`, `complete_step`, … |

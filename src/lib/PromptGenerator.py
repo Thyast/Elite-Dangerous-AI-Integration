@@ -3087,7 +3087,7 @@ class PromptGenerator:
         if cargo_info and cargo_info.get('Inventory'):
             formatted_inventory = []
             for item in cargo_info.get('Inventory', []):
-                item_name = item.get('Name', 'Unknown')
+                item_name = item.get('Name_Localised') or item.get('Name', 'Unknown')
                 count = item.get('Count', 0)
                 stolen = " (Stolen)" if item.get('Stolen', False) else ""
                 formatted_inventory.append(f"{count} X {item_name}{stolen}")
