@@ -1,19 +1,31 @@
 import { type BaseMessage } from "./tauri.service";
+import { UINode } from "./plugin-ui";
 
 export interface PluginSettings {
     key: string;
     label: string;
     icon: string;
     grids: SettingsGrid[];
+    tabs?: {key: string; label: string; grids: string[]}[];
+}
+
+export interface GridHeaderAction {
+    key: string;
+    label?: string;
+    icon?: string;
 }
 
 export interface SettingsGrid {
     key: string;
     label: string;
+    collapsible?: boolean;
+    default_collapsed?: boolean;
+    header_action?: GridHeaderAction;
+    content?: UINode[];
     fields: SettingsElement[];
 }
 
-export type SettingsElement = TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | NotificationSetting | ErrorSetting | ConditionSetting;
+export type SettingsElement = TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | NotificationSetting | ErrorSetting | ListSetting | FilterSetting | ConditionSetting;
 
 export interface SettingCondition {
     key: string;
@@ -26,6 +38,10 @@ export interface ConditionSetting {
     key: string;
     type: "condition";
     condition: SettingCondition;
+    collapsible?: boolean;
+    default_collapsed?: boolean;
+    header_action?: GridHeaderAction;
+    content?: UINode[];
     fields: SettingsElement[];
 }
 
@@ -79,10 +95,12 @@ export function voiceSettingsContext(
 export interface SettingBase {
     key: string;
     label: string;
-    type: "paragraph" | "notification" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "error";
+    type: "paragraph" | "notification" | "number" | "toggle" | "text" | "textarea" | "select" | "button" | "list" | "filter" | "error";
     readonly: boolean | null;
     placeholder: string | null;
+    icon?: string;
     default_value?: any;
+    params?: { [name: string]: string | number };
 
     // Paragraph & Error
     content: string;
@@ -105,11 +123,18 @@ export interface SettingBase {
     // Select
     select_options: SelectOption[];
     multi_select: boolean;
+
+    // List
+    items: ListRow[];
+    row_actions: ListAction[];
+    count_labels?: {one: string; many: string};
 }
 
 export interface TextSetting extends SettingBase {
     default_value: string | null;
 }
+
+export interface FilterSetting extends SettingBase {}
 
 export interface TextAreaSetting extends SettingBase {
     default_value: string | string[] | null;
@@ -123,7 +148,9 @@ export interface ToggleSetting extends SettingBase {
     default_value: boolean | null;
 }
 
-export interface ButtonSetting extends SettingBase {}
+export interface ButtonSetting extends SettingBase {
+    icon?: string;
+}
 
 export interface ParagraphSetting extends SettingBase {}
 
@@ -132,6 +159,30 @@ export interface NotificationSetting extends SettingBase {
 }
 
 export interface ErrorSetting extends SettingBase {}
+
+export interface ListAction {
+    action: string;
+    icon?: string;
+    label?: string;
+    danger?: boolean;
+    inline_edit?: boolean;
+}
+
+export interface ListRow {
+    key: string;
+    title: string;
+    title_key?: string;
+    suffix?: string;
+    meta?: string;
+    params?: { [name: string]: string | number };
+    group?: string;
+    pending?: boolean;
+    tone?: string;
+    details?: UINode[];
+}
+
+export interface ListSetting extends SettingBase {
+}
 
 export interface SelectSetting extends SettingBase {
     default_value: string | string[] | null;
