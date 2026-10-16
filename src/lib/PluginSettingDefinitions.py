@@ -160,6 +160,12 @@ def resolve_voice_settings(
         **{key: value for key, value in character_settings.items() if value is not None},
     }
 
+class SettingsHeaderLink(TypedDict):
+    text: str
+    label: str
+    url: str
+
+
 class PluginSettings(TypedDict):
     """Used to define the settings for a plugin."""
     key: str
@@ -167,6 +173,7 @@ class PluginSettings(TypedDict):
     icon: str
     grids: list[SettingsGrid]
     tabs: NotRequired[list['SettingsTab']]
+    header_link: NotRequired[SettingsHeaderLink]
 
 
 class SettingsTab(TypedDict):
