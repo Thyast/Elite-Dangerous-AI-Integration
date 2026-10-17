@@ -33,6 +33,8 @@ import { ApiKeyDetectionService } from "../../services/api-key-detection.service
 import { ConfirmationDialogComponent } from "../confirmation-dialog/confirmation-dialog.component";
 import { ChatService } from "../../services/chat.service";
 import { audioDeviceAvailable, audioDeviceLabel } from "../../services/audio-devices";
+import { VoiceActivationSettingsComponent } from "../voice-activation-settings/voice-activation-settings.component";
+import { TranslateModule } from "@ngx-translate/core";
 
 export type GeneralSettingsTarget =
     | "commander"
@@ -70,6 +72,8 @@ type PreflightChecklistItem = "commander" | "input" | "output" | "overlay" | "ac
         MatError,
         MatTooltipModule,
         MatSliderModule,
+        VoiceActivationSettingsComponent,
+        TranslateModule,
     ],
     templateUrl: "./general-settings.component.html",
     styleUrls: ["./general-settings.component.css"],

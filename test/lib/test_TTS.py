@@ -453,6 +453,17 @@ def test_shutdown_drains_submission_already_holding_queue_lock(mock_audio_output
     assert all(line.is_completed() for line in lines)
 
 
+def test_control_line_playback_failure_does_not_retry_or_hold_session(mock_audio_output, monkeypatch):
+    playback = MagicMock(side_effect=RuntimeError("Playback unavailable"))
+    monkeypatch.setattr(TTS, "_playback_one", playback)
+    tts = TTS(MagicMock(spec=OpenAITTSModel))
+    line = tts.say("Oui", retry_on_error=False)
+    line.wait_for_completion()
+    assert line.is_completed()
+    assert tts.read_queue.empty()
+    playback.assert_called_once()
+
+
 def test_postprocess_audio_applies_volume_and_distortion(mock_audio_output):
     """Test TTS postprocessing reshapes synthesized audio"""
     tts = TTS(

@@ -115,7 +115,7 @@ class TTS:
         postprocessing_config: CharacterTTSPostprocessingConfig | None = None,
         output_device: Optional[str] = None,
         output_volume_multiplier: float = 1.0,
-    ):
+    ) -> None:
         self.tts_model = tts_model
         self.voice = voice
         self.voice_settings = dict(voice_settings) if voice_settings is not None else None
@@ -176,6 +176,7 @@ class TTS:
                 "on_start": item.get("on_start"),
                 "on_complete": item.get("on_complete"),
                 "drop_if": item.get("drop_if"),
+                "retry_on_error": item.get("retry_on_error", True),
                 "line": item.get("line"),
             }
         return {
@@ -281,7 +282,7 @@ class TTS:
                 stream.finish()
             except Exception as e:
                 with self._queue_lock:
-                    if not self.is_aborted and not self._shutdown.is_set():
+                    if item.get("retry_on_error", True) and not self.is_aborted and not self._shutdown.is_set():
                         self.read_queue.put(item)
                         requeued = True
                 raise e
@@ -1344,6 +1345,7 @@ class TTS:
         on_start: Callable[[], None] | None = None,
         on_complete: Callable[[], None] | None = None,
         drop_if: Callable[[], bool] | None = None,
+        retry_on_error: bool = True,
     ) -> TTSLine:
         line = TTSLine()
         with self._queue_lock:
@@ -1361,6 +1363,7 @@ class TTS:
                     "on_start": on_start,
                     "on_complete": on_complete,
                     "drop_if": drop_if,
+                    "retry_on_error": retry_on_error,
                     "line": line,
                 },
             )

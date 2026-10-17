@@ -7,6 +7,7 @@ import queue
 from time import sleep
 import openai
 from src.lib.STT import STT, STTResult
+from src.lib.VoiceActivation import VoiceActivation
 
 def read_no_voice(x):
     """Return silence"""
@@ -78,7 +79,8 @@ def stt(mock_stt_model, mock_vad, mock_vad_detector, mock_audio_input, monkeypat
     monkeypatch.setattr('pysilero_vad.SileroVoiceActivityDetector', mock_vad_detector)
     stt =  STT(mock_stt_model, "TestDevice")
     stt.vad = mock_vad
-    return stt
+    yield stt
+    stt.stop()
 
 def test_get_microphone_device_selection(mock_audio_input, stt):
     stream = stt._get_microphone()
@@ -209,3 +211,94 @@ def test_push_to_talk_read_failure_closes_source(stt, mock_audio_input):
     mock_audio_input['stream'].close.assert_called_once()
     assert not stt.listening
     assert not stt.recording
+
+
+def test_voice_activation_replaces_required_word_without_erasing_it(stt, mock_stt_model):
+    import speech_recognition as sr
+
+    stt.required_word = "legacy-password"
+    stt.voice_activation = VoiceActivation("Simone", 10, mock_stt_model, mock_stt_model)
+    audio = sr.AudioData(b'\xff\xff' * 16000, 16000, 2)
+    mock_stt_model.transcribe.return_value = "Simone, plot a route"
+    stt._process_audio(audio, 1, stt.voice_activation.begin_audio())
+    stt.voice_activation.end_audio()
+    assert stt.resultQueue.get_nowait().text == "plot a route"
+    mock_stt_model.transcribe.return_value = "avoid neutron stars"
+    stt._process_audio(audio, 2, stt.voice_activation.begin_audio())
+    stt.voice_activation.end_audio()
+    assert stt.resultQueue.get_nowait().text == "avoid neutron stars"
+    assert stt.required_word == "legacy-password"
+    stt.voice_activation = None
+    assert stt._transcribe(audio) == ""
+
+
+def test_standby_audio_is_not_queued_or_logged(stt, mock_stt_model, caplog):
+    import speech_recognition as sr
+
+    secret = "private conversation that must not be logged"
+    mock_stt_model.transcribe.return_value = secret
+    stt.voice_activation = VoiceActivation("Simone", 10, mock_stt_model, mock_stt_model)
+    audio = sr.AudioData(b'\xff\xff' * 16000, 16000, 2)
+    stt._process_audio(audio, 1, stt.voice_activation.begin_audio())
+    assert stt.resultQueue.empty()
+    assert secret not in caplog.text
+    assert not stt.recording
+    mock_stt_model.transcribe.assert_called_once_with(audio)
+
+
+def test_hybrid_transmits_only_the_addressed_audio(stt, mock_stt_model):
+    import speech_recognition as sr
+
+    local = MagicMock()
+    local.transcribe.side_effect = ["ambient speech", "Simone, plot a route to Sol"]
+    mock_stt_model.transcribe.return_value = "plot a route to Sol"
+    stt.voice_activation = VoiceActivation("Simone", 10, mock_stt_model, local)
+    ambient = sr.AudioData(b'\xff\xff' * 16000, 16000, 2)
+    addressed = sr.AudioData(b'\xfe\xfe' * 16000, 16000, 2)
+    stt._process_audio(ambient, 1, stt.voice_activation.begin_audio())
+    stt.voice_activation.end_audio()
+    mock_stt_model.transcribe.assert_not_called()
+    stt._process_audio(addressed, 2, stt.voice_activation.begin_audio())
+    assert stt.resultQueue.get_nowait().text == "plot a route to Sol"
+    mock_stt_model.transcribe.assert_called_once_with(addressed)
+
+
+def test_continuous_standby_does_not_report_user_speaking(stt, mock_audio_input, mock_stt_model):
+    stt.voice_activation = VoiceActivation("Simone", 10, mock_stt_model, mock_stt_model)
+    stream = mock_audio_input["stream"]
+    stream.read.side_effect = [b'\xff\xff' * 512] * 32 + [b'\x00\x00' * 512] * 34 + [b""]
+
+    def transcribe(audio):
+        assert not stt.recording
+        return "private ambient conversation"
+
+    mock_stt_model.transcribe.side_effect = transcribe
+    stt.listening = True
+    stt._listen_continuous_loop()
+    mock_stt_model.transcribe.assert_called_once()
+    assert stt.resultQueue.empty()
+    stream.close.assert_called_once()
+
+
+def test_oversized_standby_phrase_is_discarded_not_transcribed(stt, mock_audio_input, mock_stt_model):
+    stt.voice_activation = VoiceActivation("Simone", 10, mock_stt_model, mock_stt_model)
+    mock_audio_input["stream"].read.side_effect = (
+        [b'\xff\xff' * 512] * 1000 + [b'\x00\x00' * 512] * 34 + [b""]
+    )
+    stt.listening = True
+    stt._listen_continuous_loop()
+    mock_stt_model.transcribe.assert_not_called()
+    assert stt.resultQueue.empty()
+
+
+def test_failed_voice_recognition_closes_audio_and_session(stt, mock_audio_input, mock_stt_model):
+    stt.voice_activation = VoiceActivation("Simone", 10, mock_stt_model, mock_stt_model)
+    mock_stt_model.transcribe.side_effect = RuntimeError("STT unavailable")
+    mock_audio_input["stream"].read.side_effect = [b'\xff\xff' * 512] * 32 + [b'\x00\x00' * 512] * 34
+    stt.listening = True
+    with pytest.raises(RuntimeError, match="STT unavailable"):
+        stt._listen_continuous_loop()
+    assert stt.voice_activation.state == "error"
+    assert not stt.recording
+    mock_audio_input["stream"].close.assert_called_once()
+    
