@@ -1,121 +1,23 @@
-from typing import Any, Iterator, Literal, NotRequired, TypeAlias, TypedDict
-from .PluginUIDefinitions import UINode
+from typing import Any, Iterator, Literal, NotRequired, TypedDict
+from .PluginUIDefinitions import (
+    UIComponent, UINode, InputBase, SelectOption, Select, TextInput, Filter,
+    TextArea, NumberInput, Toggle, Button, Paragraph, Notification, Error, List, ListAction, ListRow, SettingCondition,
+)
 
-class SettingBase(TypedDict):
-    key: str
-    label: str | None
-    type: Literal['paragraph', 'notification', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'filter', 'error']
-    readonly: bool
-    placeholder: str | None
-    params: NotRequired[dict[str, str | int | float]]
-
-
-class SelectOption(TypedDict):
-    """Defines an option for a select setting."""
-    key: str
-    label: str
-    value: object | str | int | float | bool
-    disabled: bool
-
-class SelectSetting(SettingBase):
-    """Used to display a select input."""
-    default_value: str | list[str] | None
-    select_options: list[SelectOption] | None
-    multi_select: bool
-
-class TextSetting(SettingBase):
-    """Used to display a text input."""
-    default_value: str | None
-    max_length: int | None
-    min_length: int | None
-
-class FilterSetting(SettingBase):
-    """Used to display a compact live-filter input."""
-    default_value: NotRequired[str | None]
-    max_length: NotRequired[int | None]
-    min_length: NotRequired[int | None]
-    hidden: bool
-
-class TextAreaSetting(SettingBase):
-    """Used to display a textarea."""
-    default_value: str | None
-    rows: int | float | None
-    cols: int | float | None
-
-class NumericalSetting(SettingBase):
-    """Used to display a numerical input."""
-    default_value: int | float | None
-    min_value: int | float | None
-    max_value: int | float | None
-    step: int | float | None
-
-class ToggleSetting(SettingBase):
-    """Used to display a toggle switch."""
-    default_value: bool | None
-
-class ButtonSetting(SettingBase):
-    """Used to display a button that invokes the plugin's settings-button hook."""
-    icon: NotRequired[str]
-
-class ParagraphSetting(SettingBase):
-    """Used to display a paragraph of text. The label is used as the title."""
-    content: str
-
-class NotificationSetting(SettingBase):
-    """Used to display a styled informational, warning, or error notification."""
-    content: str
-    level: Literal['info', 'warning', 'error']
-
-class ErrorSetting(SettingBase):
-    """Used to display an error message."""
-    content: str
-
-class SettingCondition(TypedDict):
-    """Compare a key in the current namespace, or use default_show when unset."""
-    key: str
-    operator: Literal['eq', 'neq', 'gt', 'geq', 'lt', 'leq', 'in', 'not_in', 'contains', 'not_contains', 'is_set', 'is_unset']
-    value: NotRequired[object]
-    default_show: NotRequired[bool]
-
-class ConditionSetting(TypedDict):
-    """Show nested fields when the condition matches; hidden values are preserved."""
-    key: str
-    type: Literal['condition']
-    condition: SettingCondition
-    fields: list['SettingsElement']
-
-class ListAction(TypedDict):
-    """Defines an action button rendered on every row of a list field.
-
-    Clicking it invokes the plugin's settings-button hook with the key
-    ``<action>:<row key>``. With ``inline_edit`` the row title becomes an
-    editable input and the edited value is passed as the hook value.
-    """
-    action: str
-    icon: NotRequired[str]
-    label: NotRequired[str]
-    danger: NotRequired[bool]
-    inline_edit: NotRequired[bool]
-
-class ListRow(TypedDict):
-    """Defines one row of a list field. Rows sharing the same group value are
-    rendered under a common group header."""
-    key: str
-    title: str
-    title_key: NotRequired[str]
-    suffix: NotRequired[str]
-    meta: NotRequired[str]
-    params: NotRequired[dict[str, str | int | float]]
-    group: NotRequired[str]
-    pending: NotRequired[bool]
-    tone: NotRequired[str]
-    details: NotRequired[list[UINode]]
-
-class ListSetting(SettingBase):
-    """Used to display a list of rows, each carrying optional actions."""
-    items: list[ListRow]
-    row_actions: NotRequired[list[ListAction]]
-    count_labels: NotRequired[dict[str, str]]
+# Deprecated compatibility aliases; use PluginUIDefinitions for new components.
+SettingBase = InputBase
+SelectSetting = Select
+TextSetting = TextInput
+TextAreaSetting = TextArea
+NumericalSetting = NumberInput
+ToggleSetting = Toggle
+ButtonSetting = Button
+ParagraphSetting = Paragraph
+NotificationSetting = Notification
+ErrorSetting = Error
+ListSetting = List
+FilterSetting = Filter
+ConditionSetting = UIComponent
 
 class GridHeaderAction(TypedDict):
     """Defines an action button rendered next to a grid header."""
@@ -123,15 +25,17 @@ class GridHeaderAction(TypedDict):
     icon: NotRequired[str]
     label: NotRequired[str]
 
-SettingsField: TypeAlias = TextSetting | TextAreaSetting | SelectSetting | NumericalSetting | ToggleSetting | ButtonSetting | ParagraphSetting | NotificationSetting | ErrorSetting | ListSetting | FilterSetting
-SettingsElement: TypeAlias = SettingsField | ConditionSetting
+SettingsField = UIComponent
+SettingsElement = UIComponent
+SettingField = UIComponent
+
 
 class SettingsGrid(TypedDict):
     """Defines a grid of settings for a plugin."""
     key: str
     label: str
     fields: list[SettingsElement]
-    content: NotRequired[list[UINode]]
+    content: NotRequired[list[UIComponent]]
     collapsible: NotRequired[bool]
     default_collapsed: NotRequired[bool]
     header_action: NotRequired[GridHeaderAction]
