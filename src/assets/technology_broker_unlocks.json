@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "source": "locked_modules.json",
+  "products": [
+    {
+      "broker_id": "guardian_fsd_booster",
+      "name_en": "Guardian FSD Booster",
+      "name_fr": "Survolteur FSD Guardian",
+      "type": "module",
+      "module_name_key": "guardianfsdbooster",
+      "journal_item_pattern": "Int_GuardianFSDbooster_Size{size}",
+      "journal_item_status": "family_pattern",
+      "requirements": [
+        { "item_en": "Guardian Module Blueprint Fragment", "item_fr": "Fragment de plan de module Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_moduleblueprint" },
+        { "item_en": "Guardian Power Cell", "item_fr": "Cellule d'énergie Guardian", "type": "guardian_material", "quantity": 21, "covas_id": "guardian_powercell" },
+        { "item_en": "Guardian Technology Component", "item_fr": "Composant technologique Guardian", "type": "guardian_material", "quantity": 21, "covas_id": "guardian_techcomponent" },
+        { "item_en": "Focus Crystals", "item_fr": "Cristaux de focalisation", "type": "manufactured", "quantity": 24, "covas_id": "focuscrystals" },
+        { "item_en": "HN Shock Mount", "item_fr": "Support amortisseur HN", "type": "commodity", "quantity": 8, "covas_id": "HN Shock Mount", "inventory_name": "HN Shock Mount", "market_name": "HN Shock Mount" }
+      ]
+    },
+    {
+      "broker_id": "guardian_module_reinforcement_package",
+      "name_en": "Guardian Module Reinforcement Package",
+      "name_fr": "Pack de renfort de module Guardian",
+      "type": "module",
+      "module_name_key": "guardianmodulereinforcementpackage",
+      "journal_item_pattern": "Int_GuardianModuleReinforcement_Size{size}_Class{class}",
+      "journal_item_status": "family_pattern",
+      "requirements": [
+        { "item_en": "Guardian Module Blueprint Fragment", "item_fr": "Fragment de plan de module Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_moduleblueprint" },
+        { "item_en": "Guardian Sentinel Wreckage Components", "item_fr": "Composants d'épave de sentinelle Guardian", "type": "guardian_material", "quantity": 18, "covas_id": "guardian_sentinel_wreckagecomponents", "covas_name_alias": "Guardian Wreckage Components" },
+        { "item_en": "Pattern Epsilon Obelisk Data", "item_fr": "Données d'obélisque - Modèle Epsilon", "type": "guardian_data", "quantity": 15, "covas_id": "ancienttechnologicaldata" },
+        { "item_en": "Guardian Power Conduit", "item_fr": "Conduit d'énergie Guardian", "type": "guardian_material", "quantity": 20, "covas_id": "guardian_powerconduit" },
+        { "item_en": "Reinforced Mounting Plate", "item_fr": "Plaque de montage renforcée", "type": "commodity", "quantity": 9, "covas_id": "Reinforced Mounting Plate", "inventory_name": "Reinforced Mounting Plate", "market_name": "Reinforced Mounting Plate" }
+      ]
+    },
+    {
+      "broker_id": "guardian_shield_reinforcement_package",
+      "name_en": "Guardian Shield Reinforcement Package",
+      "name_fr": "Pack de renfort de bouclier Guardian",
+      "type": "module",
+      "module_name_key": "guardianshieldreinforcementpackage",
+      "journal_item_pattern": "Int_GuardianShieldReinforcement_Size{size}_Class{class}",
+      "journal_item_status": "family_pattern",
+      "requirements": [
+        { "item_en": "Guardian Module Blueprint Fragment", "item_fr": "Fragment de plan de module Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_moduleblueprint" },
+        { "item_en": "Guardian Power Cell", "item_fr": "Cellule d'énergie Guardian", "type": "guardian_material", "quantity": 17, "covas_id": "guardian_powercell" },
+        { "item_en": "Guardian Technology Component", "item_fr": "Composant technologique Guardian", "type": "guardian_material", "quantity": 20, "covas_id": "guardian_techcomponent" },
+        { "item_en": "Pattern Delta Obelisk Data", "item_fr": "Données d'obélisque - Modèle Delta", "type": "guardian_data", "quantity": 24, "covas_id": "ancientlanguagedata" },
+        { "item_en": "Hardware Diagnostic Sensor", "item_fr": "Sonde de diagnostic matériel", "type": "commodity", "quantity": 8, "covas_id": "Hardware Diagnostic Sensor", "inventory_name": "Hardware Diagnostic Sensor", "market_name": "Hardware Diagnostic Sensor" }
+      ]
+    },
+    {
+      "broker_id": "guardian_hull_reinforcement_package",
+      "name_en": "Guardian Hull Reinforcement Package",
+      "name_fr": "Pack de renfort de coque Guardian",
+      "type": "module",
+      "module_name_key": "guardianhullreinforcementpackage",
+      "journal_item_pattern": "Int_GuardianHullReinforcement_Size{size}_Class{class}",
+      "journal_item_status": "family_pattern",
+      "requirements": [
+        { "item_en": "Guardian Module Blueprint Fragment", "item_fr": "Fragment de plan de module Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_moduleblueprint" },
+        { "item_en": "Guardian Sentinel Weapon Parts", "item_fr": "Pièces d'armes de sentinelle Guardian", "type": "guardian_material", "quantity": 21, "covas_id": "guardian_sentinel_weaponparts" },
+        { "item_en": "Pattern Beta Obelisk Data", "item_fr": "Données d'obélisque - Modèle Bêta", "type": "guardian_data", "quantity": 16, "covas_id": "ancientculturaldata" },
+        { "item_en": "Guardian Power Conduit", "item_fr": "Conduit d'énergie Guardian", "type": "guardian_material", "quantity": 16, "covas_id": "guardian_powerconduit" },
+        { "item_en": "Reinforced Mounting Plate", "item_fr": "Plaque de montage renforcée", "type": "commodity", "quantity": 12, "covas_id": "Reinforced Mounting Plate", "inventory_name": "Reinforced Mounting Plate", "market_name": "Reinforced Mounting Plate" }
+      ]
+    },
+    {
+      "broker_id": "guardian_hybrid_power_plant",
+      "name_en": "Guardian Hybrid Power Plant",
+      "name_fr": "Générateur hybride Guardian",
+      "type": "module",
+      "module_name_key": "guardianhybridpowerplant",
+      "journal_item_pattern": null,
+      "journal_item_status": "unverified",
+      "journal_item_note": "No local journal symbol verified; do not infer the installed module ID from this broker slug.",
+      "requirements": [
+        { "item_en": "Guardian Module Blueprint Fragment", "item_fr": "Fragment de plan de module Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_moduleblueprint" },
+        { "item_en": "Guardian Power Conduit", "item_fr": "Conduit d'énergie Guardian", "type": "guardian_material", "quantity": 18, "covas_id": "guardian_powerconduit" },
+        { "item_en": "Pattern Epsilon Obelisk Data", "item_fr": "Données d'obélisque - Modèle Epsilon", "type": "guardian_data", "quantity": 21, "covas_id": "ancienttechnologicaldata" },
+        { "item_en": "Heat Resistant Ceramics", "item_fr": "Céramique thermorésistante", "type": "manufactured", "quantity": 15, "covas_id": "heatresistantceramics" },
+        { "item_en": "Energy Grid Assembly", "item_fr": "Réseau de distribution d'énergie", "type": "commodity", "quantity": 10, "covas_id": "Energy Grid Assembly", "inventory_name": "Energy Grid Assembly", "market_name": "Energy Grid Assembly" }
+      ]
+    },
+    {
+      "broker_id": "guardian_hybrid_power_distributor",
+      "name_en": "Guardian Hybrid Power Distributor",
+      "name_fr": "Répartiteur de puissance hybride Guardian",
+      "type": "module",
+      "module_name_key": "guardianhybridpowerdistributor",
+      "journal_item_pattern": null,
+      "journal_item_status": "unverified",
+      "journal_item_note": "No local journal symbol verified; do not infer the installed module ID from this broker slug.",
+      "requirements": [
+        { "item_en": "Guardian Module Blueprint Fragment", "item_fr": "Fragment de plan de module Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_moduleblueprint" },
+        { "item_en": "Pattern Alpha Obelisk Data", "item_fr": "Données d'obélisque - Modèle Alpha", "type": "guardian_data", "quantity": 20, "covas_id": "ancientbiologicaldata" },
+        { "item_en": "Guardian Power Cell", "item_fr": "Cellule d'énergie Guardian", "type": "guardian_material", "quantity": 24, "covas_id": "guardian_powercell" },
+        { "item_en": "Guardian Power Conduit", "item_fr": "Conduit d'énergie Guardian", "type": "guardian_material", "quantity": 16, "covas_id": "guardian_powerconduit" },
+        { "item_en": "Heatsink Interlink", "item_fr": "Interconnexion de dissipateur thermique", "type": "commodity", "quantity": 6, "covas_id": "Heatsink Interlink", "inventory_name": "Heatsink Interlink", "market_name": "Heatsink Interlink" }
+      ]
+    },
+    {
+      "broker_id": "guardian_gauss_cannon_medium_fixed",
+      "name_en": "Guardian Gauss Cannon (Class 2 Fixed)",
+      "name_fr": "Canon de Gauss Guardian (Classe 2 Fixe)",
+      "type": "weapon",
+      "module_name_key": "guardiangausscannonclass2fixed",
+      "journal_item_id": "Hpt_Guardian_GaussCannon_Fixed_Medium",
+      "journal_item_status": "verified",
+      "requirements": [
+        { "item_en": "Guardian Weapon Blueprint Fragment", "item_fr": "Fragment de plan d'arme Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_weaponblueprint" },
+        { "item_en": "Guardian Power Cell", "item_fr": "Cellule d'énergie Guardian", "type": "guardian_material", "quantity": 18, "covas_id": "guardian_powercell" },
+        { "item_en": "Guardian Technology Component", "item_fr": "Composant technologique Guardian", "type": "guardian_material", "quantity": 20, "covas_id": "guardian_techcomponent" },
+        { "item_en": "Manganese", "item_fr": "Manganèse", "type": "raw", "quantity": 15, "covas_id": "manganese" },
+        { "item_en": "Magnetic Emitter Housing", "item_fr": "Boîtier d'émetteur magnétique", "type": "commodity", "quantity": 6, "covas_id": "Magnetic Emitter Housing", "inventory_name": "Magnetic Emitter Housing", "market_name": "Magnetic Emitter Housing" }
+      ]
+    },
+    {
+      "broker_id": "guardian_plasma_charger_medium_fixed",
+      "name_en": "Guardian Plasma Charger (Class 2 Fixed)",
+      "name_fr": "Chargeur à plasma Guardian (Classe 2 Fixe)",
+      "type": "weapon",
+      "module_name_key": "guardianplasmachargerclass2fixed",
+      "journal_item_id": "Hpt_Guardian_PlasmaLauncher_Fixed_Medium",
+      "journal_item_status": "verified",
+      "requirements": [
+        { "item_en": "Guardian Weapon Blueprint Fragment", "item_fr": "Fragment de plan d'arme Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_weaponblueprint" },
+        { "item_en": "Guardian Power Conduit", "item_fr": "Conduit d'énergie Guardian", "type": "guardian_material", "quantity": 18, "covas_id": "guardian_powerconduit" },
+        { "item_en": "Guardian Sentinel Weapon Parts", "item_fr": "Pièces d'armes de sentinelle Guardian", "type": "guardian_material", "quantity": 16, "covas_id": "guardian_sentinel_weaponparts" },
+        { "item_en": "Chromium", "item_fr": "Chrome", "type": "raw", "quantity": 14, "covas_id": "chromium" },
+        { "item_en": "Micro-weave Cooling Hoses", "item_fr": "Tuyaux de refroidissement micro-tressés", "type": "commodity", "quantity": 8, "covas_id": "Micro-weave Cooling Hoses", "inventory_name": "Micro-weave Cooling Hoses", "market_name": "Micro-weave Cooling Hoses" }
+      ]
+    },
+    {
+      "broker_id": "guardian_shard_cannon_medium_fixed",
+      "name_en": "Guardian Shard Cannon (Class 2 Fixed)",
+      "name_fr": "Canon à fragmentation Guardian (Classe 2 Fixe)",
+      "type": "weapon",
+      "module_name_key": "guardianshardcannonclass2fixed",
+      "journal_item_id": "Hpt_Guardian_ShardCannon_Fixed_Medium",
+      "journal_item_status": "verified",
+      "requirements": [
+        { "item_en": "Guardian Weapon Blueprint Fragment", "item_fr": "Fragment de plan d'arme Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_weaponblueprint" },
+        { "item_en": "Guardian Sentinel Wreckage Components", "item_fr": "Composants d'épave de sentinelle Guardian", "type": "guardian_material", "quantity": 16, "covas_id": "guardian_sentinel_wreckagecomponents", "covas_name_alias": "Guardian Wreckage Components" },
+        { "item_en": "Guardian Technology Component", "item_fr": "Composant technologique Guardian", "type": "guardian_material", "quantity": 20, "covas_id": "guardian_techcomponent" },
+        { "item_en": "Carbon", "item_fr": "Carbone", "type": "raw", "quantity": 15, "covas_id": "carbon" },
+        { "item_en": "Articulation Motors", "item_fr": "Moteurs d'articulation", "type": "commodity", "quantity": 8, "covas_id": "Articulation Motors", "inventory_name": "Articulation Motors", "market_name": "Articulation Motors" }
+      ]
+    },
+    {
+      "broker_id": "xg7_trident",
+      "name_en": "XG7 Trident",
+      "name_fr": "XG7 Trident",
+      "type": "fighter",
+      "module_name_key": "xg7trident",
+      "journal_item_id": null,
+      "journal_item_status": "not_ship_module",
+      "journal_item_note": "Fighter unlock; preserve broker ID and resolve ownership from a fighter or shipyard journal event, not Loadout.Item.",
+      "requirements": [
+        { "item_en": "Guardian Vessel Blueprint Fragment", "item_fr": "Fragment de plan de vaisseau Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_vesselblueprint" },
+        { "item_en": "Pattern Epsilon Obelisk Data", "item_fr": "Données d'obélisque - Modèle Epsilon", "type": "guardian_data", "quantity": 25, "covas_id": "ancienttechnologicaldata" },
+        { "item_en": "Guardian Power Conduit", "item_fr": "Conduit d'énergie Guardian", "type": "guardian_material", "quantity": 25, "covas_id": "guardian_powerconduit" },
+        { "item_en": "Guardian Sentinel Weapon Parts", "item_fr": "Pièces d'armes de sentinelle Guardian", "type": "guardian_material", "quantity": 25, "covas_id": "guardian_sentinel_weaponparts" },
+        { "item_en": "Reinforced Mounting Plate", "item_fr": "Plaque de montage renforcée", "type": "commodity", "quantity": 10, "covas_id": "Reinforced Mounting Plate", "inventory_name": "Reinforced Mounting Plate", "market_name": "Reinforced Mounting Plate" }
+      ]
+    },
+    {
+      "broker_id": "xg8_javelin",
+      "name_en": "XG8 Javelin",
+      "name_fr": "XG8 Javelin",
+      "type": "fighter",
+      "module_name_key": "xg8javelin",
+      "journal_item_id": null,
+      "journal_item_status": "not_ship_module",
+      "journal_item_note": "Fighter unlock; preserve broker ID and resolve ownership from a fighter or shipyard journal event, not Loadout.Item.",
+      "requirements": [
+        { "item_en": "Guardian Vessel Blueprint Fragment", "item_fr": "Fragment de plan de vaisseau Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_vesselblueprint" },
+        { "item_en": "Pattern Beta Obelisk Data", "item_fr": "Données d'obélisque - Modèle Bêta", "type": "guardian_data", "quantity": 25, "covas_id": "ancientculturaldata" },
+        { "item_en": "Guardian Sentinel Wreckage Components", "item_fr": "Composants d'épave de sentinelle Guardian", "type": "guardian_material", "quantity": 25, "covas_id": "guardian_sentinel_wreckagecomponents", "covas_name_alias": "Guardian Wreckage Components" },
+        { "item_en": "Guardian Technology Component", "item_fr": "Composant technologique Guardian", "type": "guardian_material", "quantity": 25, "covas_id": "guardian_techcomponent" },
+        { "item_en": "Micro-weave Cooling Hoses", "item_fr": "Tuyaux de refroidissement micro-tressés", "type": "commodity", "quantity": 10, "covas_id": "Micro-weave Cooling Hoses", "inventory_name": "Micro-weave Cooling Hoses", "market_name": "Micro-weave Cooling Hoses" }
+      ]
+    },
+    {
+      "broker_id": "xg9_lance",
+      "name_en": "XG9 Lance",
+      "name_fr": "XG9 Lance",
+      "type": "fighter",
+      "module_name_key": "xg9lance",
+      "journal_item_id": null,
+      "journal_item_status": "not_ship_module",
+      "journal_item_note": "Fighter unlock; preserve broker ID and resolve ownership from a fighter or shipyard journal event, not Loadout.Item.",
+      "requirements": [
+        { "item_en": "Guardian Vessel Blueprint Fragment", "item_fr": "Fragment de plan de vaisseau Guardian", "type": "guardian_data", "quantity": 1, "covas_id": "guardian_vesselblueprint" },
+        { "item_en": "Pattern Alpha Obelisk Data", "item_fr": "Données d'obélisque - Modèle Alpha", "type": "guardian_data", "quantity": 25, "covas_id": "ancientbiologicaldata" },
+        { "item_en": "Guardian Power Cell", "item_fr": "Cellule d'énergie Guardian", "type": "guardian_material", "quantity": 25, "covas_id": "guardian_powercell" },
+        { "item_en": "Guardian Technology Component", "item_fr": "Composant technologique Guardian", "type": "guardian_material", "quantity": 25, "covas_id": "guardian_techcomponent" },
+        { "item_en": "Magnetic Emitter Housing", "item_fr": "Boîtier d'émetteur magnétique", "type": "commodity", "quantity": 10, "covas_id": "Magnetic Emitter Housing", "inventory_name": "Magnetic Emitter Housing", "market_name": "Magnetic Emitter Housing" }
+      ]
+    },
+    {
+      "broker_id": "corrosion_resistant_cargo_rack_size_4",
+      "name_en": "Corrosion Resistant Cargo Rack (Class 4)",
+      "name_fr": "Soute anti-corrosion (Classe 4)",
+      "type": "module",
+      "module_name_key": "cargorackcorrosionresistantclass4",
+      "journal_item_id": null,
+      "journal_item_status": "unverified",
+      "journal_item_note": "The local family alias omits the class; verify the exact journal Item from Loadout or Outfitting before comparing ownership.",
+      "requirements": [
+        { "item_en": "Meta-Alloys", "item_fr": "Méta-alliages", "type": "commodity", "quantity": 16, "covas_id": "Meta-Alloys", "inventory_name": "Meta-Alloys", "market_name": "Meta-Alloys" },
+        { "item_en": "Iron", "item_fr": "Fer", "type": "raw", "quantity": 26, "covas_id": "iron" },
+        { "item_en": "Chemical Manipulators", "item_fr": "Manipulateurs chimiques", "type": "manufactured", "quantity": 18, "covas_id": "chemicalmanipulators" },
+        { "item_en": "Radiation Baffle", "item_fr": "Déflecteur de radiation", "type": "commodity", "quantity": 22, "covas_id": "Radiation Baffle", "inventory_name": "Radiation Baffle", "market_name": "Radiation Baffle" },
+        { "item_en": "Neofabric Insulation", "item_fr": "Isolation en néotissu", "type": "commodity", "quantity": 12, "covas_id": "Neofabric Insulation", "inventory_name": "Neofabric Insulation", "market_name": "Neofabric Insulation" }
+      ]
+    },
+    {
+      "broker_id": "engineered_fsd_v1_size_5",
+      "name_en": "Engineered FSD V1 (Class 5A)",
+      "name_fr": "FSD pré-ingénieré V1 (Classe 5A)",
+      "type": "pre_engineered_purchase",
+      "module_name_key": "engineeredfsdv1class5a",
+      "journal_item_id": null,
+      "journal_item_status": "unverified",
+      "journal_item_note": "The exact pre-engineered journal Item is not present in the local module references; do not infer ownership from the broker slug.",
+      "requirements": [
+        { "item_en": "Datamined Wake Exceptions", "item_fr": "Exceptions de sillage analysées", "type": "encoded", "quantity": 18, "covas_id": "dataminedwake" },
+        { "item_en": "Tellurium", "item_fr": "Tellure", "type": "raw", "quantity": 26, "covas_id": "tellurium" },
+        { "item_en": "Electrochemical Arrays", "item_fr": "Réseaux électrochimiques", "type": "manufactured", "quantity": 26, "covas_id": "electrochemicalarrays" },
+        { "item_en": "Chemical Processors", "item_fr": "Processeurs chimiques", "type": "manufactured", "quantity": 28, "covas_id": "chemicalprocessors" }
+      ]
+    }
+  ]
+}

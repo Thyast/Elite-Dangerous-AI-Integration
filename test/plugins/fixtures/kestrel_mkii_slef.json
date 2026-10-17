@@ -1,0 +1,159 @@
+[
+  {
+    "header": {
+      "appName": "Coriolis",
+      "appVersion": "4.0",
+      "appURL": "https://coriolis.io/outfit/kestrel?code=A4pf7TFOl3dks8f47U7U0v212107070702B22b2b2927272Sm14F.Iw18eQ%3D%3D.CwBgjKJQzLsEyMVFKg%3D%3D.H4sIAAAAAAAAA42Qu0oDURCGJ2ZzPTGbjdm4kUS8bBQsgq2NpLMRsZHUtlYWghax8A1ExMrCwgewtBILsVLwAURSWlhYeokzzr%2BYg4XBPcXHMPPNnDOHOEtEXylF%2F0jhdfsiYc8nMm2NJMHLtr6vKD9kiNxei6h64RBl1z9VGuHASjsK9%2FpdJGiniSqBDvFf80Szh89qJnnCmrsYd2lUDz9Uf9RkpasXi8O5gVS%2BexJx9160NcVLtvVA0SywyNyxR5RDlEc0jWgGkaR5E3oSQ7bHiVqLbyK1qJTnjp00OXhEdH%2BtNK91wxu2bvsDLJ7q6M4NwIFJkV74pWf%2B10d5xeqn%2BCx8YXCjK3vn%2BmMhYAApxjbd2GaJmzAT9POc%2BmpDsx6v2f4t9J%2B52oohIZaRMi%2FY%2BglWRL04VVfpSpMhYAAZi21Whpu3MAEDiD%2FcvIcJGECqsU2hP843W1CQ%2Fg0DAAA%3D&bn=Imported%20Kestrel%20Mk%20II"
+    },
+    "data": {
+      "Ship": "smallcombat01_nx",
+      "Modules": [
+        {
+          "Slot": "Armour",
+          "Item": "smallcombat01_nx_armour_reactive",
+          "On": true,
+          "Engineering": {"BlueprintName": "Armour_Thermic", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_armour_chunky"}
+        },
+        {"Slot": "CargoHatch", "Item": "modularcargobaydoor", "On": true, "Priority": 4},
+        {
+          "Slot": "PowerPlant",
+          "Item": "Int_Powerplant_Size5_Class5",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "PowerPlant_Armoured", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_powerplant_cooled"}
+        },
+        {
+          "Slot": "MainEngines",
+          "Item": "Int_MkIIAgileBoost_Engine_Size5_Class5",
+          "On": true,
+          "Priority": 1,
+          "Engineering": {"BlueprintName": "Engine_Tuned", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_engine_overloaded"}
+        },
+        {
+          "Slot": "FrameShiftDrive",
+          "Item": "Int_Hyperdrive_Overcharge_Size4_Class5",
+          "On": true,
+          "Priority": 4,
+          "Engineering": {"BlueprintName": "FSD_LongRange", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_fsd_fuelcapacity"}
+        },
+        {
+          "Slot": "LifeSupport",
+          "Item": "Int_LifeSupport_Size1_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "Misc_LightWeight", "Level": 5, "Quality": 1}
+        },
+        {
+          "Slot": "PowerDistributor",
+          "Item": "Int_PowerDistributor_Size5_Class5",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "PowerDistributor_HighFrequency", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_powerdistributor_fast"}
+        },
+        {
+          "Slot": "Radar",
+          "Item": "Int_Sensors_Size2_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "Sensor_LongRange", "Level": 3, "Quality": 1}
+        },
+        {"Slot": "FuelTank", "Item": "Int_FuelTank_Size4_Class3", "On": true, "Priority": 0},
+        {"Slot": "LargeHardpoint1", "Item": "Hpt_MkIIPlasmaShockAutocannon_Fixed_Large", "On": true, "Priority": 3},
+        {"Slot": "LargeHardpoint2", "Item": "Hpt_MkIIPlasmaShockAutocannon_Fixed_Large", "On": true, "Priority": 3},
+        {
+          "Slot": "LargeHardpoint3",
+          "Item": "Hpt_BeamLaser_Gimbal_Large",
+          "On": true,
+          "Priority": 3,
+          "Engineering": {"BlueprintName": "Weapon_LongRange", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_thermal_vent"}
+        },
+        {
+          "Slot": "SmallHardpoint1",
+          "Item": "Hpt_Slugshot_Gimbal_Small",
+          "On": true,
+          "Priority": 3,
+          "Engineering": {"BlueprintName": "Weapon_HighCapacity", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_corrosive_shell"}
+        },
+        {
+          "Slot": "SmallHardpoint2",
+          "Item": "Hpt_Slugshot_Gimbal_Small",
+          "On": true,
+          "Priority": 3,
+          "Engineering": {"BlueprintName": "Weapon_HighCapacity", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_drag_munitions"}
+        },
+        {
+          "Slot": "TinyHardpoint1",
+          "Item": "Hpt_ShieldBooster_Size0_Class2",
+          "On": true,
+          "Priority": 2,
+          "Engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_shieldbooster_chunky"}
+        },
+        {
+          "Slot": "TinyHardpoint2",
+          "Item": "Hpt_ShieldBooster_Size0_Class2",
+          "On": true,
+          "Priority": 2,
+          "Engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_shieldbooster_chunky"}
+        },
+        {
+          "Slot": "TinyHardpoint3",
+          "Item": "Hpt_ShieldBooster_Size0_Class2",
+          "On": true,
+          "Priority": 2,
+          "Engineering": {"BlueprintName": "ShieldBooster_Resistive", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_shieldbooster_chunky"}
+        },
+        {
+          "Slot": "TinyHardpoint4",
+          "Item": "Hpt_HeatSinkLauncher_Turret_Tiny",
+          "On": true,
+          "Priority": 2,
+          "Engineering": {"BlueprintName": "Misc_HeatSinkCapacity", "Level": 1, "Quality": 1}
+        },
+        {
+          "Slot": "Slot01_Size5",
+          "Item": "Int_ShieldGenerator_Size5_Class3_Fast",
+          "On": true,
+          "Priority": 2,
+          "Engineering": {"BlueprintName": "ShieldGenerator_Thermic", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_shield_regenerative"}
+        },
+        {
+          "Slot": "Slot02_Size4",
+          "Item": "Int_HullReinforcement_Size4_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "HullReinforcement_HeavyDuty", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_hullreinforcement_chunky"}
+        },
+        {
+          "Slot": "Military01",
+          "Item": "Int_HullReinforcement_Size4_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "HullReinforcement_HeavyDuty", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_hullreinforcement_chunky"}
+        },
+        {
+          "Slot": "Slot03_Size3",
+          "Item": "Int_HullReinforcement_Size3_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "HullReinforcement_HeavyDuty", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_hullreinforcement_chunky"}
+        },
+        {
+          "Slot": "Slot04_Size2",
+          "Item": "Int_HullReinforcement_Size2_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "HullReinforcement_HeavyDuty", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_hullreinforcement_chunky"}
+        },
+        {
+          "Slot": "Slot05_Size2",
+          "Item": "Int_HullReinforcement_Size2_Class2",
+          "On": true,
+          "Priority": 0,
+          "Engineering": {"BlueprintName": "HullReinforcement_HeavyDuty", "Level": 5, "Quality": 1, "ExperimentalEffect": "special_hullreinforcement_chunky"}
+        },
+        {"Slot": "Slot06_Size2", "Item": "Int_GuardianModuleReinforcement_Size2_Class1", "On": true, "Priority": 0},
+        {"Slot": "Slot07_Size1", "Item": "Int_ModuleReinforcement_Size1_Class2", "On": true, "Priority": 0}
+      ]
+    }
+  }
+]

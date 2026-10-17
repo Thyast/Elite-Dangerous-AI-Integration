@@ -111,11 +111,157 @@ class PluginHelper():
             raise RuntimeError('Plugin helper is not bound to a registered plugin')
         self._plugin_manager.register_language_detector(self._namespace.guid, detector)
 
+    def search_stations_for_modules(
+        self,
+        modules: list[dict[str, Any]],
+        *,
+        distance: int | float = 50000,
+        size: int = 25,
+        cache: dict[str, dict[str, Any]] | None = None,
+        cache_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Structured Spansh station lookup, shared with station_finder.
+
+        ``cache`` is scoped by the caller to one planner calculation; it is
+        never persisted. Identical normalized requests in that calculation
+        make one HTTP request. ``cache_key`` lets the planner cache its one
+        grouped query independently from per-module fallback queries.
+        Spansh catalog matches do not guarantee live stock.
+        """
+        from .actions.actions_web import search_stations_for_modules
+        from .UI import serialize_object
+        import json
+
+        _events, states = self._event_manager.get_current_state()
+        location = states.get("Location")
+        reference = (
+            location.model_dump() if hasattr(location, "model_dump")
+            else serialize_object(location) if location is not None else {}
+        )
+        outfitting = states.get("Outfitting")
+        outfitting_snapshot = (
+            outfitting.model_dump() if hasattr(outfitting, "model_dump")
+            else serialize_object(outfitting) if outfitting is not None else {}
+        )
+        normalized_modules = sorted(
+            (
+                str(module.get("name", "")).casefold(),
+                tuple(sorted(str(v).casefold() for v in (module.get("class") or []))),
+                tuple(sorted(str(v).casefold() for v in (module.get("rating") or []))),
+            )
+            for module in modules
+        )
+        request_key = cache_key or json.dumps(
+            {"modules": normalized_modules, "distance": distance, "size": size,
+             "reference": reference,
+             "outfitting_station": outfitting_snapshot.get("StationName"),
+             "outfitting_timestamp": outfitting_snapshot.get("timestamp")},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if cache is not None and request_key in cache:
+            return cache[request_key]
+        # Local Outfitting is authoritative for the currently docked station.
+        # Return immediately if it covers the full query; otherwise combine it
+        # with the Spansh catalog results.
+        outfitting_items = outfitting_snapshot.get("Items") or []
+        station_name = outfitting_snapshot.get("StationName")
+        station_system = outfitting_snapshot.get("StarSystem")
+        local_modules = []
+        local_matches = []
+        if station_name and outfitting_items:
+            for requested in modules:
+                wanted_name = str(requested.get("name", "")).casefold()
+                wanted_class = {str(v).casefold() for v in (requested.get("class") or [])}
+                wanted_rating = {str(v).casefold() for v in (requested.get("rating") or [])}
+                for item in outfitting_items:
+                    item_dict = item if isinstance(item, dict) else serialize_object(item)
+                    offered_name = str(item_dict.get("Name_Localised") or item_dict.get("Name") or "")
+                    if wanted_name not in offered_name.casefold():
+                        continue
+                    offered_class = item_dict.get("Class")
+                    offered_rating = item_dict.get("Rating")
+                    if wanted_class and str(offered_class).casefold() not in wanted_class:
+                        continue
+                    if wanted_rating and str(offered_rating).casefold() not in wanted_rating:
+                        continue
+                    local_modules.append({
+                        "name": offered_name,
+                        "class": offered_class,
+                        "rating": offered_rating,
+                        "price": item_dict.get("Price"),
+                        "stock_status": "station_catalog",
+                    })
+                    local_matches.append(requested)
+                    break
+        local_station = None
+        if local_matches:
+            star_pos = reference.get("StarPos")
+            local_station = {
+                "id": f"current::{str(station_name).casefold()}",
+                "name": station_name,
+                "system": station_system or reference.get("StarSystem", ""),
+                "distance_ly": 0.0,
+                "coords": (
+                    dict(zip(("x", "y", "z"), star_pos))
+                    if isinstance(star_pos, (list, tuple)) and len(star_pos) >= 3 else None
+                ),
+                "arrival_ls": 0.0,
+                "is_planetary": False,
+                "services": ["outfitting"],
+                "modules": local_modules,
+                "matched_filters": local_matches,
+                "stock_status": "station_catalog",
+                "source": "local Outfitting projection",
+            }
+        if len(local_matches) == len(modules):
+            result = {"status": "ok", "stations": [local_station], "count": 1,
+                      "stock_status": "station_catalog"}
+        else:
+            remote_modules = [request for request in modules if request not in local_matches]
+            result = search_stations_for_modules(
+                remote_modules or modules, states, distance=distance, size=size
+            )
+            if local_station:
+                result = dict(result)
+                result["stations"] = [local_station] + [
+                    station for station in result.get("stations", [])
+                    if station.get("id") != local_station["id"]
+                ]
+                if result.get("status") != "ok":
+                    result["status"] = "ok"
+        if cache is not None:
+            cache[request_key] = result
+        return result
+
+    def search_material_traders(
+        self,
+        category: str,
+        *,
+        distance: int | float = 50000,
+        size: int = 5,
+        cache: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Nearest material traders of one type (Raw/Manufactured/Encoded).
+
+        ``cache`` is scoped by the caller to one planner calculation, like
+        ``search_stations_for_modules``; it is never persisted."""
+        from .actions.actions_web import search_material_traders
+
+        request_key = f"material_trader:{category.casefold()}:{distance}:{size}"
+        if cache is not None and request_key in cache:
+            return cache[request_key]
+        _events, states = self._event_manager.get_current_state()
+        result = search_material_traders(category, states, distance=distance, size=size)
+        if cache is not None:
+            cache[request_key] = result
+        return result
+
     _ActionModelT = TypeVar('_ActionModelT', bound=BaseModel)
 
-    def register_action(self, name: str, description: str, parameters: type[_ActionModelT], method: Callable[[_ActionModelT, dict], str], action_type="ship", input_template: Callable[[dict, dict], str]|None=None):
+    def register_action(self, name: str, description: str, parameters: type[_ActionModelT], method: Callable[[_ActionModelT, dict[str, Any]], str], action_type="ship", input_template: Callable[[dict[str, Any], dict[str, Any]], str]|None=None, cache_prefill: dict[str, dict[str, Any]] | None=None):
         """Register an action"""
-        def _wrapper(args: dict, context: dict) -> str:
+        def _wrapper(args: dict[str, Any], context: dict[str, Any]) -> str:
             try:
                 model = parameters(**args)
                 return method(model, context)
@@ -123,7 +269,15 @@ class PluginHelper():
                 log('error', f"Plugin action '{name}' raised an exception: {e}")
                 return f"Error executing action {name}: {str(e)}"
 
-        self._action_manager.registerAction(name=name, description=description, parameters=parameters.model_json_schema(), method=_wrapper, action_type=action_type, input_template=input_template)
+        self._action_manager.registerAction(
+            name=name,
+            description=description,
+            parameters=parameters.model_json_schema(),
+            method=_wrapper,
+            action_type=action_type,
+            input_template=input_template,
+            cache_prefill=cache_prefill,
+        )
 
     def register_projection(self, projection: Projection):
         """Register a projection to maintain state over time

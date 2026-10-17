@@ -12,7 +12,9 @@ import humanize
 import json
 
 from .Projections import get_state_dict, ProjectedStates
+from .Config import get_asset_path
 from .Database import QuestDatabase
+from .projections.guardian_unlocks import get_unlocked_guardian_modules, get_unrecognized_guardian_modules
 
 from .EventModels import (
     ApproachBodyEvent, ApproachSettlementEvent, BookTaxiEvent, BountyEvent, BuyExplorationDataEvent, CommanderEvent, CommitCrimeEvent,
@@ -48,6 +50,21 @@ from .Event import (
     QuestEvent,
 )
 from .Logger import log, observe, PromptUsageStats
+
+
+def _load_ship_names() -> dict[str, str]:
+    try:
+        with open(get_asset_path("ship_names.json"), encoding="utf-8") as handle:
+            return {
+                key: value
+                for key, value in json.load(handle).items()
+                if not key.startswith("_")
+            }
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+SHIP_NAMES = _load_ship_names()
 
 # Add these new type definitions along with the other existing types
 DockingCancelledEvent = dict
@@ -3039,6 +3056,9 @@ class PromptGenerator:
         
         # Create a copy of ship_info so we don't modify the original
         ship_display = dict(ship_info)
+        ship_type = str(ship_display.get('Type') or '')
+        if ship_type:
+            ship_display['DisplayType'] = SHIP_NAMES.get(ship_type, ship_type)
         ship_display.pop('JetConeBoost', None)
         ship_display.pop('DriveMaxFuel', None)
         ship_display.pop('DrivePowerConst', None)
@@ -3091,7 +3111,7 @@ class PromptGenerator:
         if cargo_info and cargo_info.get('Inventory'):
             formatted_inventory = []
             for item in cargo_info.get('Inventory', []):
-                item_name = item.get('Name', 'Unknown')
+                item_name = item.get('Name_Localised') or item.get('Name', 'Unknown')
                 count = item.get('Count', 0)
                 stolen = " (Stolen)" if item.get('Stolen', False) else ""
                 formatted_inventory.append(f"{count} X {item_name}{stolen}")
@@ -3632,6 +3652,14 @@ class PromptGenerator:
 
             if available_engineers:
                 status_entries.append(("Available Engineers and their home system", available_engineers))
+
+        unlocked_guardian_modules = get_unlocked_guardian_modules(projected_states)
+        if unlocked_guardian_modules:
+            status_entries.append(("Unlocked Guardian modules", unlocked_guardian_modules))
+        unrecognized_guardian_modules = get_unrecognized_guardian_modules(projected_states)
+        if unrecognized_guardian_modules:
+            status_entries.append(("Guardian broker modules not recognized as standard unlocks",
+                                   unrecognized_guardian_modules))
         
         # Process plugin status messages
         for status_generator in self.registered_status_generators:

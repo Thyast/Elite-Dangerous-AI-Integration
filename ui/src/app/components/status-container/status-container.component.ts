@@ -7,6 +7,7 @@ import { MatListModule } from "@angular/material/list";
 import { MatProgressBarModule } from "@angular/material/progress-bar";
 import { MatTooltipModule } from "@angular/material/tooltip";
 import { ProjectionsService } from "../../services/projections.service";
+import { TranslateService } from "@ngx-translate/core";
 import { Subscription } from "rxjs";
 
 @Component({
@@ -79,7 +80,10 @@ export class StatusContainerComponent implements OnInit, OnDestroy {
   private rebuildIntervalId: any = null;
   currentTimeMs: number = Date.now();
 
-  constructor(private projectionsService: ProjectionsService) {}
+  constructor(
+    private projectionsService: ProjectionsService,
+    private translate: TranslateService,
+  ) {}
 
   ngOnInit(): void {
     // Subscribe only to projections referenced in the template
@@ -587,7 +591,7 @@ export class StatusContainerComponent implements OnInit, OnDestroy {
   }
 
   getShipType(): string {
-    return this.shipInfo?.Type || 'Unknown Ship';
+    return this.shipInfo?.DisplayType || this.shipInfo?.Type || 'Unknown Ship';
   }
 
   getShipIdent(): string {
@@ -740,9 +744,19 @@ export class StatusContainerComponent implements OnInit, OnDestroy {
   }
 
   formatCoreModuleName(module: any): string {
+    const item = String(module?.Item || '').toLowerCase();
+    const knownNames: Record<string, string> = {
+      smallcombat01_nx_armour_reactive: 'module.smallcombat01nxarmourreactive',
+      reactive_armour: 'module.smallcombat01nxarmourreactive',
+      panthermkii_armour_grade3: 'module.panthermkiiarmourgrade3',
+      int_engine_size8_class5: 'module.engine',
+      int_engine_size5_class5_agile: 'module.mkiiagileboostengine',
+    };
+    const moduleKey = knownNames[item];
+    const moduleName = moduleKey ? this.translate.instant(moduleKey) : '';
     const parts = [
       this.formatSlotName(module?.Slot),
-      this.formatCoreModuleLabel(module?.Item)
+      moduleName && moduleName !== moduleKey ? moduleName : this.formatCoreModuleLabel(module?.Item)
     ].filter(Boolean);
 
     return parts.join(' ');

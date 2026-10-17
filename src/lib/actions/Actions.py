@@ -12,6 +12,7 @@ from .actions_web import register_web_actions
 from .Plotter import Plotter
 from .actions_ui import register_ui_actions
 from .actions_genui import register_genui_actions
+from .actions_guardian import register_guardian_actions
 
 from ..Logger import log, show_chat_message
 from ..Screenshot import get_windows_game_window_handle, screenshot_game_window, set_game_window_active
@@ -726,9 +727,15 @@ def fsd_jump(args, projected_states):
     else:
         keys.send('HyperSuperCombination')
 
-    keys.send('SetSpeed100')
+    return_message += "Frame Shift Drive is now charging for a jump"
 
-    return return_message + "Frame Shift Drive is now charging for a jump"
+    # The jump is already underway; a missing throttle binding must not report the action as failed.
+    if 'SetSpeed100' in keys.keys:
+        keys.send('SetSpeed100')
+    else:
+        return_message += ". Throttle was not set to 100% because SetSpeed100 has no keyboard binding"
+
+    return return_message
 
 
 def next_system_in_route(args, projected_states):
@@ -1396,12 +1403,37 @@ def send_message(obj, projected_states):
 
 
 def get_visuals(obj, projected_states):
+    query = obj.get("query", "")
+    loadout = get_state_dict(projected_states, "Loadout")
+    if isinstance(loadout, BaseModel):
+        loadout = loadout.model_dump()
+    if isinstance(loadout, dict):
+        modules = loadout.get("Modules") or []
+        armour = next(
+            (module for module in modules if isinstance(module, dict) and module.get("Slot") == "Armour"),
+            None,
+        )
+        if armour and any(term in query.casefold() for term in ("armour", "armor", "armure", "blindage")):
+            item_id = str(armour.get("Item") or "")
+            response = f"The current ship's installed armor module has technical id {item_id}."
+            engineering = armour.get("Engineering")
+            if isinstance(engineering, dict):
+                blueprint = engineering.get("BlueprintName")
+                level = engineering.get("Level")
+                if blueprint:
+                    response += f" It is engineered with {blueprint}"
+                if level is not None:
+                    response += f" grade {level}"
+                if blueprint or level is not None:
+                    response += "."
+            return response
+
     image = screenshot()
     if not image: return "Unable to take screenshot."
     if not vision_model: return "Vision not enabled."
 
     response_text, _, _ = vision_model.generate(
-        messages=format_image(image, obj.get("query")),
+        messages=format_image(image, query),
     )
 
     return response_text or ""
@@ -2681,6 +2713,8 @@ def register_actions(actionManager: ActionManager, eventManager: EventManager, p
         actionManager, eventManager
     )
 
+    register_guardian_actions(actionManager)
+
     if overlay_show_hud:
         register_genui_actions(
             actionManager, eventManager,
@@ -2689,7 +2723,7 @@ def register_actions(actionManager: ActionManager, eventManager: EventManager, p
         )
 
     if vision_model:
-        actionManager.registerAction('getVisuals', "Describes what's currently visible to the Commander.", {
+        actionManager.registerAction('getVisuals', "Describes what's currently visible to the Commander. For questions about installed ship modules, use the current ship loadout data instead.", {
             "type": "object",
             "properties": {
                 "query": {

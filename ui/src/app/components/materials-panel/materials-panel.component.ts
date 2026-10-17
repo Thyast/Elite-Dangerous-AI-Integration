@@ -187,7 +187,7 @@ const ENCODED_SECTIONS: Record<string, GradeMapWithSource> = {
     2: ["ancientculturaldata"],
     3: ["ancienthistoricaldata"],
     4: ["ancienttechnologicaldata"],
-    5: ["guardian_vesselblueprint"],
+    5: ["guardian_moduleblueprint", "guardian_vesselblueprint", "guardian_weaponblueprint"],
     source: "Guardian obelisks: Synuefe XR-H D11-102, planet 1 B",
   },
   "Thargoid Data": {

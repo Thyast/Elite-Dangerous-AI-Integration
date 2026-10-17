@@ -33,6 +33,11 @@ with open(get_asset_path("ship_sizes.json"), encoding="utf-8") as handle:
 with open(get_asset_path("fsd_stats.json"), encoding="utf-8") as handle:
     fsd_stats_payload = json.load(handle)
 
+with open(get_asset_path("ship_names.json"), encoding="utf-8") as handle:
+    ship_names: dict[str, str] = {
+        key: value for key, value in json.load(handle).items() if not key.startswith("_")
+    }
+
 FSD_STATS = fsd_stats_payload.get("fsd_stats", {})
 FSD_OVERCHARGE_STATS = fsd_stats_payload.get("fsd_overcharge_stats", {})
 FSD_MKii = fsd_stats_payload.get("fsd_mkii", {})
@@ -58,6 +63,7 @@ class ShipInfoStateModel(BaseModel):
     """Current ship information and capabilities."""
     Name: str = Field(default="Unknown", description="Custom ship name")
     Type: str = Field(default="Unknown", description="Ship type identifier")
+    DisplayType: str = Field(default="Unknown", description="Localized-independent public ship type name")
     ShipIdent: str = Field(default="Unknown", description="Ship identification code")
     UnladenMass: float = Field(default=0, description="Ship mass without cargo or fuel (tons)")
     Cargo: float = Field(default=0, description="Current cargo weight (tons)")
@@ -110,7 +116,9 @@ class ShipInfo(Projection[ShipInfoStateModel]):
             if "ShipName" in payload:
                 self.state.Name = payload.get("ShipName") or "Unknown"
             if "Ship" in payload:
-                self.state.Type = payload.get("Ship") or "Unknown"
+                ship_type = payload.get("Ship") or "Unknown"
+                self.state.Type = ship_type
+                self.state.DisplayType = ship_names.get(ship_type, ship_type)
             if "ShipIdent" in payload:
                 self.state.ShipIdent = payload.get("ShipIdent") or "Unknown"
             if "UnladenMass" in payload:
