@@ -4,6 +4,13 @@ import { TranslateService } from "@ngx-translate/core";
 import { TauriService } from "./tauri.service";
 import { RegisteredUIView, PluginUIView } from "./plugin-ui";
 import { TRANSLATIONS } from "./i18n-translations";
+import { MatSnackBar } from "@angular/material/snack-bar";
+import { resolveSettingText } from "./setting-text";
+
+function isNotificationParams(value: unknown): value is Record<string, string | number> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value).every(item => typeof item === "string" || typeof item === "number");
+}
 
 @Injectable({providedIn: "root"})
 export class PluginUIService {
@@ -15,7 +22,8 @@ export class PluginUIService {
   private states: Record<string, Record<string, unknown>> = {};
   private readonly edits = new Map<string, Map<string, {value: unknown}>>();
 
-  constructor(private readonly tauri: TauriService, private readonly translate: TranslateService) {
+  constructor(private readonly tauri: TauriService, private readonly translate: TranslateService,
+    private readonly snackBar: MatSnackBar) {
     tauri.output$.subscribe(message => {
       if (message.type === "ready") {
         this.viewsSubject.next([]);
@@ -48,10 +56,24 @@ export class PluginUIService {
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(message["request_id"]);
-        if (message["success"]) pending.resolve(message["result"]);
+        if (message["success"]) {
+          this.notify(message["result"]);
+          pending.resolve(message["result"]);
+        }
         else pending.reject(new Error(message["error"] || "common.actionError"));
       }
     });
+  }
+
+  private notify(result: unknown): void {
+    if (!result || typeof result !== "object" || !("notification" in result)) return;
+    const params = "params" in result ? result.params : {};
+    if (typeof result.notification !== "string" || !result.notification.trim() || !isNotificationParams(params)) {
+      console.error("Invalid plugin action notification", result);
+      this.snackBar.open(this.translate.instant("common.actionError"), undefined, {duration: 5000});
+      return;
+    }
+    this.snackBar.open(resolveSettingText(this.translate, result.notification, params), undefined, {duration: 4000});
   }
 
   getValue(pluginGuid: string, key: string, fallback: unknown): unknown {

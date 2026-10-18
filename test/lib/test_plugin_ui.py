@@ -14,7 +14,7 @@ from lib.PluginHelper import PluginHelper
 from lib.PluginManager import PluginManager
 from lib.PluginSettingDefinitions import PluginSettings
 from lib.PluginUIDefinitions import PluginUIView, UINode, UIText, UIViewSection
-from lib.PluginUIDefinitions import TextInput, Button, Progress, Select, SelectOption, Toggle
+from lib.PluginUIDefinitions import TextInput, Button, Progress, Select, SelectOption, Toggle, List, ListRow
 from lib.PluginSettingDefinitions import SettingsGrid, ModelProviderDefinition
 from lib.actions import actions_ui
 
@@ -95,6 +95,19 @@ def test_ui_interactions_route_to_owner_and_correlate_success_and_errors(manager
     manager.on_ui_action('missing', 'increment', {'amount': 1}, 'request-4')
     assert emitted[-1][1]['success'] is False
     assert alpha.count == 3 and beta.count == 0
+
+
+def test_action_notifications_are_scoped_to_owner_and_never_published(manager):
+    manager, emitted = manager
+    plugin = register(manager, 'alpha')
+    result = {'notification': '@added', 'params': {'name': '@literal-user-title'}}
+    plugin.on_ui_action = lambda _action, _payload: result
+    manager.on_ui_action('alpha', 'add', {}, 'notify')
+    assert emitted[-1][1]['result'] == {
+        'notification': 'plugin.alpha.added', 'params': {'name': '@literal-user-title'},
+    }
+    assert result['notification'] == '@added'
+    assert 'notification' not in manager.plugin_ui['alpha']
 
 
 def test_event_hook_updates_plugin_view_through_public_api(manager):
@@ -229,6 +242,54 @@ def register_unified(manager, guid='unified'):
     manager.plugin_list[guid] = plugin
     manager.register_settings()
     return plugin
+
+
+def test_plugin_can_reset_a_declared_input_without_persistence_or_callbacks(manager, monkeypatch):
+    manager, emitted = manager
+    plugin = register_unified(manager)
+    other = register_unified(manager, 'other')
+    saved = []
+    monkeypatch.setattr('lib.PluginManager.save_config', lambda config: saved.append(deepcopy(config)))
+    manager.on_ui_action('unified', 'ui_changed', {'key': 'search', 'value': 'filter'}, 'filter')
+    changes = deepcopy(plugin.changes)
+    emitted.clear()
+    plugin.set_ui_value('search', '')
+    plugin.set_ui_value('transient', 'cleared')
+    assert plugin.get_ui_state()['search'] == ''
+    assert plugin.get_ui_state()['transient'] == 'cleared'
+    assert other.get_ui_state()['transient'] == 'view only'
+    assert plugin.changes == changes
+    assert plugin.settings == {} and saved == [] and emitted == []
+    plugin.publish_ui()
+    assert manager.plugin_ui['unified']['state']['search'] == ''
+    assert manager.plugin_ui['unified']['state']['transient'] == 'cleared'
+    for key in ('missing', 'refresh', 'progress'):
+        with pytest.raises(ValueError, match='common.invalidAction'):
+            plugin.set_ui_value(key, '')
+    plugin.model_providers[0]['settings_config'][0]['fields'][0]['readonly'] = True
+    with pytest.raises(ValueError, match='common.invalidAction'):
+        plugin.set_ui_value('enabled', True)
+
+
+def test_list_summary_uses_the_shared_input_state_and_callback(manager):
+    manager, emitted = manager
+    plugin = register_unified(manager)
+    views = plugin.get_ui_views()
+    views[0]['sections'][0]['content'].append(List(type='list', items=[
+        ListRow(key='item', title='Item', summary=[
+            TextInput(key='nested', type='text', default_value='initial', min_length=None, max_length=None),
+        ]),
+    ]))
+    plugin.get_ui_views = lambda: views
+    plugin.publish_ui()
+    assert manager.plugin_ui['unified']['state']['nested'] == 'initial'
+    manager.on_ui_action('unified', 'ui_changed', {'key': 'nested', 'value': 'changed'}, 'summary-input')
+    assert emitted[-1][1]['success'] is True
+    assert plugin.changes[-1][:2] == ('nested', 'changed')
+    plugin.set_ui_value('nested', 'reset')
+    plugin.publish_ui()
+    assert manager.plugin_ui['unified']['state']['nested'] == 'reset'
+    assert plugin.settings == {}
 
 
 def test_shared_callback_exposes_current_state_without_automatic_persistence(manager, monkeypatch):

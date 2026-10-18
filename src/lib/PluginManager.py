@@ -367,7 +367,7 @@ class PluginManager:
                 if not isinstance(key, str) or not key:
                     raise ValueError('Plugin UI inputs must have nonempty keys')
                 fields[key] = value
-            for key in ('grids', 'fields', 'content', 'sections', 'children', 'items', 'details'):
+            for key in ('grids', 'fields', 'content', 'sections', 'children', 'items', 'details', 'summary'):
                 child = value.get(key)
                 if isinstance(child, (list, dict)):
                     fields.update(self._input_fields(child))
@@ -405,6 +405,12 @@ class PluginManager:
             self._ui_values[plugin] = previous
             raise
 
+    def _set_ui_value(self, plugin: PluginBase, key: str, value: Any) -> None:
+        fields = {**self._setting_inputs(plugin), **self._input_fields(plugin.get_ui_views())}
+        if not isinstance(key, str) or key not in fields or fields[key].get('readonly'):
+            raise ValueError('common.invalidAction')
+        self._ui_values[plugin][key] = deepcopy(value)
+
     def broadcast_plugin_ui(self) -> None:
         emit_message('plugin_ui', plugins=self.plugin_ui)
         emit_message('plugin_settings_configs', plugin_settings_configs=self.plugin_settings_configs,
@@ -430,7 +436,7 @@ class PluginManager:
             if action == 'ui_changed':
                 result = self._on_ui_changed(plugin, payload)
             else:
-                result = plugin.on_ui_action(action, payload)
+                result = self._namespaces[plugin].presentation(plugin.on_ui_action(action, payload))
             self._refresh_plugin_setting_contents(plugin)
             plugin.publish_ui()
             emit_message('plugin_ui_result', request_id=request_id, plugin_guid=plugin_guid, success=True, result=result)

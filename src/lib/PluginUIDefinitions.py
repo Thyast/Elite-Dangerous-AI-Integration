@@ -121,6 +121,8 @@ class ListAction(TypedDict):
     label: NotRequired[str]
     danger: NotRequired[bool]
     inline_edit: NotRequired[bool]
+    secondary: NotRequired[bool]
+    confirmation: NotRequired[str]
 
 
 class ListRow(TypedDict):
@@ -134,12 +136,15 @@ class ListRow(TypedDict):
     pending: NotRequired[bool]
     tone: NotRequired[str]
     details: NotRequired[list['UIComponent']]
+    summary: NotRequired[list['UIComponent']]
+    highlighted: NotRequired[bool]
 
 
 class List(UINode):
     items: NotRequired[list[ListRow]]
     row_actions: NotRequired[list[ListAction]]
     count_labels: NotRequired[dict[str, str]]
+    details_collapsible: NotRequired[bool]
 
 
 UIComponent = UINode | TextInput | Filter | TextArea | NumberInput | Toggle | Select | Button | Paragraph | Error | Text | Heading | Section | Inline | Progress | Action | List

@@ -27,6 +27,7 @@ export interface UIComponent {
   items?: ListRow[];
   row_actions?: ListAction[];
   count_labels?: {one: string; many: string};
+  details_collapsible?: boolean;
   text?: UIText;
   tone?: "default" | "info" | "warning" | "success" | "muted" | "danger";
   outlined?: boolean;
@@ -54,6 +55,8 @@ export interface ListAction {
   label?: string;
   danger?: boolean;
   inline_edit?: boolean;
+  secondary?: boolean;
+  confirmation?: string;
 }
 
 export interface ListRow {
@@ -67,6 +70,8 @@ export interface ListRow {
   pending?: boolean;
   tone?: string;
   details?: UIComponent[];
+  summary?: UIComponent[];
+  highlighted?: boolean;
 }
 
 export interface UIViewSection {

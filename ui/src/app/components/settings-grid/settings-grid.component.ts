@@ -8,6 +8,7 @@ import { MatExpansionModule } from "@angular/material/expansion";
 import { MatButtonModule } from "@angular/material/button";
 import { MatIconModule } from "@angular/material/icon";
 import { PluginContentComponent } from "../plugin-content/plugin-content.component";
+import { MatTooltipModule } from "@angular/material/tooltip";
 
 /**
  * A reusable component for rendering a settings grid with a label and fields.
@@ -23,6 +24,7 @@ import { PluginContentComponent } from "../plugin-content/plugin-content.compone
         MatButtonModule,
         MatIconModule,
         PluginContentComponent,
+        MatTooltipModule,
     ],
     templateUrl: "./settings-grid.component.html",
     styleUrl: "./settings-grid.component.css",

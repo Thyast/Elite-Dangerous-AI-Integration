@@ -59,6 +59,7 @@ isolation for in-process Python plugins, not a process sandbox.
 | `on_ui_action(action, payload) -> Any` | Handle an interaction and return a JSON-serializable result, or raise an error. |
 | `on_ui_changed(key, value, state)` | Handle an input edit in either context with a detached snapshot of all current input values. |
 | `get_ui_state()` | Return the same detached input snapshot, including from button/action callbacks. |
+| `set_ui_value(key, value)` | Reset a declared, editable input for this plugin without saving or invoking input callbacks. Raises before registration or for unknown/readonly inputs; call `publish_ui()` afterward. |
 | `publish_ui()` | Refresh and broadcast settings, views, input state, translations and provider settings. |
 | `publish_settings()` | Deprecated alias of `publish_ui()`. |
 | `get_app_config()` | Return a detached copy of application configuration with only this plugin's settings section, or `{}` before registration. |
@@ -262,10 +263,23 @@ Without `tabs`, grids retain flat rendering. With `tabs`, the plugin chooses whi
 grids to include and their order; the host does not infer tabs from grid names.
 
 Generic list rows support `key`, `title`, optional `title_key`, `suffix`, `meta`,
-`params`, `group`, `pending`, `tone`, and `details: list[UINode]`. List fields may
+`params`, `group`, `pending`, `tone`, `summary: list[UIComponent]`,
+`highlighted`, and `details: list[UIComponent]`. List fields may
 supply `count_labels: {one: <key>, many: <key>}` using a `count` parameter; absent
 labels fall back to the host's generic item count. `row_actions` belongs to the
 list field, not an individual row.
+
+Set `details_collapsible=True` on a list to put row details behind a native
+disclosure, initially closed; the compact `summary` stays visible. Without this
+flag existing detail rendering is unchanged. A newly `highlighted` row is
+accented and reveals its collapsed group, which the user can collapse again.
+
+Row actions are visible icon buttons by default. `secondary=True` moves an
+action into the row's overflow menu. An optional `confirmation` translation key
+opens the standard confirmation dialog before performing the action (including
+inline edits). Its interpolation parameters include row `params` plus `title`.
+Cancellation does not invoke the backend. Enforcement of data constraints must
+still happen in the plugin.
 
 List row buttons continue to call `on_settings_button('<action>:<row-key>', value)`;
 inline edits pass the edited value. Grid header actions and ordinary buttons
@@ -381,6 +395,14 @@ The reserved action `settings_button` forwards `payload.key` and optional string
 `payload.value` to `on_settings_button`. When overriding `on_ui_action`, delegate
 unhandled actions to `super()` to preserve that behavior. The legacy
 `plugin_settings_button` command remains supported for existing callers.
+
+For transient success feedback, an action can return
+`{"notification": "@added", "params": {"name": "Item"}}`. The core scopes
+`notification` and list-action `confirmation` translation references to the
+plugin owner, preserving literal parameter values. The frontend displays the
+translated notification for four seconds only after a correlated successful
+action result. It is not a field or durable state: repeated UI publications do
+not replay it. Errors should still be raised or shown explicitly inline.
 
 UI callbacks execute synchronously in the backend command reader. The frontend
 waits for the backend result rather than considering a successful send to be

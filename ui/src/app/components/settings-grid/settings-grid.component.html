@@ -56,6 +56,7 @@
             <button mat-icon-button type="button"
                     class="grid-header-action"
                     [attr.aria-label]="resolve(grid.header_action.label)"
+                    [matTooltip]="resolve(grid.header_action.label)"
                     (click)="onButtonClick(grid.header_action.key)">
                 <mat-icon>{{ grid.header_action.icon }}</mat-icon>
             </button>
