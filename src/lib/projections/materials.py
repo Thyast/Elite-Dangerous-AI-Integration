@@ -137,7 +137,7 @@ class Materials(Projection[MaterialsStateModel]):
             update_timestamp()
             return
 
-        if event_name == "MaterialCollected":
+        if event_name in {"MaterialCollected", "MaterialDiscarded"}:
             count_value = content.get("Count", 0)
             name_value = content.get("Name")
             category_value = content.get("Category")
@@ -145,7 +145,7 @@ class Materials(Projection[MaterialsStateModel]):
             if isinstance(count_value, int):
                 update_material(
                     name_value if isinstance(name_value, str) else None,
-                    count_value,
+                    count_value if event_name == "MaterialCollected" else -count_value,
                     category_value if isinstance(category_value, str) else None,
                     localized_value if isinstance(localized_value, str) else None,
                 )

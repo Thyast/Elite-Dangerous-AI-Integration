@@ -3250,7 +3250,7 @@ class PromptGenerator:
 
                         # Format module information
                         module_info = {
-                            # "Slot": slot,
+                            "Slot": slot,
                             "Item": item
                         }
 
@@ -3265,6 +3265,10 @@ class PromptGenerator:
                                 "Blueprint": eng_info.get('BlueprintName', 'Unknown'),
                                 "Level": eng_info.get('Level', 0),
                             }
+                            if eng_info.get('Quality') is not None:
+                                engineering["Quality"] = eng_info['Quality']
+                            if eng_info.get('ExperimentalEffect'):
+                                engineering["ExperimentalEffect"] = eng_info['ExperimentalEffect']
 
                             # Add experimental effect if present
                             if eng_info.get('ExperimentalEffect_Localised'):
