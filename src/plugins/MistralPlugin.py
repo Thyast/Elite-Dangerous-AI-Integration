@@ -14,6 +14,7 @@ from lib.Models import (
 )
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginSettingDefinitions import ModelProviderDefinition
+from plugins.ProviderPluginHelpers import iter_sse_data
 
 
 MISTRAL_API_URL = "https://api.mistral.ai/v1"
@@ -171,38 +172,20 @@ class MistralTTSModel(TTSModel):
         )
 
     def _iter_audio_deltas(self, response: httpx.Response) -> Iterable[bytes]:
-        data_lines: list[str] = []
-        for line in response.iter_lines():
-            if line == "":
-                if not data_lines:
-                    continue
-                data = "\n".join(data_lines)
-                data_lines.clear()
-                if data == "[DONE]":
-                    return
-                event = json.loads(data)
-                event_type = event.get("type") if isinstance(event, dict) else None
-                if event_type == "speech.audio.done":
-                    return
-                if event_type == "speech.audio.delta":
-                    encoded_audio = event.get("audio_data")
-                    if not isinstance(encoded_audio, str) or not encoded_audio:
-                        raise LLMError("TTS Mistral audio event did not contain audio data")
-                    yield base64.b64decode(encoded_audio, validate=True)
-                elif isinstance(event_type, str) and "error" in event_type:
-                    raise LLMError(f"TTS Mistral stream error: {event}")
-                continue
-
-            if line.startswith("data:"):
-                data_lines.append(line[5:].lstrip())
-
-        if data_lines:
-            event = json.loads("\n".join(data_lines))
-            if isinstance(event, dict) and event.get("type") == "speech.audio.delta":
+        for data in iter_sse_data(response.iter_lines()):
+            if data == "[DONE]":
+                return
+            event = json.loads(data)
+            event_type = event.get("type") if isinstance(event, dict) else None
+            if event_type == "speech.audio.done":
+                return
+            if event_type == "speech.audio.delta":
                 encoded_audio = event.get("audio_data")
                 if not isinstance(encoded_audio, str) or not encoded_audio:
                     raise LLMError("TTS Mistral audio event did not contain audio data")
                 yield base64.b64decode(encoded_audio, validate=True)
+            elif isinstance(event_type, str) and "error" in event_type:
+                raise LLMError(f"TTS Mistral stream error: {event}")
 
     def _to_pcm16(self, audio_deltas: Iterable[bytes]) -> Iterable[bytes]:
         float32_buffer = bytearray()

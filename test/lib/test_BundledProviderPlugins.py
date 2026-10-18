@@ -20,7 +20,7 @@ from lib.Models import (
 )
 from lib.PluginBase import PluginManifest
 from plugins.EdgeTTSPlugin import EDGE_TTS_PLUGIN_GUID, EdgeTTSModel, EdgeTTSPlugin
-from plugins.GoogleAIStudioPlugin import GOOGLE_AI_STUDIO_API_URL, GOOGLE_AI_STUDIO_PLUGIN_GUID, GoogleAIStudioPlugin, GoogleAIStudioLLMModel
+from plugins.GoogleAIStudioPlugin import GOOGLE_AI_STUDIO_API_URL, GOOGLE_AI_STUDIO_PLUGIN_GUID, GoogleAIStudioPlugin, GoogleAIStudioLLMModel, GoogleAIStudioTTSModel
 from plugins.MistralPlugin import MISTRAL_API_URL, MISTRAL_PLUGIN_GUID, MistralPlugin
 from plugins.OpenAICompatiblePlugin import OPENAI_COMPATIBLE_PLUGIN_GUID, OpenAICompatiblePlugin
 from plugins.OpenAIPlugin import OPENAI_API_URL, OPENAI_PLUGIN_GUID, OpenAIPlugin
@@ -68,6 +68,9 @@ def test_bundled_tts_providers_define_character_scoped_voice_settings() -> None:
     }
     assert voice_setting_keys(EdgeTTSPlugin(manifest(EDGE_TTS_PLUGIN_GUID, "Edge")), "tts") == {"voice"}
     assert voice_setting_keys(MistralPlugin(manifest(MISTRAL_PLUGIN_GUID, "Mistral")), "tts") == {"voice"}
+    assert voice_setting_keys(GoogleAIStudioPlugin(manifest(GOOGLE_AI_STUDIO_PLUGIN_GUID, "Google")), "tts") == {
+        "voice", "instructions",
+    }
     compatible = OpenAICompatiblePlugin(manifest(OPENAI_COMPATIBLE_PLUGIN_GUID, "Compatible"))
     assert voice_setting_keys(compatible, "custom-tts") == {"voice", "instructions"}
     assert voice_setting_keys(compatible, "local-tts") == {"voice", "instructions"}
@@ -107,9 +110,10 @@ def test_openai_provider_definitions_and_models() -> None:
 
 def test_google_provider_definitions_and_models() -> None:
     plugin = GoogleAIStudioPlugin(manifest(GOOGLE_AI_STUDIO_PLUGIN_GUID, "Google"))
-    assert provider_ids(plugin) == {"llm", "agent-llm", "vlm", "stt", "embedding"}
+    assert provider_ids(plugin) == {"llm", "agent-llm", "vlm", "stt", "tts", "embedding"}
     assert isinstance(plugin.create_model("llm", {}), GoogleAIStudioLLMModel)
     assert isinstance(plugin.create_model("stt", {}), OpenAIMultiModalSTTModel)
+    assert isinstance(plugin.create_model("tts", {}), GoogleAIStudioTTSModel)
     assert isinstance(plugin.create_model("embedding", {}), OpenAIEmbeddingModel)
 
 

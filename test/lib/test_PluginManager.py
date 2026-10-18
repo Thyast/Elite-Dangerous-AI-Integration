@@ -17,6 +17,7 @@ from lib.PluginManager import PluginManager
 from lib.Logger import ModelUsageStats
 from lib.Models import EmbeddingModel, LLMModel, OpenAILLMModel, OpenAIResponsesLLMModel, STTModel, TTSModel
 from plugins.OpenAIPlugin import OPENAI_PLUGIN_GUID
+from plugins.GoogleAIStudioPlugin import GOOGLE_AI_STUDIO_PLUGIN_GUID, GoogleAIStudioTTSModel
 
 
 class MigratingPlugin(PluginBase):
@@ -133,6 +134,26 @@ def test_default_provider_plugins_register_and_create_models() -> None:
 
     assert isinstance(model, OpenAIResponsesLLMModel)
     assert OPENAI_PLUGIN_GUID in manager.builtin_plugin_guids
+
+
+def test_google_tts_registers_and_creates_model_with_tts_key() -> None:
+    config: Any = {"plugin_settings": {
+        GOOGLE_AI_STUDIO_PLUGIN_GUID: {"api_key": "shared-key", "tts_api_key": "speech-key"},
+    }}
+    manager = PluginManager(config)
+    manager.load_default_plugins()
+    manager.register_settings()
+
+    provider = manager.get_plugin_provider(GOOGLE_AI_STUDIO_PLUGIN_GUID, "tts")
+    assert provider is not None
+    assert provider["kind"] == "tts"
+    model = manager.create_plugin_model(GOOGLE_AI_STUDIO_PLUGIN_GUID, "tts", "tts")
+    assert isinstance(model, GoogleAIStudioTTSModel)
+    try:
+        assert model.client.headers["x-goog-api-key"] == "speech-key"
+        assert model.model_name == "gemini-3.8-flash-lite-tts"
+    finally:
+        model.client.close()
 
 
 def test_metadata_free_third_party_provider_contract_remains_compatible() -> None:

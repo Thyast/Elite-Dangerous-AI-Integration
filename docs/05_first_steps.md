@@ -15,6 +15,18 @@ The AI Character Prompt is a description of the AI's personality. You can modify
 
 The integration uses your microphone for speech recognition. We support voice activation and push-to-talk (PTT). When using voice activation, we recommend using headphones to avoid the AI hearing itself, which causes a feedback loop.
 
+### Google AI Studio text-to-speech
+
+Select **Google AI Studio** as the TTS / Speaker provider and enter your Google AI Studio API key. The default speech model is **`gemini-3.8-flash-lite-tts`**. You can set a separate TTS API key or change the model in the provider settings. This integration uses the native Gemini Interactions API, not Google's OpenAI-compatible endpoint.
+
+In the character settings, choose a voice (default: **Kore**) and optionally enter **Voice Instructions**, for example, "Speak French with a calm, warm tone and a measured pace." These directions are sent as structured speech metadata, separately from the words to speak. Use these instructions to control pacing; the legacy numeric speech-speed setting is not sent to this API.
+
+Audio streams as raw 16-bit little-endian PCM at 24 kHz, mono, matching the application playback and audio effects pipeline. The integration requests `audio/l16` explicitly to avoid playing a WAV header as audio. Requests use `store: false` rather than saving Interactions history. Selecting a Google API key does not automatically replace your TTS provider; Google TTS is an explicit opt-in.
+
+According to [Google's model documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash-lite-tts), Flash-Lite TTS prioritizes latency, throughput and cost, supports French, and shares its API schema with **`gemini-3.8-flash-tts`**. The latter prioritizes voice fidelity, expressive acting and difficult pronunciations, and can be selected in the same model field. These are the vendor's positioning claims, not an in-app listening benchmark.
+
+Model access, quotas and billing depend on your Google project; an existing STT key does not guarantee access to this TTS model. HTTP errors (including 403/429), stream errors and malformed audio are reported rather than silently falling back to another provider. For a subjective quality check, compare the same French phrases and voice in [Google AI Studio's speech playground](https://aistudio.google.com/generate-speech), including names, numbers and acronyms used in-game.
+
 ## Event Triggers
 
 Changes in the game world can trigger events that the AI can respond to. For example, when the ship is in danger, the AI can be programmed to inform you. These reactions are configured in the UI in the **Reactions** tab of the settings, where you can choose to silence some events or have the AI respond to others, making the AI more or less chatty.
