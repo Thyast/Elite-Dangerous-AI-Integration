@@ -644,11 +644,13 @@
                         <mat-form-field class="vr-anchor-field">
                             <mat-label>VR Anchor</mat-label>
                             <mat-select [(ngModel)]="config.overlay_vr_anchor"
-                                        (ngModelChange)="onConfigChange({overlay_vr_anchor: $event})">
+                                        (ngModelChange)="onVrConfigChange({overlay_vr_anchor: $event})">
                                 <mat-option value="head">Head Locked</mat-option>
                                 <mat-option value="world">World Locked</mat-option>
                             </mat-select>
                         </mat-form-field>
+
+                        <app-vr-overlay-preview [config]="config" />
 
                         <section class="vr-control-group">
                             <h4>Placement</h4>
@@ -656,19 +658,19 @@
                                 <div class="overlay-slider-field">
                                     <label>Horizontal: {{ config.overlay_vr_horizontal_offset }} m</label>
                                     <mat-slider min="-2" max="2" step="0.05" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_horizontal_offset" (ngModelChange)="onConfigChange({overlay_vr_horizontal_offset: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_horizontal_offset" (ngModelChange)="onVrConfigChange({overlay_vr_horizontal_offset: $event})">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Vertical: {{ config.overlay_vr_vertical_offset }} m</label>
                                     <mat-slider min="-1.5" max="1.5" step="0.05" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_vertical_offset" (ngModelChange)="onConfigChange({overlay_vr_vertical_offset: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_vertical_offset" (ngModelChange)="onVrConfigChange({overlay_vr_vertical_offset: $event})">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Distance: {{ config.overlay_vr_distance_offset }} m</label>
                                     <mat-slider min="-0.75" max="1.5" step="0.01" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_distance_offset" (ngModelChange)="onConfigChange({overlay_vr_distance_offset: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_distance_offset" (ngModelChange)="onVrConfigChange({overlay_vr_distance_offset: $event})">
                                     </mat-slider>
                                 </div>
                             </div>
@@ -680,13 +682,13 @@
                                 <div class="overlay-slider-field">
                                     <label>Pitch: {{ config.overlay_vr_tilt_degrees }}&deg;</label>
                                     <mat-slider min="-90" max="90" step="1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_tilt_degrees" (ngModelChange)="onConfigChange({overlay_vr_tilt_degrees: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_tilt_degrees" (ngModelChange)="onVrConfigChange({overlay_vr_tilt_degrees: $event})">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Yaw: {{ config.overlay_vr_yaw_degrees }}&deg;</label>
                                     <mat-slider min="-90" max="90" step="1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_yaw_degrees" (ngModelChange)="onConfigChange({overlay_vr_yaw_degrees: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_yaw_degrees" (ngModelChange)="onVrConfigChange({overlay_vr_yaw_degrees: $event})">
                                     </mat-slider>
                                 </div>
                             </div>
@@ -698,13 +700,13 @@
                                 <div class="overlay-slider-field">
                                     <label>Size: {{ config.overlay_vr_size_meters }} m</label>
                                     <mat-slider min="0.1" max="3" step="0.1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_size_meters" (ngModelChange)="onConfigChange({overlay_vr_size_meters: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_size_meters" (ngModelChange)="onVrConfigChange({overlay_vr_size_meters: $event})">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Curvature: {{ config.overlay_vr_curvature * 360 }}&deg;</label>
                                     <mat-slider min="0" max="180" step="1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_curvature * 360" (ngModelChange)="onConfigChange({overlay_vr_curvature: $event / 360})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_curvature * 360" (ngModelChange)="onVrConfigChange({overlay_vr_curvature: $event / 360})">
                                     </mat-slider>
                                 </div>
                             </div>

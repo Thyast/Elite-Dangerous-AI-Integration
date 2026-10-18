@@ -47,6 +47,7 @@ import { ScreenInfo } from "../../models/screen-info";
 import QRCode from "qrcode";
 import { FontScaleService } from "../../services/font-scale.service";
 import { PluginUIService } from "../../services/plugin-ui.service";
+import { VrOverlayPreviewComponent } from "../vr-overlay-preview/vr-overlay-preview.component";
 
 export type AdvancedSettingsFocusTarget =
     | "commander-name"
@@ -88,6 +89,7 @@ type AdvancedSettingsPanel = "commander" | "llm" | "agent-llm" | "stt" | "tts" |
         SettingsGridComponent,
         MatSliderModule,
         MatTooltipModule,
+        VrOverlayPreviewComponent,
     ],
     templateUrl: "./advanced-settings.component.html",
     styleUrl: "./advanced-settings.component.css",
@@ -858,6 +860,13 @@ export class AdvancedSettingsComponent implements OnDestroy {
         const update: Partial<Config> = {};
         update[field] = normalized;
         this.onConfigChange(update);
+    }
+
+    onVrConfigChange(partialConfig: Partial<Config>): void {
+        if (this.config) {
+            this.config = { ...this.config, ...partialConfig };
+        }
+        void this.onConfigChange(partialConfig);
     }
 
     async onConfigChange(partialConfig: Partial<Config>) {

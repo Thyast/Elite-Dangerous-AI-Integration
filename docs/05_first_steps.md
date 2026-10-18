@@ -34,6 +34,12 @@ Avatars allow you to give the AI a face. You provide a 2×2 grid with equal sect
 | <img src="../ui/src/assets/cn_avatar_default.png" alt="Default avatar grid" width="120" /> | **Top-left:** the character is listening<br>**Top-right:** the character is speaking<br>**Bottom-left:** the character is thinking<br>**Bottom-right:** the character is performing searches or actions |
 |----------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 
+## VR Overlay Placement
+
+In **Advanced Settings > Overlay**, select **VR Overlay** to adjust the window's placement. The live preview shows an empty orange forward-view frame with horizontal and vertical center axes, and the overlay window in blue. It updates as you adjust the horizontal and vertical offsets, distance, pitch, yaw, size, and curvature, without requiring a connected VR headset.
+
+The preview uses an illustrative 90-degree horizontal field of view, not your headset's exact field of view. Parts of the blue window outside the orange frame are outside this reference view. For **World Locked**, the reference viewer faces forward at an eye height of 1.4 m; moving your headset changes the actual view.
+
 ## Plugins
 
 Explore [Plugins](./plugins/index.md) to enhance your experience: fast, on-device speech-to-text (STT), text-to-speech (TTS), and embedding.
