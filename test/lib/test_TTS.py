@@ -1,6 +1,7 @@
 import base64
+import json
 from math import ceil
-from httpx import Response
+from httpx import Client, MockTransport, Response
 import pytest
 from unittest.mock import MagicMock
 from time import sleep
@@ -8,6 +9,7 @@ from src.lib.Config import map_character_tts_postprocessing
 from src.lib.TTS import TTS
 from src.lib.Models import OpenAITTSModel
 from src.plugins.EdgeTTSPlugin import EdgeTTSModel
+from src.plugins.GoogleAIStudioPlugin import GoogleAIStudioTTSModel
 from src.plugins.MistralPlugin import MistralTTSModel
 import numpy as np
 
@@ -145,6 +147,41 @@ def test_tts_does_not_inject_legacy_voice_into_provider_settings(mock_pyaudio):
     mock_model.synthesize_with_settings.assert_called_once_with("Hello", {
         "description": "Warm and conversational.",
     })
+
+
+def test_google_tts_integrates_character_settings_voice_override_and_audio_effects(mock_pyaudio):
+    pcm = np.array([-12000, -4000, 0, 4000, 12000], dtype="<i2").tobytes()
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        events = [
+            {"event_type": "step.delta", "delta": {
+                "type": "audio", "mime_type": "audio/l16",
+                "data": base64.b64encode(pcm).decode("ascii"),
+            }},
+            {"event_type": "interaction.completed", "interaction": {"status": "completed"}},
+        ]
+        return Response(200, headers={"Content-Type": "text/event-stream"}, content="".join(
+            f"data: {json.dumps(event)}\n\n" for event in events
+        ))
+
+    model = GoogleAIStudioTTSModel("test-google-key")
+    model.client.close()
+    with Client(base_url="https://generativelanguage.googleapis.com/v1beta/", transport=MockTransport(respond)) as client:
+        model.client = client
+        tts = TTS(model, voice_settings={"voice": "Kore", "instructions": "Speak warmly in French."})
+        audio = tts._stream_audio("Bonjour", voice_override="Puck")
+        result = b"".join(tts._postprocess_audio(audio, map_character_tts_postprocessing({"volume": 0.5})))
+
+    assert np.array_equal(
+        np.frombuffer(result, dtype="<i2"),
+        np.array([-6000, -2000, 0, 2000, 6000], dtype="<i2"),
+    )
+    assert requests[0]["generation_config"]["speech_config"] == [{"voice": "Puck"}]
+    assert requests[0]["input"][0]["content"][0]["annotations"] == [
+        {"type": "speech_metadata", "style": "Speak warmly in French."},
+    ]
 
 
 def test_openai_tts_playback_with_voice_instructions(mock_pyaudio, mock_openai):
