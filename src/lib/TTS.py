@@ -267,6 +267,8 @@ class TTS:
                     if not isinstance(file_path, str) or not file_path:
                         continue
                     self._playback_audio_file(file_path, stream)
+                elif item_type == "listening_end_tone":
+                    self._playback_listening_end_tone(stream)
                 else:
                     if not isinstance(text, str) or not text:
                         continue
@@ -570,6 +572,28 @@ class TTS:
                 break
             stream.write(
                 self._apply_output_gain_pcm16(frame.tobytes()),
+            )
+
+    def _playback_listening_end_tone(self, stream: PCMOutput) -> None:
+        sample_rate = 24_000
+        tone_samples = int(0.09 * sample_rate)
+        fade_samples = int(0.01 * sample_rate)
+        envelope = np.ones(tone_samples)
+        envelope[:fade_samples] = np.linspace(0, 1, fade_samples)
+        envelope[-fade_samples:] = np.linspace(1, 0, fade_samples)
+        time_axis = np.arange(tone_samples) / sample_rate
+        tones = [
+            (np.sin(2 * np.pi * frequency * time_axis) * envelope * 0.06 * 32767).astype(np.int16)
+            for frequency in (660, 440)
+        ]
+        silence = np.zeros(int(0.03 * sample_rate), dtype=np.int16)
+        audio = np.concatenate((tones[0], silence, tones[1])).tobytes()
+        chunk_size = self.frames_per_buffer * self.sample_size
+        for offset in range(0, len(audio), chunk_size):
+            if self.is_aborted:
+                break
+            stream.write(
+                self._apply_output_gain_pcm16(audio[offset:offset + chunk_size]),
             )
 
     def _number_to_text(self, match: re.Match[str]):
@@ -1367,6 +1391,19 @@ class TTS:
                     "line": line,
                 },
             )
+        return line
+
+    def play_listening_end_tone(self) -> TTSLine:
+        line = TTSLine()
+        with self._queue_lock:
+            if self._shutdown.is_set():
+                line.mark_completed()
+                return line
+            self.read_queue.put({
+                "type": "listening_end_tone",
+                "retry_on_error": False,
+                "line": line,
+            })
         return line
 
     def play_audio_file(
