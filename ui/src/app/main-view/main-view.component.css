@@ -115,6 +115,41 @@
   flex-shrink: 0;
 }
 
+.chat-filter-anchor {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.chat-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-overlay-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  padding: 0 6px;
+  border: 1px solid var(--hud-border);
+  border-top: 0;
+  border-right: 0;
+  background: #020100;
+}
+
+.chat-events-label {
+  color: #4CAF50;
+  font-family: var(--hud-font);
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .button-container {
   display: flex;
   flex: 0;

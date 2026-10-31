@@ -13,6 +13,8 @@ import {Config, ConfigService} from "../services/config.service";
 import { Subscription } from "rxjs";
 import { ChatService } from "../services/chat.service.js";
 import { MatTabsModule } from "@angular/material/tabs";
+import { MatTooltipModule } from "@angular/material/tooltip";
+import { MatCheckboxModule } from "@angular/material/checkbox";
 import { ChatContainerComponent } from "../components/chat-container/chat-container.component.js";
 import { StatusContainerComponent } from "../components/status-container/status-container.component";
 import { StorageContainerComponent } from "../components/storage-container/storage-container.component";
@@ -25,6 +27,8 @@ import { NavigationContainerComponent } from "../components/navigation-container
 import { MetricsService } from "../services/metrics.service.js";
 import { PolicyService } from "../services/policy.service.js";
 import {UIService} from "../services/ui.service";
+
+const CHAT_SHOW_EVENTS_KEY = "covas.ui.chat-show-events";
 
 @Component({
     selector: "app-main-view",
@@ -39,6 +43,8 @@ import {UIService} from "../services/ui.service";
         SettingsMenuComponent,
         InputContainerComponent,
         MatTabsModule,
+        MatTooltipModule,
+        MatCheckboxModule,
         ChatContainerComponent,
         StatusContainerComponent,
         StorageContainerComponent,
@@ -77,6 +83,12 @@ export class MainViewComponent implements OnInit, OnDestroy {
     public usageDisclaimerAccepted = false;
     public isQuestEditorOpen = false;
     private systemSubscription?: Subscription;
+    showChatEvents = localStorage.getItem(CHAT_SHOW_EVENTS_KEY) !== "false";
+
+    setShowChatEvents(show: boolean): void {
+        localStorage.setItem(CHAT_SHOW_EVENTS_KEY, String(show));
+        this.showChatEvents = show;
+    }
 
     constructor(
         private tauri: TauriService,

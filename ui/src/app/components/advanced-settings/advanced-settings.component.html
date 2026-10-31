@@ -1370,6 +1370,35 @@
             </div>
         </mat-expansion-panel>
 
+        <mat-expansion-panel>
+            <mat-expansion-panel-header>
+                <mat-panel-title>
+                    <mat-icon>forum</mat-icon>
+                    Chat Settings
+                </mat-panel-title>
+            </mat-expansion-panel-header>
+            <p>These settings only affect chat display. Events still reach the AI immediately;
+                messages, replies, and actions are never delayed.</p>
+            <mat-slide-toggle
+                [ngModel]="chatEventGrouping.enabled"
+                (ngModelChange)="setChatEventGrouping($event, chatEventGrouping.delaySeconds)">
+                Group repeated events
+            </mat-slide-toggle>
+            <mat-form-field>
+                <mat-label>Inactivity delay</mat-label>
+                <mat-select
+                    [ngModel]="chatEventGrouping.delaySeconds"
+                    [disabled]="!chatEventGrouping.enabled"
+                    (ngModelChange)="setChatEventGrouping(chatEventGrouping.enabled, $event)">
+                    @for (delay of chatEventGroupingDelays; track delay) {
+                        <mat-option [value]="delay">{{ delay }} s</mat-option>
+                    }
+                </mat-select>
+            </mat-form-field>
+            <p>Each event type is grouped independently until the selected inactivity delay
+                expires, or for 5 seconds at most. Settings are remembered locally.</p>
+        </mat-expansion-panel>
+
         @if (config && (config.commander_name || config.api_key)) {
             <mat-expansion-panel>
                 <mat-expansion-panel-header>

@@ -37,7 +37,7 @@ import { ModelProviderDefinition, SettingsGrid } from "../../services/plugin-set
 import { SettingsGridComponent } from "../settings-grid/settings-grid.component";
 import { MatDialog } from "@angular/material/dialog";
 import { ConfirmationDialogComponent } from "../confirmation-dialog/confirmation-dialog.component";
-import { ChatService } from "../../services/chat.service";
+import { CHAT_EVENT_GROUPING_DELAYS, ChatEventGroupingOptions, ChatService } from "../../services/chat.service";
 import { MatSliderModule } from "@angular/material/slider";
 import { MatTooltipModule } from "@angular/material/tooltip";
 import { ScreenInfo } from "../../models/screen-info";
@@ -129,6 +129,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
         { value: 1.5, label: "Huge (150%)" },
     ];
     fontScale = 1;
+    readonly chatEventGroupingDelays = CHAT_EVENT_GROUPING_DELAYS;
     highlightTarget: AdvancedSettingsFocusTarget | null = null;
     expandedPanels: Record<AdvancedSettingsPanel, boolean> = {
         commander: false,
@@ -193,6 +194,14 @@ export class AdvancedSettingsComponent implements OnDestroy {
     onFontScaleChange(scale: number): void {
         this.fontScale = scale;
         this.fontScaleService.setScale(scale);
+    }
+
+    get chatEventGrouping(): Readonly<ChatEventGroupingOptions> {
+        return this.chatService.eventGrouping;
+    }
+
+    setChatEventGrouping(enabled: boolean, delaySeconds: number): void {
+        this.chatService.setEventGrouping(enabled, delaySeconds);
     }
 
     resetFontScale(): void {

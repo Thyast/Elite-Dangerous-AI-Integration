@@ -15,9 +15,21 @@
                         <mat-icon class="tab-label-icon">forum</mat-icon>
                         Chat
                     </ng-template>
-                    <div class="tab-content-container">
-                        <div class="chat-container">
-                            <app-chat-container></app-chat-container>
+                    <div class="chat-filter-anchor">
+                        <div class="chat-overlay-controls">
+                            <mat-checkbox
+                                [checked]="showChatEvents"
+                                (change)="setShowChatEvents($event.checked)"
+                                matTooltip="Show events in the chat. AI reactions are not affected.">
+                                <span class="chat-events-label">Events</span>
+                            </mat-checkbox>
+                        </div>
+                    </div>
+                    <div class="chat-panel">
+                        <div class="tab-content-container">
+                            <div class="chat-container">
+                                <app-chat-container [showEvents]="showChatEvents"></app-chat-container>
+                            </div>
                         </div>
                     </div>
                     <!--          <app-input-container class="input-container"></app-input-container>-->
