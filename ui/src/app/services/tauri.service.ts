@@ -9,6 +9,7 @@ import {
     firstValueFrom,
     Observable,
     ReplaySubject,
+    Subject,
     take,
 } from "rxjs";
 import { MatDialog } from "@angular/material/dialog";
@@ -199,6 +200,9 @@ export interface OverlayCreateOptions {
     alwaysOnTop: boolean;
     screenId?: number;
     mode?: "disabled" | "desktop" | "standalone" | "vr" | "both";
+    vrContent?: "hud" | "interface";
+    vrGazeZoom?: boolean;
+    vrGazeReductionFactor?: number;
     standaloneTransparent?: boolean;
     standaloneBackgroundColor?: string;
     vrSizeMeters?: number;
@@ -211,7 +215,21 @@ export interface OverlayCreateOptions {
     vrCurvature?: number;
 }
 
+export interface OverlayCreateResult {
+    gazeZoom: { status: "disabled" | "active" } | { status: "unavailable" | "waiting"; message: string };
+}
+
+export interface OpenXrGazeIntegrationState {
+    supported: boolean;
+    available: boolean;
+    installed: boolean;
+    enabled: boolean;
+    restartRequired: boolean;
+}
+
 export interface OverlayRuntimeInfo {
+    activeVrSettings?: OverlayCreateOptions | null;
+    gazeZoom?: OverlayCreateResult["gazeZoom"];
     platform: string;
     probeMode: string;
     openxrAvailable: boolean;
@@ -419,13 +437,23 @@ export class TauriService {
 
     }
 
-    public async createOverlay(config: OverlayCreateOptions): Promise<void> {
-        const result = await window.electronAPI?.invoke("create_floating_overlay", config);
-        return result;
+    public async createOverlay(config: OverlayCreateOptions): Promise<OverlayCreateResult | undefined> {
+        try {
+            return await window.electronAPI?.invoke("create_floating_overlay", config);
+        } finally {
+            this.overlayChanges.next();
+        }
     }
 
+    private readonly overlayChanges = new Subject<void>();
+    public readonly overlayChanges$ = this.overlayChanges.asObservable();
+
     public async destroyOverlay(): Promise<void> {
-        await window.electronAPI?.invoke("destroy_floating_overlay", {});
+        try {
+            await window.electronAPI?.invoke("destroy_floating_overlay", {});
+        } finally {
+            this.overlayChanges.next();
+        }
     }
 
     public async getAvailableScreens(): Promise<ScreenInfo[]> {
@@ -442,6 +470,16 @@ export class TauriService {
         }
         const result = await window.electronAPI.invoke('get_overlay_runtime_info');
         return result as OverlayRuntimeInfo;
+    }
+
+    public async getOpenXrGazeIntegrationStatus(): Promise<OpenXrGazeIntegrationState> {
+        if (!window.electronAPI) throw new Error("electronAPI not available");
+        return window.electronAPI.invoke("get_openxr_gaze_integration_status");
+    }
+
+    public async runOpenXrGazeIntegrationAction(action: "install" | "uninstall"): Promise<OpenXrGazeIntegrationState> {
+        if (!window.electronAPI) throw new Error("electronAPI not available");
+        return window.electronAPI.invoke("openxr_gaze_integration_action", action);
     }
 
     public async getVrCompatibilityState(): Promise<VRCompatibilityState> {

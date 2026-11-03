@@ -1,4 +1,4 @@
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Iterator, Literal, NotRequired, TypedDict
 
 
 class UIText(TypedDict, total=False):
@@ -8,7 +8,7 @@ class UIText(TypedDict, total=False):
     localized: dict[str, str]
 
 
-ComponentType = Literal['paragraph', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'filter', 'error', 'heading', 'section', 'inline', 'progress', 'action']
+ComponentType = Literal['paragraph', 'notification', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'filter', 'error', 'heading', 'section', 'inline', 'progress', 'action']
 
 
 class _ComponentProperties(TypedDict, total=False):
@@ -19,7 +19,7 @@ class _ComponentProperties(TypedDict, total=False):
     text: UIText
     tone: Literal['default', 'info', 'warning', 'success', 'muted', 'danger']
     outlined: bool
-    level: int
+    level: int | Literal['info', 'warning', 'error']
     children: list['UIComponent']
     value: float
     maximum: float
@@ -87,6 +87,10 @@ class Paragraph(InputBase):
     content: str
 
 
+class Notification(Paragraph):
+    pass
+
+
 class Error(Paragraph):
     pass
 
@@ -147,12 +151,59 @@ class List(UINode):
     details_collapsible: NotRequired[bool]
 
 
-UIComponent = UINode | TextInput | Filter | TextArea | NumberInput | Toggle | Select | Button | Paragraph | Error | Text | Heading | Section | Inline | Progress | Action | List
+class UICondition(TypedDict):
+    """Compare a key in the current namespace, or use default_show when unset."""
+    key: str
+    operator: Literal['eq', 'neq', 'gt', 'geq', 'lt', 'leq', 'in', 'not_in', 'contains', 'not_contains', 'is_set', 'is_unset']
+    value: NotRequired[object]
+    default_show: NotRequired[bool]
+
+
+class Condition(TypedDict):
+    """Show nested components when the condition matches; hidden values are preserved."""
+    key: str
+    type: Literal['condition']
+    condition: UICondition
+    fields: list['UIComponent']
+
+
+UIComponent = UINode | TextInput | Filter | TextArea | NumberInput | Toggle | Select | Button | Paragraph | Notification | Error | Text | Heading | Section | Inline | Progress | Action | List | Condition
+
+
+class GridHeaderAction(TypedDict):
+    key: str
+    icon: NotRequired[str]
+    label: NotRequired[str]
+
+
+class UIGrid(TypedDict):
+    key: str
+    label: str
+    fields: list[UIComponent]
+    content: NotRequired[list[UIComponent]]
+    collapsible: NotRequired[bool]
+    default_collapsed: NotRequired[bool]
+    header_action: NotRequired[GridHeaderAction]
+
+
+def ui_fields(elements: list[UIComponent]) -> Iterator[UIComponent]:
+    """Include hidden descendants without treating conditions as value-bearing fields."""
+    for element in elements:
+        if element['type'] == 'condition':
+            yield from ui_fields(element['fields'])
+        else:
+            yield element
+            yield from ui_fields(element.get('children', []))
+            if element['type'] == 'list':
+                for row in element.get('items', []):
+                    yield from ui_fields(row.get('summary', []))
+                    yield from ui_fields(row.get('details', []))
 
 
 class UIViewSection(TypedDict):
     key: str
     label: str
+    voice_aliases: NotRequired[list[str]]
     grids: NotRequired[list[str]]
     content: NotRequired[list[UIComponent]]
 
@@ -160,6 +211,7 @@ class UIViewSection(TypedDict):
 class PluginUIView(TypedDict):
     id: str
     label: str
+    voice_aliases: NotRequired[list[str]]
     description: NotRequired[str]
     icon: NotRequired[str]
     order: NotRequired[int]

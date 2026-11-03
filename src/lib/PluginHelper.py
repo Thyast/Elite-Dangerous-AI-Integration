@@ -2,7 +2,7 @@ from pydantic.main import BaseModel
 from copy import copy, deepcopy
 from dataclasses import replace
 import os
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Literal, TypedDict, TypeVar
 
 from .Models import LLMModel, STTModel, TTSModel, EmbeddingModel
 from .Logger import log
@@ -18,6 +18,14 @@ from .PluginNamespace import PluginNamespace
 
 # Type alias for projected states dictionary
 ProjectedStates = dict[str, BaseModel]
+
+
+class NavigationPreparation(TypedDict):
+    status: Literal["ready", "arrived", "blocked", "failed"]
+    system: str
+    active_destination: str | None
+    next_jump: str | None
+    message: str
 
 # reexport Projection and PluginEvent for plugins
 Projection = _Projection
@@ -104,6 +112,111 @@ class PluginHelper():
 
     def get_current_state(self) -> tuple[list[Event], ProjectedStates]:
         return self._event_manager.get_current_state()
+
+    def prepare_navigation(self, system: str) -> NavigationPreparation:
+        """Plot an exact destination, close the map and select the next jump.
+
+        Works aboard the main ship, including while docked or landed. Uses the
+        enabled host actions; never undocks, starts the FSD or changes throttle.
+        """
+        import json
+        from openai.types.chat import ChatCompletionMessageFunctionToolCall
+        from openai.types.chat.chat_completion_message_function_tool_call import Function
+        from .projections.common import get_state_dict
+
+        system = system.strip()
+        if not system or system.casefold() == "unknown":
+            raise ValueError("A known navigation destination is required")
+
+        def state() -> ProjectedStates:
+            return self.get_current_state()[1]
+
+        def matches(value: str | None) -> bool:
+            return bool(value and value.strip().casefold() == system.casefold())
+
+        def result(status: Literal["ready", "arrived", "blocked", "failed"], message: str) -> NavigationPreparation:
+            nav = get_state_dict(state(), "NavInfo")
+            route = nav.get("NavRoute") or []
+            destination = route[-1].get("StarSystem") if route else None
+            if status in {"failed", "blocked"}:
+                log("warn", f"Navigation preparation for {system}: {message}; active destination: {destination}")
+            return {
+                "status": status, "system": system,
+                "active_destination": destination,
+                "next_jump": nav.get("NextJumpTarget"), "message": message,
+            }
+
+        states = state()
+        if matches(get_state_dict(states, "Location").get("StarSystem")):
+            return result("arrived", "Already in the destination system. Complete the local stop before continuing.")
+        current = get_state_dict(states, "CurrentStatus")
+        flags = current.get("flags") or {}
+        if (not flags.get("InMainShip") or (current.get("flags2") or {}).get("OnFoot")
+                or any(flags.get(key) for key in ("FsdCharging", "FsdJump"))):
+            return result("blocked", "Navigation preparation requires the commander aboard the main ship, "
+                          "with no FSD charge or jump in progress.")
+        available = {
+            tool["function"]["name"] for tool in self._action_manager.getToolsList(
+                "mainship", self._config.get("game_actions_var", False), False, False,
+                self._config.get("allowed_actions", {}),
+            )
+        }
+        required = {"plotToTarget", "target_next_system_in_route", "galaxyMapOpenOrClose"}
+        if not required <= available:
+            return result("blocked", "Required navigation actions are disabled or unavailable: "
+                          + ", ".join(sorted(required - available)))
+
+        def run(name: str, arguments: dict[str, Any]) -> str:
+            response = self._action_manager.runAction(ChatCompletionMessageFunctionToolCall(
+                id=f"plugin-navigation-{name}", type="function",
+                function=Function(name=name, arguments=json.dumps(arguments)),
+            ), state())
+            return str(response["content"])
+
+        nav = get_state_dict(states, "NavInfo")
+        route = nav.get("NavRoute") or []
+        if not route or not matches(route[-1].get("StarSystem")):
+            plotted = run("plotToTarget", {"system": system})
+            if plotted.startswith("ERROR:"):
+                return result("failed", plotted)
+            nav = get_state_dict(state(), "NavInfo")
+            route = nav.get("NavRoute") or []
+            if not route or not matches(route[-1].get("StarSystem")):
+                return result("failed", f"Destination {system} was not confirmed. {plotted} "
+                              "Do not jump using an unverified route; this is not evidence the destination is unreachable.")
+
+        if get_state_dict(state(), "CurrentStatus").get("GuiFocus") == "GalaxyMap":
+            closed = run("galaxyMapOpenOrClose", {"desired_state": "close"})
+            if closed.startswith("ERROR:"):
+                return result("failed", closed)
+            try:
+                self._event_manager.wait_for_condition(
+                    "CurrentStatus", lambda s: s.GuiFocus != "GalaxyMap", 4,
+                )
+            except TimeoutError:
+                return result("failed", f"Could not confirm the galaxy map was closed. {closed}")
+
+        targeted = run("target_next_system_in_route", {})
+        if targeted.startswith("ERROR:"):
+            return result("failed", targeted)
+        try:
+            self._event_manager.wait_for_condition(
+                "NavInfo",
+                lambda s: bool(s.NavRoute and matches(s.NavRoute[-1].StarSystem)
+                               and s.NextJumpTarget
+                               and s.NextJumpTarget.casefold() == s.NavRoute[0].StarSystem.casefold()),
+                4,
+            )
+        except TimeoutError:
+            return result("failed", "The requested destination or next jump target was not confirmed. Do not jump.")
+        nav = get_state_dict(state(), "NavInfo")
+        route = nav.get("NavRoute") or []
+        if (not route or not matches(route[-1].get("StarSystem"))
+                or nav.get("NextJumpTarget") != route[0].get("StarSystem")
+                or get_state_dict(state(), "CurrentStatus").get("GuiFocus") == "GalaxyMap"):
+            return result("failed", "Navigation changed during preparation; the destination and next jump are not verified.")
+        return result("ready", "Destination verified, galaxy map closed and next route system targeted. "
+                      "FSD not engaged; no takeoff or throttle changes performed.")
 
     def register_language_detector(self, detector: Callable[[str], str | None]) -> None:
         """Register a local text-language detector for this assistant run."""

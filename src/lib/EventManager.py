@@ -470,7 +470,13 @@ class EventManager:
                     projection.state = state_model_type.model_construct()  # type: ignore[assignment]
                     projection.last_processed = 0.0
 
+            restored_until = projection.last_processed
             for event in self.processed + self.pending:
+                # Journal history prepended before the stored event window is already
+                # reflected in a restored snapshot, despite having no processed_at.
+                if (restored_until > 0 and isinstance(event, GameEvent)
+                        and event.historic and event.processed_at == 0):
+                    continue
                 if event.processed_at > 0.0 and event.processed_at <= projection.last_processed:
                     # log('debug', 'skipping update due to timestamp')
                     continue

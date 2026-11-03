@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Any, cast
 
 from typing_extensions import override
 
@@ -22,12 +22,12 @@ class LoadoutModifierB(BaseModel):
 
 
 class LoadoutEngineering(BaseModel):
-    Level: int
-    EngineerID: int
+    Level: int | None = None
+    EngineerID: int | None = None
     Engineer: str | None = None
     ExperimentalEffect: str | None = None
-    BlueprintID: int
-    Quality: float
+    BlueprintID: int | None = None
+    Quality: float | None = None
     Modifiers: list[LoadoutModifierA | LoadoutModifierB] = Field(default_factory=list)
     ExperimentalEffect_Localised: str | None = None
     BlueprintName: str
@@ -38,11 +38,11 @@ class LoadoutModule(BaseModel):
     AmmoInClip: int | None = None
     Item: str
     Value: int | None = None
-    Health: float
+    Health: float | None = None
     Engineering: LoadoutEngineering | None = None
     Slot: str
-    On: bool
-    Priority: int
+    On: bool | None = None
+    Priority: int | None = None
 
 
 class LoadoutFuelCapacity(BaseModel):
@@ -71,6 +71,8 @@ class LoadoutState(BaseModel):
 
 
 class Loadout(Projection[LoadoutState]):
+    """Track fitted modules and per-slot engineering across journal replay."""
+
     StateModel = LoadoutState
 
     @override
@@ -122,6 +124,17 @@ class Loadout(Projection[LoadoutState]):
             self.state.Hot = payload.get("Hot")
             return
 
+        if isinstance(event, GameEvent) and event.content.get("event") in {
+            "ModuleBuy", "ModuleRetrieve", "ModuleStore", "ModuleSell",
+            "MassModuleStore", "ModuleSwap", "EngineerCraft",
+        }:
+            change = cast(dict[str, Any], event.content)
+            ship_id = change.get("ShipID", self.state.ShipID)
+            if self.state.ShipID is not None and str(ship_id) == str(self.state.ShipID):
+                if self._update_modules(change):
+                    self.state.timestamp = change.get("timestamp", self.state.timestamp)
+            return
+
         if isinstance(event, GameEvent) and event.content.get("event") == "HullDamage":
             payload = cast(HullDamageEvent, event.content)
             if payload.get("Fighter") is not True:
@@ -131,3 +144,67 @@ class Loadout(Projection[LoadoutState]):
         if isinstance(event, GameEvent) and event.content.get("event") in ["RepairAll", "Died"]:
             _payload = cast(RepairAllEvent, event.content)
             self.state.HullHealth = 1.0
+
+    @staticmethod
+    def _item(value: Any) -> str:
+        return str(value or "").strip().lower().removeprefix("$").removesuffix("_name;")
+
+    def _update_modules(self, change: dict[str, Any]) -> bool:
+        event_name = change["event"]
+        slot = str(change.get("Slot") or "").casefold()
+        if event_name == "ModuleSwap":
+            first = str(change.get("FromSlot") or "").casefold()
+            second = str(change.get("ToSlot") or "").casefold()
+            if not first or not second:
+                return False
+            self.state.Modules = [
+                module.model_copy(update={"Slot": change["ToSlot"]})
+                if module.Slot.casefold() == first else
+                module.model_copy(update={"Slot": change["FromSlot"]})
+                if module.Slot.casefold() == second else module
+                for module in self.state.Modules
+            ]
+            return True
+        if event_name == "MassModuleStore":
+            slots = {str(item.get("Slot") or "").casefold() for item in change.get("Items", [])}
+            self.state.Modules = [module for module in self.state.Modules if module.Slot.casefold() not in slots]
+            return True
+        if not slot:
+            return False
+        if event_name == "EngineerCraft":
+            item = self._item(change.get("Module"))
+            for index, module in enumerate(self.state.Modules):
+                if module.Slot.casefold() != slot or (item and self._item(module.Item) != item):
+                    continue
+                engineering = {
+                    key: change[key] for key in LoadoutEngineering.model_fields if key in change
+                }
+                if change.get("ApplyExperimentalEffect"):
+                    engineering["ExperimentalEffect"] = change["ApplyExperimentalEffect"]
+                previous = module.Engineering
+                if (previous is not None
+                        and previous.BlueprintName.casefold() == str(engineering.get("BlueprintName") or "").casefold()
+                        and not engineering.get("ExperimentalEffect")):
+                    engineering["ExperimentalEffect"] = previous.ExperimentalEffect
+                    engineering["ExperimentalEffect_Localised"] = previous.ExperimentalEffect_Localised
+                updated = LoadoutEngineering.model_validate(engineering)
+                self.state.Modules[index] = module.model_copy(update={"Engineering": updated})
+                return True
+            return False
+        if event_name in {"ModuleStore", "ModuleSell"}:
+            item = self._item(change.get("ReplacementItem"))
+            engineering = None
+        else:
+            item = self._item(change.get("BuyItem" if event_name == "ModuleBuy" else "RetrievedItem"))
+            if not item or item == "null":
+                return False
+            blueprint = change.get("EngineerModifications")
+            engineering = LoadoutEngineering(
+                BlueprintName=blueprint, Level=change.get("Level"), Quality=change.get("Quality"),
+            ) if isinstance(blueprint, str) and blueprint else None
+        self.state.Modules = [module for module in self.state.Modules if module.Slot.casefold() != slot]
+        if item and item != "null":
+            self.state.Modules.append(LoadoutModule(
+                Slot=change["Slot"], Item=item, Engineering=engineering,
+            ))
+        return True

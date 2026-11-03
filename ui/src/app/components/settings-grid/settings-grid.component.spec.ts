@@ -2,8 +2,11 @@ import { TestBed } from "@angular/core/testing";
 import { NoopAnimationsModule } from "@angular/platform-browser/animations";
 import { TranslateModule } from "@ngx-translate/core";
 import { SettingsGridComponent } from "./settings-grid.component";
-import { SettingsGrid } from "../../services/plugin-settings";
-import { UIComponent } from "../../services/plugin-ui";
+import { SettingsGrid, SettingCondition, ModelProviderDefinition, matchesSettingCondition,
+  providerVoiceSettingsValues, providerVoiceDisplayValue } from "../../services/plugin-settings";
+import { UIComponent, uiFields, matchesUICondition } from "../../services/plugin-ui";
+import { settingsFields } from "../../services/plugin-settings";
+import { PluginContentComponent } from "../plugin-content/plugin-content.component";
 import { By } from "@angular/platform-browser";
 import { MatSelect } from "@angular/material/select";
 
@@ -89,5 +92,239 @@ describe("settings grid content", () => {
       const select: MatSelect = fixture.debugElement.query(By.directive(MatSelect)).componentInstance;
       expect(select.options.map(option => option.viewValue)).toEqual(["First", "Second"]);
     });
+
+    for (const collapsible of [false, true]) {
+      it(`renders conditions in ${placement} with collapsible=${collapsible} through the shared renderer`, async () => {
+        const fixture = TestBed.createComponent(SettingsGridComponent);
+        const nodes: UIComponent[] = [{
+          key: "advanced", type: "condition", condition: {key: "enabled", operator: "eq", value: true},
+          fields: [
+            {key: "voice", type: "textarea", label: "Voice", default_value: "default"},
+            {key: "apply", type: "button", label: "Apply"},
+            {type: "progress", value: 1, maximum: 2},
+          ],
+        }];
+        const values: Record<string, unknown> = {enabled: true, voice: "saved"};
+        const button = jasmine.createSpy("button");
+        fixture.componentRef.setInput("grid", {
+          key: "shared", label: "", collapsible, fields: [], [placement]: nodes,
+        } satisfies SettingsGrid);
+        fixture.componentRef.setInput("getValue", (key: string, fallback: unknown) => values[key] ?? fallback);
+        fixture.componentRef.setInput("setValue", (key: string, value: unknown) => values[key] = value);
+        fixture.componentRef.setInput("onButtonClick", button);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const textarea = root.querySelector("textarea")!;
+        expect(textarea.value).toBe("saved");
+        expect(root.querySelector("mat-progress-bar")?.getAttribute("aria-valuenow")).toBe("50");
+        textarea.value = "changed";
+        textarea.dispatchEvent(new Event("input"));
+        textarea.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", bubbles: true}));
+        expect(values["voice"]).toBe("changed");
+        expect(button).toHaveBeenCalledOnceWith("apply");
+        values["enabled"] = false;
+        fixture.detectChanges();
+        expect(root.querySelector("textarea")).toBeNull();
+        values["enabled"] = true;
+        fixture.detectChanges();
+        await fixture.whenStable();
+        expect(root.querySelector("textarea")?.value).toBe("changed");
+      });
+    }
   }
+});
+
+import { SettingsFieldComponent } from "../settings-field/settings-field.component";
+
+describe("setting condition comparisons", () => {
+    it("re-exports the shared traversal and condition implementation for legacy imports", () => {
+        expect(settingsFields).toBe(uiFields);
+        expect(matchesSettingCondition).toBe(matchesUICondition);
+    });
+
+    const cases: [SettingCondition["operator"], unknown, unknown, boolean][] = [
+        ["eq", false, false, true], ["eq", "1", 1, false],
+        ["neq", 1, "1", true], ["neq", 1, 1, false],
+        ["gt", 2, 1, true], ["gt", 1, 1, false],
+        ["geq", 1, 1, true], ["geq", 0, 1, false],
+        ["lt", 0, 1, true], ["lt", 1, 1, false],
+        ["leq", 1, 1, true], ["leq", 2, 1, false],
+        ["gt", "2", 1, false], ["lt", null, 1, false],
+        ["leq", NaN, 1, false], ["geq", Infinity, 1, false],
+        ["in", "expert", ["custom", "expert"], true],
+        ["in", 1, ["1"], false], ["not_in", "simple", ["expert"], true],
+        ["not_in", "expert", ["expert"], false], ["not_in", "x", null, false],
+        ["contains", ["a", "b"], "b", true], ["contains", "abc", "bc", true],
+        ["contains", [1], "1", false], ["not_contains", "abc", "z", true],
+        ["not_contains", [1], 1, false], ["not_contains", null, "x", false],
+        ["contains", "123", 1, false], ["eq", undefined, true, false],
+    ];
+    for (const [operator, actual, value, expected] of cases) {
+        it(`${operator}: ${JSON.stringify(actual)} against ${JSON.stringify(value)} -> ${expected}`, () => {
+            expect(matchesSettingCondition({ key: "test", operator, value }, actual)).toBe(expected);
+        });
+    }
+
+    it("uses default_show as the result only when the key is unset", () => {
+        const condition: SettingCondition = { key: "test", operator: "eq", value: true, default_show: true };
+        expect(matchesSettingCondition(condition, undefined)).toBeTrue();
+        expect(matchesSettingCondition(condition, null)).toBeTrue();
+        expect(matchesSettingCondition(condition, false)).toBeFalse();
+        expect(matchesSettingCondition(condition, 0)).toBeFalse();
+        expect(matchesSettingCondition(condition, "")).toBeFalse();
+        expect(matchesSettingCondition({ ...condition, default_show: false }, undefined)).toBeFalse();
+        expect(matchesSettingCondition({ key: "test", operator: "neq", value: true }, undefined)).toBeFalse();
+    });
+
+    it("tests presence without treating false, zero, or empty strings as unset", () => {
+        for (const value of [undefined, null]) {
+            expect(matchesSettingCondition({ key: "test", operator: "is_unset", default_show: false }, value)).toBeTrue();
+            expect(matchesSettingCondition({ key: "test", operator: "is_set", default_show: true }, value)).toBeFalse();
+        }
+        for (const value of [false, 0, "", [], "model"]) {
+            expect(matchesSettingCondition({ key: "test", operator: "is_unset" }, value)).toBeFalse();
+            expect(matchesSettingCondition({ key: "test", operator: "is_set" }, value)).toBeTrue();
+        }
+    });
+});
+
+describe("nested conditional settings", () => {
+    const grid = {
+        key: "general", label: "General", fields: [{
+            key: "advanced_options", type: "condition",
+            condition: { key: "enabled", operator: "eq", value: true, default_show: true },
+            fields: [{
+                key: "voice", label: "Voice", type: "text", default_value: "default voice",
+            }, {
+                key: "inner", type: "condition",
+                condition: { key: "level", operator: "geq", value: 2, default_show: false },
+                fields: [{ key: "refresh", label: "Refresh", type: "button" }],
+            }],
+        }],
+    } as SettingsGrid;
+
+    beforeEach(async () => {
+        await TestBed.configureTestingModule({ imports: [SettingsGridComponent, TranslateModule.forRoot(), NoopAnimationsModule] }).compileComponents();
+    });
+
+    for (const collapsible of [false, true]) {
+    it(`preserves conditional fields and callbacks with collapsible=${collapsible}`, () => {
+        const fixture = TestBed.createComponent(SettingsGridComponent);
+        const values: Record<string, unknown> = {};
+        const component = fixture.componentInstance;
+        component.grid = {...grid, collapsible};
+        component.getValue = (key, fallback) => values[key] ?? fallback;
+        component.setValue = (key, value) => { values[key] = value; };
+        component.onButtonClick = jasmine.createSpy("button");
+        fixture.detectChanges();
+        expect(fixture.debugElement.queryAll(By.directive(SettingsFieldComponent)).length).toBe(1);
+        const input = fixture.debugElement.query(By.directive(SettingsFieldComponent));
+        input.componentInstance.valueChange.emit("saved voice");
+        expect(values["voice"]).toBe("saved voice");
+
+        values["level"] = 2;
+        fixture.detectChanges();
+        const fields = fixture.debugElement.queryAll(By.directive(SettingsFieldComponent));
+        expect(fields.length).toBe(2);
+        fields[1].componentInstance.buttonClick.emit();
+        expect(component.onButtonClick).toHaveBeenCalledWith("refresh");
+
+        values["enabled"] = false;
+        fixture.detectChanges();
+        expect(fixture.debugElement.queryAll(By.directive(SettingsFieldComponent)).length).toBe(0);
+        const button = component.onButtonClick as jasmine.Spy;
+        button.calls.reset();
+        const renderer: PluginContentComponent = fixture.debugElement.query(By.directive(PluginContentComponent)).componentInstance;
+        renderer.handleEnterSubmit();
+        expect(button).not.toHaveBeenCalled();
+        expect(values["voice"]).toBe("saved voice");
+        values["enabled"] = true;
+        fixture.detectChanges();
+        expect(fixture.debugElement.query(By.directive(SettingsFieldComponent)).componentInstance.value).toBe("saved voice");
+        renderer.handleEnterSubmit();
+        expect(button).toHaveBeenCalledOnceWith("refresh");
+    });
+    }
+
+    it("collects nested voice defaults and preserves stored values without storing containers", () => {
+        const provider = {
+            plugin_guid: "example", id: "tts", kind: "tts", label: "Example", is_builtin: false,
+            settings_config: [], voice_settings_config: [grid],
+        } as ModelProviderDefinition;
+        const ref = "plugin:example:tts";
+        expect(providerVoiceSettingsValues(ref, [provider], undefined)).toEqual({ voice: "default voice" });
+        const stored = { [ref]: { voice: "saved voice", advanced_options: true, unknown: 1 } };
+        expect(providerVoiceSettingsValues(ref, [provider], stored)).toEqual({ voice: "saved voice" });
+        expect(providerVoiceDisplayValue(ref, [provider], stored)).toBe("saved voice");
+    });
+
+    it("resolves voice inputs inside layout containers and grid content", () => {
+        const provider: ModelProviderDefinition = {
+            plugin_guid: "example", id: "tts", kind: "tts", label: "Example", is_builtin: false,
+            settings_config: [], voice_settings_config: [{
+                key: "shared", label: "", fields: [{type: "section", children: [{
+                    key: "conditional", type: "condition",
+                    condition: {key: "enabled", operator: "eq", value: true},
+                    fields: [{key: "voice", type: "select", default_value: "one", select_options: [
+                        {key: "one", value: "one", label: "First voice", disabled: false},
+                    ]}],
+                }]}],
+                content: [{type: "list", items: [{key: "row", title: "Row", summary: [
+                    {key: "instructions", type: "text", default_value: "calm"},
+                ], details: [{key: "speed", type: "number", default_value: 1}]}]}],
+            }],
+        };
+        const ref = "plugin:example:tts";
+        expect(providerVoiceSettingsValues(ref, [provider], undefined)).toEqual({
+            voice: "one", instructions: "calm", speed: 1,
+        });
+        expect(providerVoiceDisplayValue(ref, [provider], undefined)).toBe("First voice");
+    });
+});
+
+describe("notification settings", () => {
+    beforeEach(async () => {
+        await TestBed.configureTestingModule({ imports: [SettingsGridComponent, SettingsFieldComponent, TranslateModule.forRoot(), NoopAnimationsModule] }).compileComponents();
+    });
+
+    it("renders plugin-provided notification content and level", () => {
+        const fixture = TestBed.createComponent(SettingsFieldComponent);
+        fixture.componentInstance.field = {
+            key: "notice", label: "Plugin notice", type: "notification", level: "warning",
+            content: "Choose a replacement.",
+        } as any;
+        fixture.detectChanges();
+
+        const notification = fixture.nativeElement.querySelector(".notification-field.warning");
+        expect(notification.textContent).toContain("Plugin notice");
+        expect(notification.textContent).toContain("Choose a replacement.");
+    });
+
+    it("lets the plugin condition decide when and where to show a notification", () => {
+        const fixture = TestBed.createComponent(SettingsGridComponent);
+        const values: Record<string, unknown> = { model: "legacy-model" };
+        fixture.componentInstance.grid = {
+            key: "models", label: "Models", fields: [{
+                key: "model", label: "Model", type: "select", default_value: "supported-model",
+                select_options: [{ key: "supported-model", label: "Supported", value: "supported-model", disabled: false }],
+                multi_select: false,
+            }, {
+                key: "legacy-model-notice", type: "condition",
+                condition: { key: "model", operator: "not_in", value: ["supported-model"] },
+                fields: [{
+                    key: "notice", label: null, type: "notification", level: "warning",
+                    content: "Plugin-selected warning.",
+                }],
+            }],
+        } as any;
+        fixture.componentInstance.getValue = (key, fallback) => values[key] ?? fallback;
+        fixture.componentInstance.setValue = (key, value) => { values[key] = value; };
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector(".notification-field")).not.toBeNull();
+
+        values["model"] = "supported-model";
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector(".notification-field")).toBeNull();
+    });
 });

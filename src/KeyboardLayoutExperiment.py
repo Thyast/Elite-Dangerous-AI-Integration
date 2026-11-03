@@ -4,7 +4,7 @@ Run this with Elite Dangerous focused:
     python -m src.KeyboardLayoutExperiment
 
 The harness does not change the normal EDKeys behaviour. It compares the
-historical fixed scancode with the scancode resolved from the active Windows
+historical fixed scancode with the scancode resolved from the game's
 keyboard layout and lets the user test each one manually.
 """
 
@@ -18,6 +18,7 @@ from .lib.directinput import (
     LAYOUT_DEPENDENT_KEY_CHARACTERS,
     PressKey,
     ReleaseKey,
+    load_keyboard_layout,
     resolve_layout_key_name,
 )
 from .lib.Config import get_asset_path
@@ -27,8 +28,8 @@ with open(get_asset_path("keymap.json"), encoding="utf-8") as keymap_file:
     keymap = json.load(keymap_file)
 
 
-def _print_resolution(key_name: str) -> None:
-    resolved = resolve_layout_key_name(key_name)
+def _print_resolution(key_name: str, layout: int) -> None:
+    resolved = resolve_layout_key_name(key_name, layout)
     fixed_scancode = keymap[key_name]
     character = LAYOUT_DEPENDENT_KEY_CHARACTERS[key_name]
     print(
@@ -57,18 +58,20 @@ def main() -> None:
     if platform.system() != "Windows":
         raise SystemExit("This experiment must be run on Windows.")
 
+    locale_name = input("KeyboardLayout from your .binds file (for example fr-FR): ").strip()
+    layout = load_keyboard_layout(locale_name)
     key_names = ["Key_Comma", "Key_SemiColon"]
     print("Keep Elite Dangerous focused when testing a key.")
     print("Close the opened map before each subsequent test.")
 
     for key_name in key_names:
-        _print_resolution(key_name)
+        _print_resolution(key_name, layout)
         fixed_scancode = keymap[key_name]
-        resolved = resolve_layout_key_name(key_name)
+        resolved = resolve_layout_key_name(key_name, layout)
 
         print(f"\nTesting {key_name}:")
         print("[1] historical fixed scancode (switch to Elite during countdown)")
-        print("[2] active-layout-resolved scancode (switch to Elite during countdown)")
+        print("[2] game-layout-resolved scancode (switch to Elite during countdown)")
         choice = input("Choose a method (1/2, or Enter to skip): ").strip()
         if choice == "1":
             _send_after_countdown(fixed_scancode)

@@ -1,6 +1,9 @@
 import { type BaseMessage } from "./tauri.service";
-import { UINode, UIComponent } from "./plugin-ui";
-export type { SelectOption, ListRow, ListAction } from "./plugin-ui";
+import { UIComponent, uiFields } from "./plugin-ui";
+export type { SelectOption, ListRow, ListAction, GridHeaderAction,
+    UIGrid as SettingsGrid, UICondition as SettingCondition, Condition as ConditionSetting } from "./plugin-ui";
+import type { UIGrid as SettingsGrid } from "./plugin-ui";
+export { uiFields as settingsFields, matchesUICondition as matchesSettingCondition } from "./plugin-ui";
 
 export interface SettingsHeaderLink {
     text: string;
@@ -17,22 +20,6 @@ export interface PluginSettings {
     header_link?: SettingsHeaderLink;
 }
 
-export interface GridHeaderAction {
-    key: string;
-    label?: string;
-    icon?: string;
-}
-
-export interface SettingsGrid {
-    key: string;
-    label: string;
-    collapsible?: boolean;
-    default_collapsed?: boolean;
-    header_action?: GridHeaderAction;
-    content?: UINode[];
-    fields: (TextSetting | TextAreaSetting | NumericalSetting | ToggleSetting | SelectSetting | ButtonSetting | ParagraphSetting | ErrorSetting | ListSetting | FilterSetting)[];
-}
-
 // Deprecated names retained for existing consumers.
 export type SettingBase = UIComponent;
 export type TextSetting = UIComponent;
@@ -42,9 +29,22 @@ export type NumericalSetting = UIComponent;
 export type ToggleSetting = UIComponent;
 export type ButtonSetting = UIComponent;
 export type ParagraphSetting = UIComponent;
+export type NotificationSetting = UIComponent;
 export type ErrorSetting = UIComponent;
 export type ListSetting = UIComponent;
 export type SelectSetting = UIComponent;
+export type SettingsElement = UIComponent;
+
+/** Voice conditions can reference global keys; character values win on collisions. */
+export function voiceSettingsContext(
+    pluginSettings: Record<string, any> | undefined,
+    characterSettings: Record<string, any> | undefined,
+): Record<string, any> {
+    const setValues = (settings: Record<string, any> | undefined) => Object.fromEntries(
+        Object.entries(settings ?? {}).filter(([, value]) => value !== undefined && value !== null),
+    );
+    return { ...setValues(pluginSettings), ...setValues(characterSettings) };
+}
 
 export interface PluginSettingsMap {
     [plugin_guid: string]: PluginSettings;
@@ -76,13 +76,13 @@ export function providerVoiceSettingsValues(
     if (!provider || provider.voice_settings_config === undefined) return undefined;
 
     const defaults = Object.fromEntries(
-        provider.voice_settings_config
-            .flatMap(grid => grid.fields)
+        (provider.voice_settings_config ?? [])
+            .flatMap(grid => uiFields([...grid.fields, ...(grid.content ?? [])]))
             .filter(field => field.default_value !== undefined)
             .map(field => [field.key, field.default_value]),
     );
     const declaredKeys = new Set(
-        provider.voice_settings_config.flatMap(grid => grid.fields).map(field => field.key),
+        provider.voice_settings_config.flatMap(grid => uiFields([...grid.fields, ...(grid.content ?? [])])).map(field => field.key),
     );
     const stored = Object.fromEntries(
         Object.entries(voiceSettings?.[providerRef] ?? {})
@@ -95,15 +95,14 @@ export function providerVoiceDisplayValue(
     providerRef: string,
     providers: ModelProviderDefinition[],
     voiceSettings: Record<string, Record<string, any>> | undefined,
-    legacyFallback: string,
+    legacyFallback: string = "",
 ): string | undefined {
     const provider = providers.find(
         candidate => providerRef === `plugin:${candidate.plugin_guid}:${candidate.id}`,
     );
     if (!provider || provider.voice_settings_config === undefined) return legacyFallback || undefined;
 
-    const voiceField = provider.voice_settings_config
-        .flatMap(grid => grid.fields)
+    const voiceField = provider.voice_settings_config?.flatMap(grid => uiFields([...grid.fields, ...(grid.content ?? [])]))
         .find(field => field.key === "voice");
     if (!voiceField) return undefined;
 
@@ -152,7 +151,7 @@ export function llmProviderSummary(
         (!p.slots || p.slots.includes(slot)) &&
         providerRef === `plugin:${p.plugin_guid}:${p.id}`
     );
-    const modelField = provider?.settings_config.flatMap(grid => grid.fields)
+    const modelField = provider?.settings_config.flatMap(grid => uiFields([...grid.fields, ...(grid.content ?? [])]))
         .find(field => field.label === "Model" || field.key === "model" || field.key?.endsWith("_model"));
     const configured = provider && modelField?.key ? pluginSettings[provider.plugin_guid]?.[modelField.key] : undefined;
     const model = typeof configured === "string" && configured.trim() ? configured.trim() : modelField?.default_value;

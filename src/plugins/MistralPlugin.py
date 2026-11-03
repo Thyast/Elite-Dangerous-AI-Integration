@@ -171,6 +171,9 @@ class MistralTTSModel(TTSModel):
             timeout=60.0,
         )
 
+    def close(self) -> None:
+        self.client.close()
+
     def _iter_audio_deltas(self, response: httpx.Response) -> Iterable[bytes]:
         for data in iter_sse_data(response.iter_lines()):
             if data == "[DONE]":

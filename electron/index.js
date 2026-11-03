@@ -11,6 +11,9 @@ import contextMenu from 'electron-context-menu';
 import pino from 'pino';
 import { WebSocketServer } from 'ws';
 import {VROverlay} from '@covas-labs/electron-vr';
+import { createOptionalVrGazeZoom, createVrHeadPoseReader } from './vr-head-pose.js';
+import { createOpenXrGazeIntegration } from './openxr-gaze-integration.js';
+import { createVrPlacementAdjustment, getOverlayPlacement, handleVrPlacementRequest } from './vr-placement-adjustment.js';
 import {
   configure as configureNativeOverlay,
   displayToOverlayRect,
@@ -139,46 +142,15 @@ function getOverlayUrl(opts = {}) {
   return overlayUrl.toString();
 }
 
-function getOverlayRotation(tiltDegrees = 0, yawDegrees = 0) {
-  const halfPitch = tiltDegrees * Math.PI / 360;
-  const halfYaw = yawDegrees * Math.PI / 360;
-  const sinPitch = Math.sin(halfPitch);
-  const cosPitch = Math.cos(halfPitch);
-  const sinYaw = Math.sin(halfYaw);
-  const cosYaw = Math.cos(halfYaw);
-  return {
-    x: cosYaw * sinPitch,
-    y: sinYaw * cosPitch,
-    z: -sinYaw * sinPitch,
-    w: cosYaw * cosPitch,
-  };
-}
-
-function getOverlayPlacement(vrAnchor, vrSizeMeters, horizontalOffset = 0, verticalOffset = 0, distanceOffset = 0, tiltDegrees = 0, yawDegrees = 0) {
-  const rotation = getOverlayRotation(tiltDegrees, yawDegrees);
-  if (vrAnchor === 'world') {
-    const distance = Math.max(0.1, 2.0 + distanceOffset);
-    const widthOffset = 0.5;
-    const heightOffset = (720 / 1280) / 2;
-    return {
-      mode: 'world',
-      position: { x: horizontalOffset - widthOffset, y: 1.4 + verticalOffset - heightOffset, z: -distance },
-      rotation,
-    };
-  }
-  const distance = Math.max(0.1, 1.1 + distanceOffset);
-  return {
-    mode: 'head',
-    position: { x: horizontalOffset, y: verticalOffset, z: -distance },
-    rotation,
-  };
-}
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
 function normalizeOverlayOptions(opts = {}) {
+  const reductionFactor = opts.vrGazeReductionFactor ?? 5;
+  if (!Number.isFinite(reductionFactor) || reductionFactor < 1) {
+    throw new Error('The VR gaze area reduction factor must be a finite number of at least 1.');
+  }
   const desktopPlacement = normalizeDesktopOverlayScreen(opts.screenId);
   const mode = opts.mode === 'screen'
     ? 'desktop'
@@ -192,7 +164,7 @@ function normalizeOverlayOptions(opts = {}) {
     ? clamp(opts.vrVerticalOffset, -1.5, 1.5)
     : 0;
   const vrDistanceOffset = Number.isFinite(opts.vrDistanceOffset)
-    ? clamp(opts.vrDistanceOffset, -0.75, 1.5)
+    ? clamp(opts.vrDistanceOffset, -1.5, 1.5)
     : 0;
   const vrTiltDegrees = Number.isFinite(opts.vrTiltDegrees)
     ? clamp(opts.vrTiltDegrees, -90, 90)
@@ -213,6 +185,9 @@ function normalizeOverlayOptions(opts = {}) {
       ? opts.vrSizeMeters
       : 0.9,
     vrAnchor: opts.vrAnchor === 'world' ? 'world' : 'head',
+    vrContent: opts.vrContent === 'interface' ? 'interface' : 'hud',
+    vrGazeZoom: opts.vrGazeZoom === true,
+    vrGazeReductionFactor: reductionFactor,
     vrHorizontalOffset,
     vrVerticalOffset,
     vrDistanceOffset,
@@ -249,6 +224,9 @@ async function getOverlayRuntimeInfo() {
   try {
     const compatibility = await VROverlay.getCompatibilityReport();
     const runtimeInfo = compatibility.diagnostics;
+    if (opts.vrGazeZoom && opts.vrAnchor !== 'world') {
+      throw new Error('VR gaze zoom requires a world-locked overlay. Change VR Anchor or disable gaze zoom.');
+    }
     return {
       ...runtimeInfo,
       packageInstalled: true,
@@ -552,6 +530,11 @@ function resolveReadableAssetPath(filePath) {
 }
 
 class BackendService {
+  onMessage = null;
+  onExit = null;
+  emitMessage(message) {
+    this.#notifyListeners('stdout', JSON.stringify({ timestamp: new Date().toISOString(), ...message }));
+  }
   #currentProcess = null;
   #windows = [];
   #remoteClients = new Set();
@@ -677,6 +660,7 @@ class BackendService {
         pid: childProcess.pid ?? null,
         timestamp: new Date().toISOString(),
       });
+      if (this.#currentProcess === null) this.onExit?.();
     };
 
     childProcess.once('error', (error) => {
@@ -720,6 +704,15 @@ class BackendService {
             logger.info('[stdout]', "[config redacted]");
           }
           this.#notifyListeners('stdout', line);
+          if (this.onMessage) {
+            try {
+              Promise.resolve(this.onMessage(JSON.parse(line))).catch(error => {
+                logger.error({ err: error }, 'Failed to handle an asynchronous backend message.');
+              });
+            } catch (error) {
+              logger.error({ err: error }, 'Failed to handle a backend message.');
+            }
+          }
         }
       }
     });
@@ -927,32 +920,80 @@ async function createVrOverlayWindow(opts) {
     },
   });
   overlayWindow.setMenuBarVisibility(false);
-  await overlayWindow.loadURL(config.overlay);
+  const placement = getOverlayPlacement(opts.vrAnchor, opts.vrSizeMeters, opts.vrHorizontalOffset, opts.vrVerticalOffset, opts.vrDistanceOffset, opts.vrTiltDegrees, opts.vrYawDegrees);
+  let vrOverlay;
+  let gazeZoom;
+  let gazeZoomStatus;
+  try {
+    await overlayWindow.loadURL(opts.vrContent === 'interface'
+      ? `${config.overlay}/interface`
+      : config.overlay);
 
-  const vrOverlay = await VROverlay.openWindow(overlayWindow, {
-    name: 'COVAS_NEXT_Overlay',
-    frameRate: 60,
-    sizeMeters: opts.vrSizeMeters,
-    curvature: opts.vrCurvature,
-    visible: true,
-    placement: getOverlayPlacement(opts.vrAnchor, opts.vrSizeMeters, opts.vrHorizontalOffset, opts.vrVerticalOffset, opts.vrDistanceOffset, opts.vrTiltDegrees, opts.vrYawDegrees),
-  });
+    vrOverlay = await VROverlay.openWindow(overlayWindow, {
+      name: 'COVAS_NEXT_Overlay',
+      frameRate: 60,
+      sizeMeters: opts.vrSizeMeters,
+      curvature: opts.vrCurvature,
+      visible: true,
+      placement,
+    });
 
-  if (!vrOverlay) {
-    if (!overlayWindow.isDestroyed()) {
-      overlayWindow.close();
+    if (!vrOverlay) {
+      const refreshedCompatibility = await VROverlay.getCompatibilityReport();
+      throw new Error(refreshedCompatibility.launch.wouldWorkNow
+        ? 'The VR overlay could not be initialized. Check the VR application and try again.'
+        : refreshedCompatibility.launch.message);
     }
-    const refreshedCompatibility = await VROverlay.getCompatibilityReport();
-    throw new Error(refreshedCompatibility.launch.wouldWorkNow
-      ? 'The VR overlay could not be initialized. Check the VR application and try again.'
-      : refreshedCompatibility.launch.message);
+
+    const gaze = await createOptionalVrGazeZoom({ controller: vrOverlay, options: opts, placement, logger });
+    gazeZoom = gaze.controller;
+    gazeZoomStatus = gaze.state;
+    if (gazeZoom) {
+      overlayWindow.once('close', () => {
+        try {
+          gazeZoom.close();
+        } catch (error) {
+          logger.error({ err: error }, 'Failed to close VR gaze zoom.');
+        }
+      });
+    }
+  } catch (error) {
+    try {
+      gazeZoom?.close();
+    } catch (cleanupError) {
+      logger.error({ err: cleanupError }, 'Failed to close VR gaze zoom during initialization.');
+    }
+    try {
+      vrOverlay?.destroy();
+    } catch (cleanupError) {
+      logger.error({ err: cleanupError }, 'Failed to clean up VR overlay initialization.');
+    }
+    if (!overlayWindow.isDestroyed()) {
+      overlayWindow.destroy();
+    }
+    throw error;
   }
 
+  const placementAdjustment = createVrPlacementAdjustment({
+    controller: vrOverlay, options: opts, placement, gazeZoom,
+    async readHeadPose() {
+      const reader = await createVrHeadPoseReader(vrOverlay);
+      try {
+        return reader.read();
+      } finally {
+        reader.close();
+      }
+    },
+  });
   return {
     kind: 'vr',
     window: overlayWindow,
     windows: [overlayWindow],
     controller: vrOverlay,
+    gazeZoomStatus,
+    getGazeState: () => gazeZoom?.getState() ?? gazeZoomStatus,
+    placementAdjustment,
+    nativeControllers: [placementAdjustment, ...(gazeZoom ? [gazeZoom] : [])],
     runtimeInfo,
     cleanedUp: false,
   };
@@ -1013,6 +1054,13 @@ async function createManagedOverlay(opts) {
     try {
       desktopOverlay = await createFloatingOverlayWindow(normalized);
     } catch (error) {
+      for (const controller of vrOverlay.nativeControllers ?? []) {
+        try {
+          controller.close();
+        } catch (cleanupError) {
+          logger.error({ err: cleanupError }, 'Failed to close VR gaze zoom after desktop overlay initialization failed.');
+        }
+      }
       try {
         vrOverlay.controller.destroy();
       } catch (cleanupError) {
@@ -1028,7 +1076,10 @@ async function createManagedOverlay(opts) {
       window: desktopOverlay.window,
       windows: [desktopOverlay.window, vrOverlay.window],
       controller: vrOverlay.controller,
-      nativeControllers: [desktopOverlay.nativeController],
+      placementAdjustment: vrOverlay.placementAdjustment,
+      gazeZoomStatus: vrOverlay.gazeZoomStatus,
+      getGazeState: vrOverlay.getGazeState,
+      nativeControllers: [...vrOverlay.nativeControllers, desktopOverlay.nativeController],
       runtimeInfo: vrOverlay.runtimeInfo,
       cleanedUp: false,
     };
@@ -1353,8 +1404,36 @@ app.whenReady().then(async ()=>{
   })
 
   const backend = new BackendService();
+  const gazeIntegration = createOpenXrGazeIntegration({
+    userDataDirectory: app.getPath('userData'),
+    getHostProcessId: () => VROverlay.getRuntimeInfo().openxrHostProcessId,
+    binaryPath: app.isPackaged
+      ? path.join(process.resourcesPath, 'openxr-gaze', 'covas_openxr_gaze.dll')
+      : path.join(import.meta.dirname, '..', 'build', 'openxr-gaze', 'covas_openxr_gaze.dll'),
+  });
   const mainWindow = createMainWindow();
   let floatingOverlay = null;
+  backend.onMessage = async message => {
+    if (message.type !== 'vr_placement_request') return;
+    let result;
+    try {
+      result = { success: true, ...await handleVrPlacementRequest(message, floatingOverlay?.placementAdjustment) };
+    } catch (error) {
+      logger.error({ err: error }, 'VR placement adjustment failed.');
+      result = { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    backend.sendJsonLine(null, { jsonLine: JSON.stringify({
+      type: 'vr_placement_result', request_id: message.request_id, ...result,
+    }) });
+  };
+  backend.onExit = () => {
+    try {
+      const state = floatingOverlay?.placementAdjustment?.close();
+      if (state) backend.emitMessage({ type: 'vr_placement_state', ...state });
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to restore VR placement after the assistant stopped.');
+    }
+  };
   ipcMain.handle('send_json_line', (...args)=>backend.sendJsonLine(...args));
   ipcMain.handle('start_process', (...args)=>{
     // Close existing overlay on process start (handles reload scenarios)
@@ -1385,6 +1464,7 @@ app.whenReady().then(async ()=>{
         }
       });
     }
+    return { gazeZoom: floatingOverlay.getGazeState?.() ?? floatingOverlay.gazeZoomStatus ?? { status: 'disabled' } };
   });
   ipcMain.handle('destroy_floating_overlay', async (event) => {
     if (floatingOverlay) {
@@ -1406,7 +1486,17 @@ app.whenReady().then(async ()=>{
   ipcMain.handle('stop_remote_interface', async () => stopRemoteInterface());
   ipcMain.handle('get_remote_interface_state', async () => getRemoteInterfaceState());
   ipcMain.handle('get_remote_interface_bind_addresses', async () => getRemoteInterfaceBindAddresses());
-  ipcMain.handle('get_overlay_runtime_info', async () => getOverlayRuntimeInfo());
+  ipcMain.handle('get_overlay_runtime_info', async () => ({
+    ...await getOverlayRuntimeInfo(),
+    activeVrSettings: floatingOverlay?.placementAdjustment?.getSettings() ?? null,
+    gazeZoom: floatingOverlay?.getGazeState?.(),
+  }));
+  ipcMain.handle('get_openxr_gaze_integration_status', async () => gazeIntegration.getStatus());
+  ipcMain.handle('openxr_gaze_integration_action', async (_event, action) => {
+    if (action === 'install') return gazeIntegration.install();
+    if (action === 'uninstall') return gazeIntegration.uninstall();
+    throw new TypeError('Invalid OpenXR gaze integration action.');
+  });
   ipcMain.handle('get_vr_compatibility_state', async () => getVrCompatibilityState());
   ipcMain.handle('vr_integration_action', async (_event, action) => {
     if (!['install', 'enable', 'disable', 'uninstall'].includes(action)) {

@@ -1,7 +1,7 @@
 import { AfterViewChecked, Component, ElementRef, Input, OnChanges, SimpleChanges, OnDestroy } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { MatCardModule } from "@angular/material/card";
-import { ChatMessage, ChatService } from "../../services/chat.service";
+import { ChatMessage, ChatService, DisplayChatMessage } from "../../services/chat.service";
 import { Character, CharacterService } from "../../services/character.service";
 import { Subscription } from "rxjs";
 
@@ -17,9 +17,10 @@ import { Subscription } from "rxjs";
 })
 export class ChatContainerComponent implements AfterViewChecked, OnChanges, OnDestroy {
   @Input() limit?: number;
+  @Input() showEvents = true;
 
-  chat: ChatMessage[] = [];
-  private fullChat: ChatMessage[] = [];
+  chat: DisplayChatMessage[] = [];
+  private fullChat: DisplayChatMessage[] = [];
   private readonly filteredEventNames = new Set([
     "materials",
     "missions",
@@ -45,6 +46,7 @@ export class ChatContainerComponent implements AfterViewChecked, OnChanges, OnDe
   private shouldScroll: boolean = false;
   private currentCharacter: Character | null = null;
   private characterSubscription?: Subscription;
+  private chatSubscription?: Subscription;
 
   private element!: ElementRef<HTMLElement>;
 
@@ -54,7 +56,7 @@ export class ChatContainerComponent implements AfterViewChecked, OnChanges, OnDe
     element: ElementRef<HTMLElement>
   ) {
     this.element = element;
-    this.chatService.chatHistory$.subscribe((chat) => {
+    this.chatSubscription = this.chatService.displayChatHistory$.subscribe((chat) => {
       //console.log("chat received", chat);
       this.fullChat = chat;
       const previousLength = this.chat.length;
@@ -72,14 +74,15 @@ export class ChatContainerComponent implements AfterViewChecked, OnChanges, OnDe
   }
 
   ngOnDestroy(): void {
+    this.chatSubscription?.unsubscribe();
     this.characterSubscription?.unsubscribe();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if ("limit" in changes) {
+    if ("limit" in changes || "showEvents" in changes) {
       const previousLength = this.chat.length;
       this.applyLimit();
-      // Scroll if limit change affects displayed messages
+      // Scroll if display options affect displayed messages
       if (this.chat.length !== previousLength) {
         this.shouldScroll = true;
       }
@@ -110,6 +113,9 @@ export class ChatContainerComponent implements AfterViewChecked, OnChanges, OnDe
   private isFilteredEvent(msg: ChatMessage): boolean {
     if (msg.role?.toLowerCase() !== "event") {
       return false;
+    }
+    if (!this.showEvents) {
+      return true;
     }
     const name = msg.message?.trim().toLowerCase();
     return !!name && this.filteredEventNames.has(name);

@@ -5,6 +5,7 @@ import { GenUiRenderComponent } from "./components/gen-ui-render/gen-ui-render.c
 
 export const routes: Routes = [
     { path: "", component: MainViewComponent },
+    { path: "overlay/interface", component: MainViewComponent, data: { overlayInterface: true } },
     { path: "overlay", component: OverlayViewComponent },
     { path: "genui", component: GenUiRenderComponent },
 ];

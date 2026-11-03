@@ -16,7 +16,7 @@ from .UI import emit_message
 
 from .PluginBase import PluginBase, PluginManifest
 from .PluginNamespace import PluginNamespace
-from .PluginUIDefinitions import UIComponent, view_target
+from .PluginUIDefinitions import UIComponent, ui_fields, view_target
 from .Models import LLMModel, STTModel, TTSModel, EmbeddingModel
 
 from typing import TYPE_CHECKING
@@ -494,7 +494,7 @@ class PluginManager:
         settings_config = plugin.settings_config
         if settings_config is not None:
             for grid in settings_config.get("grids", []):
-                for field in grid.get("fields", []):
+                for field in ui_fields(grid.get("fields", []) + grid.get("content", [])):
                     if self._is_status_field(field) and field.get("key") == key:
                         field["content"] = str(value)
 
@@ -542,7 +542,7 @@ class PluginManager:
         if settings_config is None:
             return
         for grid in settings_config.get("grids", []):
-            for field in grid.get("fields", []):
+            for field in ui_fields(grid.get("fields", []) + grid.get("content", [])):
                 if self._is_status_field(field):
                     setting_key = field.get("key")
                     if setting_key in plugin.settings:
@@ -603,7 +603,10 @@ class PluginManager:
                              "two-letter language code or None.")
         return language
 
-    def create_plugin_model(self, plugin_guid: str, provider_id: str, expected_kind: str) -> LLMModel | STTModel | TTSModel | EmbeddingModel | None:
+    def create_plugin_model(
+        self, plugin_guid: str, provider_id: str, expected_kind: str,
+        *, settings_override: dict[str, Any] | None = None,
+    ) -> LLMModel | STTModel | TTSModel | EmbeddingModel | None:
         """
         Create a model instance from a plugin provider.
         
@@ -631,7 +634,7 @@ class PluginManager:
             return None
         
         # Get plugin settings
-        settings = self.config.get('plugin_settings', {}).get(plugin_guid, {})
+        settings = settings_override if settings_override is not None else self.config.get('plugin_settings', {}).get(plugin_guid, {})
         
         # Call the plugin's create_model method
         try:

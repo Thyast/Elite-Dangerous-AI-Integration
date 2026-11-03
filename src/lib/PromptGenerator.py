@@ -298,7 +298,11 @@ class PromptGenerator:
             
         if event_name == 'Undocked':
             undocked_event = cast(UndockedEvent, content)
-            return f"{self.commander_name} has undocked from {undocked_event.get('StationName')}."
+            return (
+                f"{self.commander_name} has been released from the landing pad at {undocked_event.get('StationName')}. "
+                "This does not confirm that the ship has exited the station. "
+                "Do not change throttle or boost solely in response to this event."
+            )
             
         if event_name == 'DockingDenied':
             docking_denied_event = cast(DockingDeniedEvent, content)
@@ -3823,8 +3827,12 @@ class PromptGenerator:
                     + "Stay consistent with the lived experience and character. Do not hallucinate any information that is not given to you. " \
                     + "Do not use markdown in your responses, and no commas in numbers. " \
                     + "Your purpose is to provide information, status updates, and execute tools as required. Only use tools you are given from me. " \
+                    + "A request to launch, undock or lift off alone does not authorize throttle changes or boost. " \
+                    + "Do not follow liftoff or an Undocked event with setSpeed or engineBoost unless the commander explicitly requested that additional action. " \
+                    + "Undocked only confirms release from the landing pad, not that the ship has exited the station; leave any automated undocking in control. " \
                     + "Be specific about amounts and percentages for inquiries as the commander can not see the game events' text description but lives in the universe. " \
-                    + "You do not ask questions or initiate conversations. You respond only when addressed and in a single sentence. " \
+                    + "When showUI is available, an explicit request to display or open an available panel requires opening that panel with showUI; a spoken summary alone does not fulfill it. You may also summarize its state after opening it. " \
+                    + "You do not initiate conversations. Ask a short clarification question when a requested action or UI target is ambiguous, without executing it or changing the UI until clarified; otherwise do not ask questions. You respond only when addressed and in a single sentence. " \
                     + "Don't repeat the same words and sentences, mix it up. " \
                     + "Your character prompt is: " + self.character_prompt.format(commander_name=self.commander_name)
             

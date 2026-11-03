@@ -1,18 +1,22 @@
 <!-- GenUI Background Layer - fills the entire 16:9 container -->
+@if (!chatOnly) {
 <div class="genui-container">
     <app-gen-ui-render></app-gen-ui-render>
 </div>
+}
 
-<div class="streamer-window-drag" *ngIf="isStreamerWindow"></div>
+<div class="streamer-window-drag" *ngIf="isStreamerWindow && !chatOnly"></div>
 
 <!-- Avatar and Chat Overlay Layer -->
 <div class="overlay-container" 
      [class.position-left]="avatarPosition === 'left'" 
      [class.position-right]="avatarPosition === 'right'"
-     *ngIf="avatarShow || chatShow">
+     *ngIf="chatOnly || avatarShow || chatShow">
     <div class="overlay-character" [ngClass]="action">
-        <app-voice-activation-status></app-voice-activation-status>
-        @if (avatarShow) {
+        @if (!chatOnly) {
+            <app-voice-activation-status></app-voice-activation-status>
+        }
+        @if (avatarShow && !chatOnly) {
           @if (avatarUsesInlineSvg) {
             <div class="overlay-svg-tuber"
                  #svgTuberElement
@@ -26,7 +30,7 @@
                  #pngtuberElement></div>
           }
         }
-        <div class="overlay-chat" *ngIf="chatShow">
+        <div class="overlay-chat" *ngIf="chatOnly || chatShow">
 <!--            <p class="ready-text" *ngIf="runMode=='starting'">System preparing...</p>-->
             @for (msg of chat; track msg.index) {
               <div class="chat-entry">

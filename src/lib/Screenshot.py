@@ -34,20 +34,30 @@ def get_windows_game_window_handle():
     return win32gui.FindWindow(0, WINDOWS_GAME_WINDOW_TITLE)
 
 
-def set_windows_game_window_active() -> None:
+def set_windows_game_window_active(*, require_focus: bool = False) -> None:
     handle = get_windows_game_window_handle()
     if not handle:
+        if require_focus:
+            raise RuntimeError("Elite Dangerous is not running or its game window is unavailable.")
         log("info", "Unable to find Elite game window")
         return
 
     import win32gui
 
     try:
-        win32gui.SetForegroundWindow(handle)
+        if require_focus and win32gui.IsIconic(handle):
+            import win32con
+            win32gui.ShowWindow(handle, win32con.SW_RESTORE)
+        if not require_focus or win32gui.GetForegroundWindow() != handle:
+            win32gui.SetForegroundWindow(handle)
         sleep(0.15)
         log("debug", "Set game window as active")
-    except Exception:
+    except Exception as error:
+        if require_focus:
+            raise RuntimeError(f"Unable to focus Elite Dangerous; no recenter input was sent: {error}") from error
         log("warn", "Failed to set game window as active")
+    if require_focus and win32gui.GetForegroundWindow() != handle:
+        raise RuntimeError("Unable to focus Elite Dangerous; no recenter input was sent. Activate the game window and retry.")
 
 
 def screenshot_windows_game_window(new_height: int) -> Image.Image | None:
@@ -152,6 +162,8 @@ def screenshot_game_window(new_height: int) -> Image.Image | None:
     return None
 
 
-def set_game_window_active() -> None:
+def set_game_window_active(*, require_focus: bool = False) -> None:
     if platform.system() == "Windows":
-        set_windows_game_window_active()
+        set_windows_game_window_active(require_focus=require_focus)
+    elif require_focus:
+        raise RuntimeError("Verified Elite Dangerous window activation is currently supported on Windows only.")

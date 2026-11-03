@@ -57,7 +57,6 @@ def checkStatus(projected_states: ProjectedStates, blocked_status_dict: dict[str
                         raise Exception(f"Action not possible due to {'not ' if not expected_value else ''}being in a state of {blocked_status}!")
 
 
-# Define functions for each action
 # General Ship Actions
 def fire_weapons(args, projected_states):
     checkStatus(projected_states, {'Docked': True, 'Landed': True})
@@ -740,7 +739,7 @@ def fsd_jump(args, projected_states):
 
 def next_system_in_route(args, projected_states):
     nav_info = get_state_dict(projected_states, 'NavInfo')
-    if not nav_info.get('NextJumpTarget'):
+    if not nav_info.get('NavRoute'):
         return "cannot target next system in route as no navigation route is currently set"
 
     setGameWindowActive()
@@ -764,7 +763,11 @@ def liftoff(args, projected_states):
         keys.send('UI_Down', repeat=3)
         keys.send('UI_Up')
         keys.send('UI_Select')
-        return 'The ship is now undocking.'
+        return (
+            'Undocking initiated. The ship may still be inside the station after the Undocked event, '
+            'which only confirms release from the landing pad. '
+            'Leave throttle unchanged and do not boost unless the commander explicitly requested it.'
+        )
 
     if flags.get('Landed'):
         keys.send('UpThrustButton', hold=3)
@@ -1582,7 +1585,7 @@ def register_actions(actionManager: ActionManager, eventManager: EventManager, p
         "honk": {"weaponType": "discovery_scanner", "action":"fire"},
     })
 
-    actionManager.registerAction('setSpeed', "Change flight thrust", {
+    actionManager.registerAction('setSpeed', "Change flight thrust when requested by the commander. Do not use as an automatic follow-up to liftoff or an Undocked event.", {
         "type": "object",
         "properties": {
             "speed": {
@@ -2153,7 +2156,7 @@ def register_actions(actionManager: ActionManager, eventManager: EventManager, p
         "docking permission": {},
     })
 
-    actionManager.registerAction('liftoff', "Undock from station or lift off from planet", {
+    actionManager.registerAction('liftoff', "Initiate undocking from a station or lift off from a planet. A launch request alone does not authorize throttle changes or boost.", {
         "type": "object",
         "properties": {}
     }, liftoff, ['mainship', 'nomad'], permission='liftoff', cache_prefill={

@@ -26,8 +26,8 @@ Relevant source files:
 | Responsibility | Source |
 | --- | --- |
 | Public hooks | `src/lib/PluginBase.py` |
-| Shared Python component types | `src/lib/PluginUIDefinitions.py` |
-| Settings layout, provider types and deprecated component aliases | `src/lib/PluginSettingDefinitions.py` |
+| Shared Python components, conditions and grids | `src/lib/PluginUIDefinitions.py` |
+| Settings metadata, provider types and deprecated aliases | `src/lib/PluginSettingDefinitions.py` |
 | Registration, publication, interaction routing | `src/lib/PluginManager.py` |
 | Runtime event/action integration | `src/lib/PluginHelper.py` |
 | Command handling before and during Run | `src/Chat.py` |
@@ -85,6 +85,7 @@ A `PluginUIView` contains:
 | --- | --- | --- |
 | `id` | Yes | Nonempty local identifier, unique within the plugin, without `:`. |
 | `label` | Yes | User-facing translation key. |
+| `voice_aliases` | No | Business names/synonyms in any supported language, independent of the displayed label. |
 | `sections` | Yes | Ordered section definitions. |
 | `icon` | No | Material icon name. |
 | `description` | No | Assistant-facing description used in the `showUI` tool schema. Explain the view's purpose and any preparation action here. |
@@ -98,14 +99,69 @@ Each section has a stable `key`, a translated `label`, and optionally:
 
 - `grids`: ordered keys referencing grids from this plugin's exported settings.
 - `content`: ordered generic content nodes.
+- `voice_aliases`: business names/synonyms for this subtab, independent of its displayed label or GUI language.
 
 Both may be supplied: the grids render first, followed by content. Missing grid
 references produce no grid. Keep section keys unique and stable for navigation.
 
+The `showUI` schema includes translated view/subtab labels from every registered
+language, their stable keys and `voice_aliases`. For example:
+
+```python
+UIViewSection(
+    key="session",
+    label="@progress.title",
+    voice_aliases=["progression du vaisseau", "suivi des ameliorations", "ship upgrade progress"],
+    grids=["session"],
+)
+```
+
+The GUI may display **Progress** while French voice requests select this same
+subtab. Exact French/English display requests, including `affiche-moi`,
+`montre-moi` and `show me`, are resolved locally from published plugin metadata
+before the action cache or model, even when the action cache is disabled.
+They open the requested view/subtab first; the assistant may then give a spoken
+summary, but a status-reading operation alone does not fulfill a display request.
+No domain-specific plugin names are embedded in this local resolver.
+The same requests are also prefilled against the final tool schema.
+When multiple plugin views are
+available, unqualified plugin navigation requests go through the model rather
+than a direct prefilled shortcut, so semantically similar aliases cannot bypass
+disambiguation. Qualified subtab requests include the view name, for example
+`show progress in ship upgrades`. Exact collisions, including accent variants,
+are never prefilled, even when qualified.
+
+The tool exposes each view's owning plugin name alongside its translated labels
+and aliases. If multiple plugins, views or subtabs plausibly match the request,
+the assistant must ask the player which one they mean, naming the alternatives
+in the player's language, and leave the UI unchanged until clarified. It must
+not choose based on registration order or the currently open tab. Explicitly
+identifying a view/subtab allows navigation; a shared alias alone does not.
+Publishing new labels, aliases or available views refreshes navigation without
+changing plugin data or overriding built-in navigation shortcuts.
+
+`setUISectionExpanded` controls collapsible content in the active subtab by name
+or one-based visible header index. The tool receives available plugin grid,
+category and detail labels. The shared renderer exposes stable identities and
+translations for lookup; generic Material accordion headers and native `details`
+summaries are also supported. Headers hidden in inactive tabs or under a closed
+parent are excluded from indexing. The command carries a correlated request ID;
+the desktop UI acknowledges the actual expanded state through
+`ui_section_result`, while the VR window applies the same command without
+duplicating the acknowledgement. Errors and a five-second timeout are returned
+to the assistant. These are transient presentation changes, not plugin actions.
+
 ## Shared components
 
+Settings and views use one component contract and one recursive renderer, including
+conditions, notifications and grouped buttons. Settings grids only add layout,
+headers and optional collapse behavior; they do not define another set of fields.
+Hidden fields keep their saved values and defaults; hidden buttons are not selected
+by Enter-to-submit. Plugin notification labels and content use the same translation
+resolution as other shared fields.
+
 Settings `fields`, grid `content`, view-section `content`, container `children`
-and list-row `details` all accept the same `UIComponent` union and use the same
+and list-row `summary`/`details` all accept the same `UIComponent` union and use the same
 recursive renderer. A text input or button does not have to be placed inside a
 settings grid to work in a view; progress and other display components do not
 have to be placed in a separate settings `content` array.
@@ -117,6 +173,8 @@ Import new typed constructors from `lib.PluginUIDefinitions`:
 | `TextInput`, `TextArea`, `NumberInput`, `Toggle`, `Select`, `Filter` | `text`, `textarea`, `number`, `toggle`, `select`, `filter` | Inputs with local keys, labels and typed `default_value` properties. |
 | `Button` | `button` | Calls `on_settings_button(key)` by default, in either context. Set `action` and optional `payload` to call `on_ui_action` instead. |
 | `Paragraph`, `Error` | `paragraph`, `error` | Label and `content`, with optional interpolation `params`. |
+| `Notification` | `notification` | Informational, warning or error content with a `level`. |
+| `Condition` | `condition` | A `condition: UICondition` and nested `fields`, usable anywhere a component is accepted. |
 | `Text`, `Heading`, `Section`, `Inline`, `List`, `Progress`, `Action` | See below | Display, layout and structured actions. |
 
 Constructors still require the explicit `type` discriminator, as historical
@@ -125,6 +183,24 @@ settings constructors did. `TextInput(type="text", ...)` is an input;
 `row_actions`, or `children` for a bullet list. Input keys are nonempty, flat,
 local names; reusing a key in settings and views deliberately shares its value.
 Use distinct keys for independent inputs.
+
+For example, the same conditional component can be returned in settings or a view:
+
+```python
+Condition(
+    key="advanced_options",
+    type="condition",
+    condition=UICondition(key="advanced", operator="eq", value=True),
+    fields=[TextInput(key="voice", type="text", default_value="Kore",
+                      min_length=None, max_length=None)],
+)
+```
+
+Conditions read the current input namespace in both contexts, including nested
+containers and list rows. `ui_fields()` traverses all descendants, including
+hidden ones, when resolving defaults. Rendering does not determine persistence:
+declared settings retain automatic persistence through the default input callback,
+while view-only inputs remain transient unless the plugin saves them explicitly.
 
 ### Historical aliases
 
@@ -142,12 +218,21 @@ dictionaries with the same properties and behavior:
 | `SelectSetting` | `Select` |
 | `ButtonSetting` | `Button` |
 | `ParagraphSetting` | `Paragraph` |
+| `NotificationSetting` | `Notification` |
 | `ErrorSetting` | `Error` |
+| `SettingCondition` | `UICondition` |
+| `ConditionSetting` | `Condition` |
+| `SettingsGrid` | `UIGrid` |
+| `SettingField`, `SettingsField`, `SettingsElement` | `UIComponent` |
+| `settings_fields` | `ui_fields` |
 
-`PluginSettings`, `SettingsGrid`, `SelectOption` and provider definitions retain
+`PluginSettings`, `SelectOption`, `GridHeaderAction` and provider definitions retain
 their import paths. The additional `FilterSetting` and `ListSetting` names also
 remain aliases. Existing `settings_config`, `on_settings_changed()` and
 single-argument `on_settings_button(key)` implementations continue to work.
+Frontend historical types and condition/traversal helpers are re-exported from
+`plugin-settings.ts`; their implementations live alongside the shared UI contract
+in `plugin-ui.ts`.
 
 ### Display and layout
 

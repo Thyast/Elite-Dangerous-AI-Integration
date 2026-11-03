@@ -6,7 +6,7 @@ from time import sleep
 from typing import Any, Callable, Literal
 
 import requests
-from pyautogui import typewrite
+from pyautogui import hotkey
 
 from ..Logger import log
 from ..Projections import ProjectedStates, get_state_dict
@@ -683,7 +683,8 @@ class Plotter:
         self.keys.send('UI_Select')
         sleep(.05)
 
-        typewrite(system_name.split('+', 1)[0], interval=0.02)
+        hotkey('ctrl', 'a')
+        self.keys.send_text(system_name)
         sleep(0.05)
 
         self.keys.send_key('Down', 'Key_Enter')
@@ -738,7 +739,14 @@ class Plotter:
         except TimeoutError:
             if clear_nav_route:
                 return "Failed to clear navigation route"
-            return f"Failed to plot a route to {system_name}"
+            _events, latest = self.event_manager.get_current_state()
+            route = get_state_dict(latest, 'NavInfo').get('NavRoute') or []
+            destination = self._nav_route_item_system(route[-1]) if route else None
+            warning = (f"A route to {destination} is active instead; do not follow it toward {system_name}."
+                       if destination else "No navigation route is confirmed.")
+            log('warn', f"Route to {system_name} was not confirmed. {warning}")
+            return (f"Failed to confirm a route to {system_name}. {warning} "
+                    "This does not establish that the destination is unreachable.")
 
     @staticmethod
     def calculate_navigation_distance_and_timing(current_system: str, target_system: str) -> tuple[float, int]:

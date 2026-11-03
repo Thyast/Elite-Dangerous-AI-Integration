@@ -25,6 +25,11 @@
   color: var(--hud-text);
 }
 
+.repeat-count {
+  margin-left: 6px;
+  color: var(--hud-muted);
+}
+
 .processing-text {
   display: inline-block;
   margin-left: 10px;

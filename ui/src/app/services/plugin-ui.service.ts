@@ -17,7 +17,6 @@ export class PluginUIService {
   private readonly viewsSubject = new BehaviorSubject<RegisteredUIView[]>([]);
   readonly views$ = this.viewsSubject.asObservable();
   private readonly pending = new Map<string, {resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>}>();
-  private sequence = 0;
   private languages = new Set<string>();
   private states: Record<string, Record<string, unknown>> = {};
   private readonly edits = new Map<string, Map<string, {value: unknown}>>();
@@ -100,7 +99,7 @@ export class PluginUIService {
   }
 
   invoke(pluginGuid: string, action: string, payload: Record<string, unknown> = {}): Promise<unknown> {
-    const requestId = `plugin-ui-${++this.sequence}`;
+    const requestId = `plugin-ui-${crypto.randomUUID()}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);

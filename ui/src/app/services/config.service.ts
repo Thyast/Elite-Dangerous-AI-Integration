@@ -13,6 +13,11 @@ export interface RunningConfigMessage extends BaseMessage {
     type: 'running_config';
     config: Config;
 }
+export interface VrPlacementStateMessage extends BaseMessage {
+    type: "vr_placement_state";
+    active: boolean;
+    config: Partial<Config>;
+}
 export interface ChangeConfigMessage extends BaseCommand {
     type: "change_config";
     config: Partial<Config>;
@@ -36,11 +41,26 @@ export interface RefreshSystemInfoMessage extends BaseCommand {
     type: "refresh_system_info";
 }
 
+export interface BindingKeyIssue {
+    action: string;
+    binding: string;
+    key: string;
+    role: 'key' | 'modifier';
+    character: string | null;
+    layout: string | null;
+    platform: string;
+    modifiers: string[];
+    reason: string;
+    native_shift_state?: number;
+}
+
 export interface KeybindsMessages extends BaseMessage {
     type: "keybinds";
     missing: string[];
     collisions: [string,string][];
     unsupported: string[];
+    unresolved_keys?: BindingKeyIssue[];
+    mapping_warnings?: BindingKeyIssue[];
     start_mismatch?: boolean | { file: string | null; values: string[] } | null;
     start_values?: string[];
     start_profile?: string | null;
@@ -92,7 +112,6 @@ export interface Config {
     embedding_provider: string;
     vision_var: boolean;
     ptt_var: "voice_activation" | "push_to_talk" | "push_to_mute" | "toggle" | "wake_word";
-    wake_word_name: string;
     wake_word_timeout: number;
     wake_word_source: "main" | "parakeet";
     wake_word_first_command: "retranscribe" | "reuse";
@@ -138,6 +157,9 @@ export interface Config {
     overlay_standalone_background_color: string;
     overlay_vr_size_meters: number;
     overlay_vr_anchor: "head" | "world";
+    overlay_vr_content: "hud" | "interface";
+    overlay_vr_gaze_zoom: boolean;
+    overlay_vr_gaze_reduction_factor: number;
     overlay_vr_horizontal_offset: number;
     overlay_vr_vertical_offset: number;
     overlay_vr_distance_offset: number;
@@ -191,22 +213,28 @@ export class ConfigService {
             ): message is
                 | ConfigMessage
                 | RunningConfigMessage
+                | VrPlacementStateMessage
                 | SystemInfoMessage
                 | PluginSettingsMessage
                 | PluginModelProvidersMessage
                 | KeybindsMessages =>
                 message.type === "config" ||
                 message.type === "running_config" ||
+                message.type === "vr_placement_state" ||
                 message.type === "system" ||
                 message.type === "plugin_settings_configs" ||
                 message.type === "plugin_model_providers" ||
                 message.type === "keybinds"
             ),
-        ).subscribe((message: ConfigMessage | RunningConfigMessage | SystemInfoMessage | PluginSettingsMessage | PluginModelProvidersMessage | KeybindsMessages) => {
+        ).subscribe((message: ConfigMessage | RunningConfigMessage | VrPlacementStateMessage | SystemInfoMessage | PluginSettingsMessage | PluginModelProvidersMessage | KeybindsMessages) => {
             if (message.type === "config") {
                 this.configSubject.next(message.config);
             } else if (message.type === "running_config") {
                 this.configSubject.next(message.config);
+            } else if (message.type === "vr_placement_state") {
+                if (this.configSubject.value) {
+                    this.configSubject.next({ ...this.configSubject.value, ...message.config });
+                }
             } else if (message.type === "system") {
                 // Do not mutate SystemInfo with screen data
                 this.systemSubject.next(message.system);

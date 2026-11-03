@@ -4,6 +4,10 @@ import sys
 from typing import Any
 from unittest.mock import patch
 
+import httpx
+import pytest
+from openai import OpenAI
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
@@ -115,6 +119,42 @@ def test_google_provider_definitions_and_models() -> None:
     assert isinstance(plugin.create_model("stt", {}), OpenAIMultiModalSTTModel)
     assert isinstance(plugin.create_model("tts", {}), GoogleAIStudioTTSModel)
     assert isinstance(plugin.create_model("embedding", {}), OpenAIEmbeddingModel)
+
+
+@pytest.mark.parametrize("override_key", ["", "embedding-test-key"])
+def test_google_embeddings_use_google_endpoint_and_configured_key(override_key: str) -> None:
+    plugin = GoogleAIStudioPlugin(manifest(GOOGLE_AI_STUDIO_PLUGIN_GUID, "Google"))
+    model = plugin.create_model("embedding", {
+        "api_key": "shared-google-test-key",
+        "embedding_api_key": override_key,
+    })
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={
+            "object": "list",
+            "model": "gemini-embedding-001",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.25, 0.75]}],
+            "usage": {"prompt_tokens": 2, "total_tokens": 2},
+        })
+
+    base_url = model.client.base_url
+    key = model.client.api_key
+    model.client.close()
+    with OpenAI(
+        base_url=base_url,
+        api_key=key,
+        http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    ) as client:
+        model.client = client
+        assert model.create_embedding("Synthetic memory") == ("gemini-embedding-001", [0.25, 0.75])
+
+    assert len(requests) == 1
+    assert requests[0].url.host == "generativelanguage.googleapis.com"
+    assert requests[0].url.path.endswith("/embeddings")
+    assert requests[0].headers["Authorization"] == f"Bearer {override_key or 'shared-google-test-key'}"
+    assert json.loads(requests[0].content)["model"] == "gemini-embedding-001"
 
 
 def test_openrouter_slots_and_models_are_independent() -> None:

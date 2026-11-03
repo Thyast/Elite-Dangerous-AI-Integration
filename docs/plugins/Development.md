@@ -213,6 +213,8 @@ self.model_providers = [ModelProviderDefinition(
 
 Existing implementations only need `synthesize(text, voice)`. Providers that require additional character voice fields may override `synthesize_with_settings(text, settings)`; its default implementation forwards `settings["voice"]` to `synthesize`.
 
+The character voice preview creates a temporary TTS model and calls `close()` after playback, including on failure. Override this optional method to close HTTP clients or other resources owned by that model instance. The base implementation is a no-op for existing plugins. Do not return an externally owned shared model instance from `create_model` if closing it would disrupt an active session.
+
 ## PluginHelper Methods
 
 The `PluginHelper` class provides several methods for interacting with the COVAS:NEXT system:
@@ -226,8 +228,24 @@ The `PluginHelper` class provides several methods for interacting with the COVAS
   - `prompt_generator`: A callable that takes a PluginEvent and returns a string prompt to add to the assistant conversation
 - `helper.dispatch_event(event: PluginEvent)`:  
    Dispatch an event from an outside source. The event must be of type `PluginEvent`.
+   Events are processed normally without adding a raw chat line unless
+   `plugin_event_content` is a dictionary containing a non-blank string `text`.
+   This explicit chat payload can also include an `avatar_url`. Technical event
+   names are not used as fallback chat messages; assistant replies remain
+   independent of this display rule.
 
 ### State Management
+
+The `Loadout` projection applies fitting, retrieval, removal, storage, swap and
+engineering events after the last complete ship snapshot. Events identifying
+another ShipID do not change the current ship's modules. Incremental events can
+omit health, power settings or engineering identifiers; these remain `None`
+until reported rather than being inferred from the module they replaced.
+When restoring a persisted projection, the older journal prefix outside the
+stored conversation window must not be replayed over that snapshot: its
+historical events have no processing timestamp but are already reflected in
+the saved state. Fresh or source-version-invalidated projections still replay
+that prefix before the stored event tail to reconstruct the complete state.
 
 - `helper.get_current_state()`:
     Return `(processed_events, projected_states)`. Projection values may be
@@ -261,6 +279,26 @@ The `PluginHelper` class provides several methods for interacting with the COVAS
 
 - `helper.register_status_generator(status_generator: Callable[[dict[str, dict]], list[tuple[str, Any]]])`:  
    Register a status generator callback for adding information to the model's status context. The callable takes the current projected states and returns a list of (title, content) tuples.
+
+- `helper.prepare_navigation(system: str) -> NavigationPreparation`:
+    Prepare actual in-game navigation to an exact system using the enabled
+    `plotToTarget`, `galaxyMapOpenOrClose` and `target_next_system_in_route`
+    actions. Requires the commander aboard the main ship with no FSD charge or
+    jump in progress. Docked (including inside the hangar) and landed ships are
+    supported: plotting navigation does not require taking off.
+    Reuses a correctly plotted route, otherwise plots it, verifies its final
+    destination, closes the galaxy map and targets the next route system.
+    Never engages the FSD, changes throttle or undocks.
+
+    The structured result contains `status` (`ready`, `arrived`, `blocked` or
+    `failed`), `system`, `active_destination`, `next_jump` and `message`.
+    Only `ready` confirms navigation preparation, not clearance for departure.
+    `arrived` means local work
+    remains in that system, not that a plugin may skip the stop. On failure,
+    relay any different active destination and warn against following it.
+    An unconfirmed plot is not proof that a system is unreachable.
+    Normal plotting may query Spansh to resolve a target and EDSM for distance,
+    just like the corresponding assistant action.
 
 ### Input Simulation
 

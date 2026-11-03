@@ -115,6 +115,7 @@ class TTS:
         postprocessing_config: CharacterTTSPostprocessingConfig | None = None,
         output_device: Optional[str] = None,
         output_volume_multiplier: float = 1.0,
+        start_playback_thread: bool = True,
     ) -> None:
         self.tts_model = tts_model
         self.voice = voice
@@ -143,9 +144,32 @@ class TTS:
         )
         self._glitch_state = GlitchState(history=deque(maxlen=64))
 
-        thread = threading.Thread(target=self._playback_thread)
-        thread.daemon = True
-        thread.start()
+        if start_playback_thread:
+            thread = threading.Thread(target=self._playback_thread)
+            thread.daemon = True
+            thread.start()
+
+    def play_once(self, text: str) -> None:
+        stream = None
+        try:
+            stream = self.p.open(
+                format=self.output_format,
+                channels=1,
+                rate=24_000,
+                frames_per_buffer=self.frames_per_buffer,
+                output=True,
+                output_device_index=self._get_output_device_index(),
+            )
+            self._playback_one(text, stream, context="voice_preview", raise_synthesis_errors=True)
+        finally:
+            try:
+                if stream is not None:
+                    try:
+                        stream.stop_stream()
+                    finally:
+                        stream.close()
+            finally:
+                self.p.terminate()
 
     def _normalize_queue_item(self, item: Any) -> dict[str, Any]:
         if isinstance(item, str):
@@ -273,6 +297,8 @@ class TTS:
                             if not isinstance(file_path, str) or not file_path:
                                 continue
                             self._playback_audio_file(file_path, stream)
+                        elif item_type == "listening_end_tone":
+                            self._playback_listening_end_tone(stream)
                         else:
                             if not isinstance(text, str) or not text:
                                 continue
@@ -313,6 +339,7 @@ class TTS:
         voice_override: str | None = None,
         postprocessing_override: CharacterTTSPostprocessingConfig | None = None,
         postprocessing_layers: list[CharacterTTSPostprocessingConfig | None] | None = None,
+        raise_synthesis_errors: bool = False,
     ):
         # Fix numberformatting for different providers
         text = re.sub(r"\d+(,\d{3})*(\.\d+)?", self._number_to_text, text)
@@ -333,7 +360,7 @@ class TTS:
             "response_ms": None,
             "time_to_first_byte_ms": None,
         }
-        audio_stream = self._stream_audio(text, voice_override, stream_metrics)
+        audio_stream = self._stream_audio(text, voice_override, stream_metrics, raise_errors=raise_synthesis_errors)
         if postprocessing:
             audio_stream = self._postprocess_audio(audio_stream, postprocessing)
 
@@ -361,6 +388,8 @@ class TTS:
                     # log('debug', 'tts underflow detected', underflow_count)
                 stream.write(self._apply_output_gain_pcm16(chunk), exception_on_underflow=False)
         
+        if raise_synthesis_errors and total_audio_bytes == 0:
+            raise RuntimeError("The TTS provider returned no audio.")
         if underflow_count > 0:
             self.prebuffer_size *= 2
             log('debug', 'tts underflow detected, total', underflow_count, 'increasing prebuffer size to', self.prebuffer_size)
@@ -543,6 +572,7 @@ class TTS:
         text: str,
         voice_override: str | None = None,
         metrics: dict[str, float | None] | None = None,
+        raise_errors: bool = False,
     ):
         started_at = time()
         if self.tts_model is None:
@@ -574,6 +604,8 @@ class TTS:
                     metrics["response_ms"] = (time() - started_at) * 1000
             except Exception as e:
                 log('error', 'TTS synthesis error', e, traceback.format_exc())
+                if raise_errors:
+                    raise
                 show_chat_message('error', 'TTS synthesis error:', str(e))
 
     @observe()
@@ -594,6 +626,29 @@ class TTS:
                 break
             stream.write(
                 self._apply_output_gain_pcm16(frame.tobytes()),
+                exception_on_underflow=False,
+            )
+
+    def _playback_listening_end_tone(self, stream: pyaudio.Stream) -> None:
+        sample_rate = 24_000
+        tone_samples = int(0.09 * sample_rate)
+        fade_samples = int(0.01 * sample_rate)
+        envelope = np.ones(tone_samples)
+        envelope[:fade_samples] = np.linspace(0, 1, fade_samples)
+        envelope[-fade_samples:] = np.linspace(1, 0, fade_samples)
+        time_axis = np.arange(tone_samples) / sample_rate
+        tones = [
+            (np.sin(2 * np.pi * frequency * time_axis) * envelope * 0.06 * 32767).astype(np.int16)
+            for frequency in (660, 440)
+        ]
+        silence = np.zeros(int(0.03 * sample_rate), dtype=np.int16)
+        audio = np.concatenate((tones[0], silence, tones[1])).tobytes()
+        chunk_size = self.frames_per_buffer * self.sample_size
+        for offset in range(0, len(audio), chunk_size):
+            if self.is_aborted:
+                break
+            stream.write(
+                self._apply_output_gain_pcm16(audio[offset:offset + chunk_size]),
                 exception_on_underflow=False,
             )
 
@@ -1386,6 +1441,15 @@ class TTS:
                 "line": line,
             },
         )
+        return line
+
+    def play_listening_end_tone(self) -> TTSLine:
+        line = TTSLine()
+        self.read_queue.put({
+            "type": "listening_end_tone",
+            "retry_on_error": False,
+            "line": line,
+        })
         return line
 
     def play_audio_file(

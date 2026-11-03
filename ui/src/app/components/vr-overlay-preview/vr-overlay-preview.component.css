@@ -1,0 +1,86 @@
+:host {
+  display: block;
+  flex: 1 0 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+figure {
+  margin: 0;
+}
+
+figcaption {
+  margin-bottom: 0.5rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+svg {
+  display: block;
+  width: 100%;
+  max-height: 22rem;
+  overflow: hidden;
+}
+
+.reference {
+  fill: none;
+  stroke: #ff7500;
+  stroke-width: 1.5;
+}
+
+.reference line {
+  stroke-dasharray: 5 5;
+  opacity: 0.6;
+}
+
+.overlay-window {
+  fill: rgba(66, 165, 245, 0.3);
+  stroke: #42a5f5;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.25rem;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.reduced-window {
+  fill: none;
+  stroke: #42a5f5;
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.reduced-key {
+  color: #42a5f5;
+}
+
+.legend .reduced-key::before {
+  border-style: dashed;
+}
+
+.legend span::before {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.5rem;
+  margin-right: 0.4rem;
+  border: 1px solid currentColor;
+  content: "";
+}
+
+.reference-key {
+  color: #ff7500;
+}
+
+.window-key {
+  color: #42a5f5;
+}

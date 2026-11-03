@@ -1,7 +1,8 @@
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 from .PluginUIDefinitions import (
     UIComponent, UINode, InputBase, SelectOption, Select, TextInput, Filter,
-    TextArea, NumberInput, Toggle, Button, Paragraph, Error, List, ListAction, ListRow,
+    TextArea, NumberInput, Toggle, Button, Paragraph, Notification, Error, List, ListAction, ListRow,
+    UICondition, Condition, UIGrid, GridHeaderAction, ui_fields,
 )
 
 # Deprecated compatibility aliases; use PluginUIDefinitions for new components.
@@ -13,34 +14,37 @@ NumericalSetting = NumberInput
 ToggleSetting = Toggle
 ButtonSetting = Button
 ParagraphSetting = Paragraph
+NotificationSetting = Notification
 ErrorSetting = Error
 ListSetting = List
 FilterSetting = Filter
-
-class GridHeaderAction(TypedDict):
-    """Defines an action button rendered next to a grid header."""
-    key: str
-    icon: NotRequired[str]
-    label: NotRequired[str]
-
 SettingField = UIComponent
-
-
-class SettingsGrid(TypedDict):
-    """Defines a grid of settings for a plugin."""
-    key: str
-    label: str
-    fields: list[SettingField]
-    content: NotRequired[list[UIComponent]]
-    collapsible: NotRequired[bool]
-    default_collapsed: NotRequired[bool]
-    header_action: NotRequired[GridHeaderAction]
+SettingsField = UIComponent
+SettingsElement = UIComponent
+SettingCondition = UICondition
+ConditionSetting = Condition
+SettingsGrid = UIGrid
+settings_fields = ui_fields
 
 class SettingsHeaderLink(TypedDict):
     text: str
     label: str
     url: str
 
+def resolve_voice_settings(
+    grids: list[SettingsGrid], plugin_settings: dict[str, Any], character_settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge voice defaults, plugin globals, and character overrides, in that order."""
+    defaults = {
+        field['key']: field['default_value']
+        for grid in grids for field in ui_fields(grid['fields'] + grid.get('content', []))
+        if 'default_value' in field
+    }
+    return {
+        **defaults,
+        **{key: value for key, value in plugin_settings.items() if value is not None},
+        **{key: value for key, value in character_settings.items() if value is not None},
+    }
 
 class PluginSettings(TypedDict):
     """Used to define the settings for a plugin."""

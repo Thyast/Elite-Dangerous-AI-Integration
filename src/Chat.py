@@ -80,6 +80,7 @@ from lib.Projections import registerProjections
 from lib.PromptGenerator import PromptGenerator
 from lib.STT import STT, STTResult
 from lib.TTS import TTS, TTSLine
+from lib.TTSPreview import TTSPreview, resolve_tts_voice_settings
 from lib.VoiceActivation import (
     PARAKEET_GUID,
     PARAKEET_MODEL,
@@ -95,6 +96,11 @@ from lib.QuestCatalogManager import QuestCatalogManager
 from lib.SystemDatabase import SystemDatabase
 from lib.Database import ModelUsageStore, QuestDatabase, VectorStore
 from lib.Assistant import Assistant
+from lib.VrOverlayAdjustment import VrOverlayAdjustment
+from lib.VrRecenter import recenter_game_and_kneeboard
+
+
+tts_preview = TTSPreview()
 
 
 def get_model_usage_history_payload(
@@ -256,7 +262,7 @@ class Chat:
         log("debug", "Initializing Speech processing...")
         self._voice_mode_enabled = self.config.get("ptt_var") == "wake_word"
         if self._voice_mode_enabled:
-            emit_message("voice_activation", state="preparing", name=self.config.get("wake_word_name", "Simone"))
+            emit_message("voice_activation", state="preparing", name=self.character["first_name"])
         self.sttModel: STTModel | None = None
         if self.config["stt_provider"] != "none":
             stt_plugin = parse_plugin_provider(self.config["stt_provider"])
@@ -290,31 +296,9 @@ class Chat:
                 else:
                     self.ttsModel = cast(TTSModel, model)
                     provider = self.plugin_manager.get_plugin_provider(tts_plugin[0], tts_plugin[1])
-                    grids = provider.get("voice_settings_config") if provider else None
-                    if grids is not None:
-                        fields = [field for grid in grids for field in grid["fields"]]
-                        defaults = {
-                            field["key"]: field.get("default_value")
-                            for field in fields
-                            if "default_value" in field
-                        }
-                        stored = self.character.get("tts_voice_settings", {}).get(
-                            self.config["tts_provider"], {}
-                        )
-                        declared_keys = {field["key"] for field in fields}
-                        stored = {
-                            key: value
-                            for key, value in stored.items()
-                            if key in declared_keys
-                        } if isinstance(stored, dict) else {}
-                        tts_voice_settings = {
-                            **defaults,
-                            **stored,
-                        }
-                        if any(field["key"] == "voice" for field in fields):
-                            tts_voice_settings.setdefault("voice", self.character["tts_voice"])
-                        if any(field["key"] == "instructions" for field in fields):
-                            tts_voice_settings.setdefault("instructions", self.character["tts_prompt"])
+                    tts_voice_settings = resolve_tts_voice_settings(
+                        provider, self.character, self.config["tts_provider"],
+                    )
             else:
                 show_chat_message("warning", f"TTS provider is not a registered plugin: {self.config['tts_provider']}")
 
@@ -343,6 +327,7 @@ class Chat:
         self._voice_activation_warning = ""
         self._last_voice_state: str | None = None
         self._voice_control_line: TTSLine | None = None
+        self._voice_timeout_line: TTSLine | None = None
         if self._voice_mode_enabled and self.sttModel is not None:
             def create_parakeet() -> STTModel | None:
                 model = self.plugin_manager.create_plugin_model(PARAKEET_GUID, PARAKEET_MODEL, "stt")
@@ -364,7 +349,7 @@ class Chat:
                 )
                 show_chat_message("warning", self._voice_activation_warning)
             voice_activation = VoiceActivation(
-                self.config.get("wake_word_name", "Simone"),
+                self.character["first_name"],
                 self.config.get("wake_word_timeout", 10.0),
                 self.sttModel,
                 activation_model,
@@ -449,12 +434,41 @@ class Chat:
         log("debug", "Plugin helper is ready...")
 
         self.previous_states = {}
+        self.vr_adjustment = VrOverlayAdjustment(
+            get_config=lambda: self.config,
+            save=self._save_vr_position,
+            emit=send_message,
+            reply=self._reply_vr_adjustment,
+            recenter=lambda: recenter_game_and_kneeboard(self.ed_keys),
+            busy=lambda: self.assistant.is_replying,
+            assistant_name=self.character["first_name"],
+        )
+
+    def _save_vr_position(self, values: dict[str, float]) -> None:
+        updated = cast(Config, {**self.config, **values})
+        save_config(updated)
+        self.config = updated
+        emit_message("running_config", config=self.config)
+
+    def _reply_vr_adjustment(self, message: str, error: bool = False) -> None:
+        show_chat_message("error" if error else "covas", message)
+        if self.ttsModel is not None:
+            self.tts.say(
+                message,
+                on_start=self.event_manager.add_assistant_speaking,
+                on_complete=self.event_manager.add_assistant_complete_event,
+            )
+        else:
+            self.event_manager.add_assistant_complete_event()
 
     def emit_runtime_state(self):
         _, projected_states = self.event_manager.get_current_state()
         emit_message("running_config", config=self.config)
+        if self.vr_adjustment.active:
+            self.vr_adjustment.publish()
         emit_message("system", system=get_system_info())
         emit_message("states", states=projected_states)
+        self.plugin_manager.broadcast_plugin_ui()
         self.previous_states = copy.deepcopy(projected_states)
         self._emit_voice_activation(force=True)
 
@@ -467,7 +481,7 @@ class Chat:
         emit_message(
             "voice_activation",
             state=state,
-            name=session.name if session else self.config.get("wake_word_name", "Simone"),
+            name=session.name if session else self.character["first_name"],
             activation_provider=self._voice_activation_provider,
             warning=self._voice_activation_warning,
         )
@@ -479,10 +493,14 @@ class Chat:
                 self._voice_control_line = None
                 session.finish_control()
                 self.event_manager.add_assistant_complete_event()
+            if self._voice_timeout_line is not None and self._voice_timeout_line.is_completed():
+                self._voice_timeout_line = None
+                session.finish_control()
             output_busy = self.tts.get_is_playing()
             session.tick(
                 busy=(
                     self.assistant.reply_pending
+                    or self.vr_adjustment.active
                     or self.assistant.is_replying
                     or self.stt.recording
                     or self.stt.processing
@@ -492,6 +510,8 @@ class Chat:
                 ),
                 output_busy=output_busy,
             )
+            if session.consume_timeout():
+                self._voice_timeout_line = self.tts.play_listening_end_tone()
         self._emit_voice_activation()
 
     def _handle_stt_result(self, result: STTResult) -> None:
@@ -521,7 +541,7 @@ class Chat:
                     )
                 return
         self.tts.abort()
-        self.event_manager.add_conversation_event("user", result.text)
+        self.submit_input(result.text)
 
     def on_event(self, event: Event, projected_states: dict[str, Any]):
         for key, value in projected_states.items():
@@ -579,12 +599,13 @@ class Chat:
             plugin_content = event.plugin_event_content if isinstance(event.plugin_event_content, dict) else {}
             plugin_message = plugin_content.get("text")
             avatar_url = plugin_content.get("avatar_url")
-            show_chat_message(
-                "plugin",
-                plugin_message if isinstance(plugin_message, str) and plugin_message.strip() else event.plugin_event_name,
-                plugin_event_name=event.plugin_event_name,
-                avatar_url=avatar_url if isinstance(avatar_url, str) and avatar_url else None,
-            )
+            if isinstance(plugin_message, str) and plugin_message.strip():
+                show_chat_message(
+                    "plugin",
+                    plugin_message,
+                    plugin_event_name=event.plugin_event_name,
+                    avatar_url=avatar_url if isinstance(avatar_url, str) and avatar_url else None,
+                )
         if event.kind == "quest":
             event = cast(QuestEvent, event)
             action_value = event.content.get("action") if isinstance(event.content, dict) else None
@@ -661,6 +682,9 @@ class Chat:
             )
 
     def submit_input(self, input: str):
+        if self.vr_adjustment.handle_input(input):
+            show_chat_message("cmdr", input)
+            return
         self.event_manager.add_conversation_event("user", input)
 
     def query_memories(self, query: str, top_k: int = 5):
@@ -991,6 +1015,7 @@ class Chat:
 
         while True:
             try:
+                self.vr_adjustment.tick()
                 self._update_voice_activation()
                 status = None
                 # check status file for updates
@@ -1029,6 +1054,7 @@ class Chat:
 
                 if (
                     self.assistant.reply_pending
+                    and not self.vr_adjustment.active
                     and not self.assistant.is_replying
                     and not self.stt.recording
                     and not self.tts.get_is_playing()
@@ -1160,6 +1186,13 @@ def read_stdin(chat: Chat):
         line = sys.stdin.readline().strip()
         if line:
             data = json.loads(line)
+            if data.get("type") == "vr_placement_result":
+                chat.vr_adjustment.handle_result(data)
+            if data.get("type") == "ui_section_result":
+                from lib.actions.actions_ui import handle_ui_section_result
+                handle_ui_section_result(data)
+            if data.get("type") == "preview_tts":
+                tts_preview.start(chat.config, chat.plugin_manager, data)
             if data.get("type") == "change_config":
                 partial = data.get("config")
                 if isinstance(partial, dict):
@@ -1332,6 +1365,8 @@ if __name__ == "__main__":
 
             try:
                 data = json.loads(line)
+                if data.get("type") == "preview_tts":
+                    tts_preview.start(config, plugin_manager, data)
                 if data.get("type") == "start":
                     if data.get("oldUi"):
                         config = load_config()
@@ -1375,6 +1410,7 @@ if __name__ == "__main__":
                     emit_message("system", system=get_system_info())
                 if data.get("type") == "init_overlay":
                     update_config(config, {}) # Ensure that the overlay gets a new config on start
+                    plugin_manager.broadcast_plugin_ui()
                 if data.get("type") == "get_quest_catalog":
                     results = quest_catalog_manager.get_catalog()
                     emit_message(
