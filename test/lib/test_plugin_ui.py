@@ -68,6 +68,42 @@ def register(manager, guid):
     return plugin
 
 
+@pytest.fixture
+def ui_actions(monkeypatch):
+    cache = {}
+    messages = []
+    monkeypatch.setattr('lib.ActionManager.KeyValueStore', lambda name: SimpleNamespace(
+        get=cache.get, set=cache.__setitem__,
+    ))
+    monkeypatch.setattr(actions_ui, 'plugin_manager', None)
+    monkeypatch.setattr(actions_ui, 'event_manager', None)
+    monkeypatch.setattr(actions_ui, 'send_message', messages.append)
+    action_manager = actions_ui.ActionManager()
+    actions_ui.register_ui_actions(action_manager, None)
+    return action_manager, messages, cache
+
+
+def register_upgrade_view(manager, guid='upgrades-guid', title='Am\u00e9liorations'):
+    plugin = register(manager, guid)
+    plugin.get_ui_views = lambda: [PluginUIView(id='upgrades', label='@runtime.title', sections=[
+        UIViewSection(key='route', label='@route.title'),
+        UIViewSection(key='session', label='@progress.title', grids=['session'],
+                      voice_aliases=["progression de l'am\u00e9lioration du vaisseau", 'suivi des am\u00e9liorations']),
+        UIViewSection(key='broker', label='@broker.grid'),
+        UIViewSection(key='plans', label='@grid.plans'),
+    ])]
+    plugin.get_ui_translations = lambda: {
+        'en': {'runtime': {'title': 'Ship upgrades'}, 'route': {'title': 'Route'},
+               'progress': {'title': 'Progress'}, 'broker': {'grid': 'Unlockable blueprints'},
+               'grid': {'plans': 'Plans'}},
+        'fr': {'runtime': {'title': title}, 'route': {'title': 'Route'},
+               'progress': {'title': 'Progression'}, 'broker': {'grid': 'Plans \u00e0 d\u00e9bloquer'},
+               'grid': {'plans': 'Plans'}},
+    }
+    manager.publish_plugin_ui(plugin)
+    return plugin
+
+
 def test_plugins_register_same_local_view_id_without_collision_and_publish_translations(manager):
     manager, emitted = manager
     register(manager, 'alpha-guid')
