@@ -514,6 +514,19 @@ class Chat:
                 self._voice_timeout_line = self.tts.play_listening_end_tone()
         self._emit_voice_activation()
 
+    def _update_stt_recording(self) -> None:
+        if not self.stt.recording:
+            self.listening = False
+            return
+        if not self.listening:
+            self.listening = True
+            self.event_manager.add_user_speaking()
+        # A wake-word recording may be ambient sound or unrelated speech.
+        # Accepted commands and controls interrupt in _handle_stt_result.
+        if self.stt.voice_activation is None and self.tts.get_is_playing():
+            log("debug", "interrupting TTS")
+            self.tts.abort()
+
     def _handle_stt_result(self, result: STTResult) -> None:
         session = self.stt.voice_activation
         voice_input = result.voice_input
@@ -1031,15 +1044,7 @@ class Chat:
                         self.stt.pause_continuous_listening(False)
 
                 # check STT recording
-                if self.stt.recording:
-                    if not self.listening:
-                        self.listening = True
-                        self.event_manager.add_user_speaking()
-                    if self.tts.get_is_playing():
-                        log("debug", "interrupting TTS")
-                        self.tts.abort()
-                else:
-                    self.listening = False
+                self._update_stt_recording()
 
                 # check STT result queue
                 if not self.stt.resultQueue.empty():

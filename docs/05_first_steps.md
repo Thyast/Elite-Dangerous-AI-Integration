@@ -19,6 +19,12 @@ The integration uses your microphone for speech recognition. We support voice ac
 
 Choose **Name-triggered Dialogue** under **Microphone Mode** in the general or advanced audio settings. The existing microphone modes, including Push-to-Talk, are unchanged. Start or restart the assistant after changing the microphone mode or activation settings.
 
+In Name-triggered Dialogue, microphone activity alone does not interrupt a spoken
+reply or game announcement: interruption waits for a recognized, accepted command
+or dialogue control. Ambient sound or rejected standby speech therefore cannot
+silence an announcement. Other microphone modes retain immediate interruption
+when recording starts.
+
 The **active avatar's first name** is used for activation. It is separate from the technical **Profile name** displayed in the character selector. Each avatar has a **First name** field in Character Settings, initialized to `Simone`, including existing profiles when upgrading. A profile named `Default (Copy)` therefore responds to "Simone", not "Default Copy". Edit or duplicate an avatar to change its first name, then select it. Duplicating a profile preserves its first name without adding "(Copy)" to the spoken name. Set the global **inactivity timeout** (initially 10 seconds) in the microphone settings. Restart the assistant after changing the avatar or its first name. Say the first name at the beginning of a phrase:
 
 - "Simone, plot a route to Sol."

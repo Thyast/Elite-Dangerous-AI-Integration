@@ -38,6 +38,7 @@ def chat(monkeypatch):
     instance._voice_control_line = None
     instance._voice_timeout_line = None
     instance.config = {}
+    instance.listening = False
     instance.character = {"name": "Default (Copy)", "first_name": "Simone"}
     instance.vr_adjustment = ChatModule.VrOverlayAdjustment(
         get_config=lambda: instance.config, save=MagicMock(), emit=MagicMock(),
@@ -107,6 +108,44 @@ def input_result(chat, text):
 def test_invocation_command_is_added_once(chat):
     chat._handle_stt_result(input_result(chat, "Hey Simone, plot a route"))
     chat.event_manager.add_conversation_event.assert_called_once_with("user", "plot a route")
+    chat.tts.abort.assert_called_once()
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_unconfirmed_wake_mode_recording_does_not_cancel_spoken_notice(chat, active):
+    if active:
+        input_result(chat, "Simone, plot a route")
+    chat.tts.get_is_playing.return_value = True
+    chat.stt.recording = True
+    chat._update_stt_recording()
+    chat._update_stt_recording()
+    chat.event_manager.add_user_speaking.assert_called_once()
+    chat.tts.abort.assert_not_called()
+    chat.stt.recording = False
+    chat._update_stt_recording()
+    assert chat.listening is False
+    chat._handle_stt_result(input_result(chat, "Simone, plot a route"))
+    chat.tts.abort.assert_called_once()
+
+
+def test_ignored_background_speech_preserves_notice_but_valid_wake_interrupts(chat):
+    chat.tts.get_is_playing.return_value = True
+    chat.stt.recording = True
+    chat._update_stt_recording()
+    session = chat.stt.voice_activation
+    ignored = session.recognize(session.begin_audio(), lambda _: "unrelated station chatter")
+    session.end_audio()
+    assert ignored is None
+    chat.tts.abort.assert_not_called()
+    chat._handle_stt_result(input_result(chat, "Simone"))
+    chat.tts.abort.assert_called_once()
+
+
+def test_recording_without_wake_mode_still_interrupts_immediately(chat):
+    chat.stt.voice_activation = None
+    chat.stt.recording = True
+    chat.tts.get_is_playing.return_value = True
+    chat._update_stt_recording()
     chat.tts.abort.assert_called_once()
 
 
