@@ -13,6 +13,7 @@ from .HudColorMatrix import HudColorMatrix
 from .Logger import log, show_chat_message
 from .UI import emit_message
 from .VoiceActivation import voice_config_error
+from .actions.action_language_packs import load_action_language_packs
 
 # List of game events categorized (legacy boolean defaults)
 game_events = {
@@ -913,6 +914,8 @@ class Config(TypedDict):
     web_search_actions_var: bool
     ui_actions_var: bool
     use_action_cache_var: bool
+    selected_action_languages: list[str]
+    available_action_languages: list[dict[str, str]]
     allowed_actions: dict[str, bool]
     discovery_primary_var: bool
     discovery_firegroup_var: int  # 0 keeps the current firegroup; 1-8 select one
@@ -1732,6 +1735,10 @@ def getDefaultCharacter(config: Config) -> Character:
     })
 
 def load_config() -> Config:
+    available_action_languages = [
+        {"code": code, "name": pack["name"]}
+        for code, pack in load_action_language_packs().items()
+    ]
     defaults: Config = {
         'config_version': 26,
         'commander_name': "",
@@ -1749,6 +1756,8 @@ def load_config() -> Config:
         'web_search_actions_var': True,
         'ui_actions_var': True,
         'use_action_cache_var': True,
+        'selected_action_languages': [],
+        'available_action_languages': available_action_languages,
         'allowed_actions': default_allowed_actions.copy(),
         'discovery_primary_var': True,
         'discovery_firegroup_var': 1,
@@ -1845,6 +1854,22 @@ def load_config() -> Config:
             if data:
                 data = migrate(data)
                 merged_config = merge_config_data(defaults, data)
+                merged_config["available_action_languages"] = available_action_languages
+                selected_languages = merged_config.get("selected_action_languages", [])
+                if not isinstance(selected_languages, list):
+                    log("warn", "Invalid selected action languages; using English only")
+                    selected_languages = []
+                available_codes = {language["code"] for language in available_action_languages}
+                unknown_languages = [
+                    language for language in selected_languages
+                    if not isinstance(language, str) or language not in available_codes
+                ]
+                if unknown_languages:
+                    log("warn", f"Ignoring unavailable action languages: {unknown_languages}")
+                merged_config["selected_action_languages"] = list(dict.fromkeys(
+                    language for language in selected_languages
+                    if isinstance(language, str) and language in available_codes
+                ))
                 
                 print(f"Configuration loaded successfully. Commander: {merged_config.get('commander_name')}, Characters: {len(merged_config.get('characters', []))}")
                 return cast(Config, merged_config)  # pyright: ignore[reportInvalidCast]
