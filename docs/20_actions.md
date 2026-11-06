@@ -633,6 +633,8 @@ parent. Acknowledgement from the UI is required before reporting success.
 
     Optional translated command aliases can be enabled in **Settings → Actions → Additional command languages**. English commands remain available regardless of this setting.
 
+    The French pack includes "passe en vitesse de croisière" and the transcription variant "passe en vitesse de coisière". These aliases use exact phrase matching and require the action cache to be enabled.
+
     <details>
     <summary>Required Keyboard Binds</summary>
 
@@ -671,6 +673,8 @@ Language packs are JSON files in `src/lib/actions/languages/`, named with their 
     </details>
 
 3. **Toggle cargo scoop**
+
+    With the French language pack enabled, "ouvre la soute" and "ferme la soute" are aliases for this ship action. Both toggle the current state, like "open cargo scoop" and "close cargo scoop".
 
     <details>
     <summary>Examples</summary>
