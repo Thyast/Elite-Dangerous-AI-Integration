@@ -111,6 +111,19 @@ You can read more about the AIServer [here](./AIServer.md).
 - May struggle with multilingual input/output
 - Higher latency than cloud services
 
+### 1.5 Using Groq (cloud-based)
+[Groq](https://console.groq.com) offers a rate-limited free tier with very fast inference. Create an API key, select **Groq** as LLM (and Agent LLM) provider and paste the key. `openai/gpt-oss-120b` (default) and `openai/gpt-oss-20b` support tool use; set their reasoning effort to `low`, `medium` or `high`. `qwen/qwen3.8-27b` accepts only `none` or `default`.
+
+*Upsides:*
+
+- Very low latency
+- Reliable tool use with GPT-OSS models
+
+*Downsides:*
+
+- Requires an account and an internet connection
+- Free tier is rate-limited
+
 ## 2. Agent Configuration
 The Agent is a search sub-LLM that answers queries posed by the main LLM. It chains web and knowledge actions in a loop to find answers. Higher accuracy matters more here than for the main chat LLM—consider using an online LLM for the Agent even if the main LLM is local. You can use the same provider as the main LLM (e.g. LM Studio, Ollama), but set the main LLM to no reasoning effort and the Agent LLM to at least Low reasoning effort for better search accuracy. The Agent is served the same way as the main LLM (LM Studio, Ollama, cloud, etc.); configure it in the same style as section 1.
 
@@ -194,6 +207,18 @@ You can read more about the AIServer [here](./AIServer.md).
 - Tricky to set up, as it is still highly experimental
 - May struggle with multilingual input/output
 - Higher latency than cloud services
+
+### 4.4 Using Groq (cloud-based)
+Groq hosts Orpheus voices, but only for **English** (`canopylabs/orpheus-v1-english`) and **Saudi Arabic** (`canopylabs/orpheus-arabic-saudi`). Before first use, accept the model terms in the [Groq playground](https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english). If the selected voice does not belong to the selected model, COVAS:NEXT uses the model's first voice.
+
+*Upsides:*
+
+- Expressive voices with low latency
+
+*Downsides:*
+
+- No French, German or other languages
+- Billed per character (about $22 per million characters for English)
 
 ## 5. Vision Configuration
 Vision requires an LLM that is multimodal or has image-understanding (e.g. text-from-image) capabilities. It can be the same as the main LLM or a smaller model dedicated to vision. Same serving options as the main LLM (LM Studio, Ollama, cloud, etc.).

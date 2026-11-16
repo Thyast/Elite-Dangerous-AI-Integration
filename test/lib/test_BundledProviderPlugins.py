@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 import sys
@@ -15,6 +16,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from lib.Models import (
+    LLMError,
     OpenAIEmbeddingModel,
     OpenAILLMModel,
     OpenAIMultiModalSTTModel,
@@ -25,7 +27,17 @@ from lib.Models import (
 from lib.PluginBase import PluginManifest
 from plugins.EdgeTTSPlugin import EDGE_TTS_PLUGIN_GUID, EdgeTTSModel, EdgeTTSPlugin
 from plugins.GoogleAIStudioPlugin import GOOGLE_AI_STUDIO_API_URL, GOOGLE_AI_STUDIO_PLUGIN_GUID, GoogleAIStudioPlugin, GoogleAIStudioLLMModel, GoogleAIStudioTTSModel
-from plugins.GroqPlugin import GROQ_API_URL, GROQ_PLUGIN_GUID, GROQ_STT_MODEL, GroqPlugin
+from plugins.GroqPlugin import (
+    GROQ_API_URL,
+    GROQ_LLM_MODEL,
+    GROQ_PLUGIN_GUID,
+    GROQ_STT_MODEL,
+    GROQ_TTS_MODEL,
+    GroqPlugin,
+    GroqTTSModel,
+    split_tts_text,
+    wav_to_pcm16,
+)
 from plugins.MistralPlugin import MISTRAL_API_URL, MISTRAL_PLUGIN_GUID, MistralPlugin
 from plugins.OpenAICompatiblePlugin import OPENAI_COMPATIBLE_PLUGIN_GUID, OpenAICompatiblePlugin
 from plugins.OpenAIPlugin import OPENAI_API_URL, OPENAI_PLUGIN_GUID, OpenAIPlugin
@@ -189,8 +201,9 @@ def test_openrouter_tool_toggle_suppresses_tools_per_role() -> None:
 def test_groq_stt_uses_fixed_endpoint_and_whisper_settings() -> None:
     plugin = GroqPlugin(manifest(GROQ_PLUGIN_GUID, "Groq"))
     providers = {provider["id"]: provider for provider in plugin.model_providers or []}
-    assert set(providers) == {"stt"}
-    assert providers["stt"]["slots"] == ["stt"]
+    assert {provider_id: provider["slots"] for provider_id, provider in providers.items()} == {
+        "llm": ["llm"], "agent-llm": ["agent_llm"], "stt": ["stt"], "tts": ["tts"],
+    }
     assert not any(key == "endpoint" or key.endswith("_endpoint") for key in setting_keys(plugin))
 
     default = plugin.create_model("stt", {"api_key": "groq-secret"})
@@ -207,7 +220,79 @@ def test_groq_stt_uses_fixed_endpoint_and_whisper_settings() -> None:
     assert configured.language == "fr"
     assert configured.prompt == "Elite Dangerous"
     with pytest.raises(ValueError):
-        plugin.create_model("llm", {})
+        plugin.create_model("vlm", {})
+
+
+def test_groq_llm_roles_use_independent_models_and_tool_toggle() -> None:
+    plugin = GroqPlugin(manifest(GROQ_PLUGIN_GUID, "Groq"))
+    main = plugin.create_model("llm", {"api_key": "groq-secret"})
+    agent = plugin.create_model("agent-llm", {
+        "agent_llm_model": "openai/gpt-oss-20b", "agent_llm_reasoning_effort": "low",
+        "agent_llm_tools_enabled": False,
+    })
+    assert isinstance(main, ToolToggleOpenAILLMModel)
+    assert str(main.client.base_url).rstrip("/") == GROQ_API_URL
+    assert main.client.api_key == "groq-secret"
+    assert main.model_name == GROQ_LLM_MODEL and main.tools_enabled
+    assert agent.model_name == "openai/gpt-oss-20b"
+    assert agent.reasoning_effort == "low" and not agent.tools_enabled
+
+
+def wav_bytes(samples: Any, rate: int, channels: int = 1) -> bytes:
+    import numpy as np
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(np.asarray(samples, dtype="<i2").tobytes())
+    return buffer.getvalue()
+
+
+def test_groq_tts_text_split_respects_request_limit() -> None:
+    text = "Première phrase courte. " + "mot " * 80 + "x" * 450
+    chunks = split_tts_text(text)
+    assert chunks[0] == "Première phrase courte."
+    assert all(0 < len(chunk) <= 200 for chunk in chunks)
+    assert "".join(chunks).replace(" ", "") == text.replace(" ", "")
+
+
+def test_groq_wav_conversion_downmixes_and_resamples_to_playback_format() -> None:
+    import numpy as np
+
+    stereo = np.array([[1000, 3000]] * 480, dtype="<i2").reshape(-1)
+    pcm = np.frombuffer(wav_to_pcm16(wav_bytes(stereo, 48000, channels=2)), dtype="<i2")
+    assert len(pcm) == 240
+    assert np.all(np.abs(pcm - 2000) <= 1)
+    with pytest.raises(LLMError):
+        wav_to_pcm16(b"not a wav")
+
+
+def test_groq_tts_requests_each_chunk_and_maps_voice_to_model() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        assert request.headers["Authorization"] == "Bearer groq-secret"
+        return httpx.Response(200, content=wav_bytes([100] * 10, 24000))
+
+    plugin = GroqPlugin(manifest(GROQ_PLUGIN_GUID, "Groq"))
+    model = plugin.create_model("tts", {"api_key": "groq-secret"})
+    assert isinstance(model, GroqTTSModel)
+    model.client = httpx.Client(base_url=f"{GROQ_API_URL}/", headers=model.client.headers,
+                                transport=httpx.MockTransport(handler))
+    audio = b"".join(model.synthesize("a " * 150, "fahad"))
+
+    assert len(audio) == 2 * 10 * 2
+    assert [request["voice"] for request in requests] == ["troy", "troy"]
+    assert all(request["model"] == GROQ_TTS_MODEL and request["response_format"] == "wav" for request in requests)
+
+    model.client = httpx.Client(base_url=f"{GROQ_API_URL}/", transport=httpx.MockTransport(
+        lambda request: httpx.Response(400, json={"error": {"message": "requires terms acceptance"}})))
+    with pytest.raises(LLMError, match="requires terms acceptance"):
+        list(model.synthesize("hello", "troy"))
 
 
 def test_openai_compatible_models_cover_existing_modalities() -> None:
