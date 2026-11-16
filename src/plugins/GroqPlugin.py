@@ -161,8 +161,8 @@ class GroqPlugin(PluginBase):
                 ]}],
             },
             {
-                "kind": "tts", "id": "tts", "label": "Groq", "slots": ["tts"],
-                "settings_config": [{"key": "tts", "label": "Groq Text-to-Speech", "fields": [
+                "kind": "tts", "id": "tts", "label": "Groq (EN, AR only)", "slots": ["tts"],
+                "settings_config": [{"key": "tts", "label": "Groq Text-to-Speech (EN, AR only)", "fields": [
                     text_field("api_key", "Groq API Key", "", hidden=True),
                     select_field("tts_model", "Model", GROQ_TTS_MODEL, list(GROQ_TTS_VOICES)),
                     paragraph("Groq voices only speak English or Saudi Arabic. Accept the model terms in the Groq console before first use."),
