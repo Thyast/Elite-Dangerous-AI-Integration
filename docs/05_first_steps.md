@@ -15,6 +15,19 @@ The AI Character Prompt is a description of the AI's personality. You can modify
 
 The integration uses your microphone for speech recognition. We support voice activation and push-to-talk (PTT). When using voice activation, we recommend using headphones to avoid the AI hearing itself, which causes a feedback loop.
 
+## Long-term Memory
+
+Long-term memory uses the **Embeddings** provider, independently of the main LLM.
+Changing only the LLM provider does not change this selection. If embeddings
+still use OpenAI, they require a valid OpenAI API key even when the LLM uses
+Google AI Studio. To use Google for both, select **Google AI Studio** for
+Embeddings; its shared Google API key is used unless an embedding-specific key
+override is configured. Memory text is sent to the selected embedding provider.
+
+An embeddings authentication error prevents new long-term memories from being
+stored. Before changing embedding models, back up existing memories: vectors
+from different models are not interchangeable.
+
 ## Event Triggers
 
 Changes in the game world can trigger events that the AI can respond to. For example, when the ship is in danger, the AI can be programmed to inform you. These reactions are configured in the UI in the **Reactions** tab of the settings, where you can choose to silence some events or have the AI respond to others, making the AI more or less chatty.
