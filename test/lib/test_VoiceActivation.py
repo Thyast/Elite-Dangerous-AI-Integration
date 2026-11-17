@@ -404,6 +404,7 @@ def test_hybrid_first_command_and_followup(strategy, main_calls, remote_text):
     ("Restes en \u00e9coute.", "hold", "fr"),
     ("keep listening", "hold", "en"),
     ("\u00c7a sera tout !", "close", "fr"),
+    ("Ce sera tout.", "close", "fr"),
     ("I'm done", "close", "en"),
 ])
 def test_hybrid_named_controls_use_only_the_activation_transcript(strategy, phrase, kind, language):
@@ -469,7 +470,11 @@ def test_explicit_close_is_immediate_and_invalidates_earlier_results(session, ph
     assert session.begin_audio().active is False
 
 
-@pytest.mark.parametrize("phrase", ["Explain the phrase j'ai termin\u00e9", "j'ai termin\u00e9 la route, continue"])
+@pytest.mark.parametrize("phrase", [
+    "Explain the phrase j'ai termin\u00e9", "j'ai termin\u00e9 la route, continue",
+    "Explique la phrase ce sera tout", "ce sera tout pour cette route, continue",
+    "ce ne sera pas tout",
+])
 def test_closing_substrings_do_not_close_the_session(session, phrase):
     recognize(session, "Simone, plot a route")
     assert recognize(session, phrase).kind == "command"
@@ -539,7 +544,10 @@ def test_keep_listening_substrings_do_not_disable_timeout(phrase):
     assert session.state == "standby"
 
 
-@pytest.mark.parametrize("closing", ["\u00c7a sera tout !", "j'ai termin\u00e9", "that's all", "I'm done"])
+@pytest.mark.parametrize("closing", [
+    "\u00c7a sera tout !", "Ca sera tout", "Ce sera tout.", "CE SERA TOUT !",
+    "Simone, ce sera tout", "j'ai termin\u00e9", "that's all", "I'm done",
+])
 def test_explicit_close_ends_keep_listening_and_next_session_times_out(closing):
     now = [0.0]
     session = VoiceActivation("Simone", 10, Mock(), Mock(), clock=lambda: now[0])
