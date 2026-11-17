@@ -250,7 +250,8 @@ def test_standby_audio_is_not_queued_or_logged(stt, mock_stt_model, caplog):
 
 
 @pytest.mark.parametrize("phrase", ["reste en \u00e9coute", "Restes en \u00e9coute."])
-def test_keep_listening_audio_queues_control_then_followup_after_timeout(stt, mock_stt_model, phrase):
+@pytest.mark.parametrize("closing", ["\u00c7a sera tout", "Ce sera tout."])
+def test_keep_listening_audio_queues_control_then_followup_after_timeout(stt, mock_stt_model, phrase, closing):
     import speech_recognition as sr
 
     now = [0.0]
@@ -271,7 +272,7 @@ def test_keep_listening_audio_queues_control_then_followup_after_timeout(stt, mo
     stt._process_audio(audio, 2, session.begin_audio())
     session.end_audio()
     assert stt.resultQueue.get_nowait().text == "plot a route to Sol"
-    mock_stt_model.transcribe.return_value = "\u00c7a sera tout"
+    mock_stt_model.transcribe.return_value = closing
     stt._process_audio(audio, 3, session.begin_audio())
     session.end_audio()
     assert stt.resultQueue.get_nowait().voice_input.kind == "close"
@@ -283,6 +284,7 @@ def test_keep_listening_audio_queues_control_then_followup_after_timeout(stt, mo
 @pytest.mark.parametrize("phrase,kind", [
     ("reste en \u00e9coute", "hold"), ("\u00c7a sera tout", "close"),
     ("Restes en \u00e9coute.", "hold"),
+    ("Ce sera tout.", "close"),
 ])
 def test_hybrid_named_controls_do_not_retranscribe_or_queue_conversation(stt, mock_stt_model, phrase, kind):
     import speech_recognition as sr
