@@ -40,6 +40,10 @@ Edge TTS sends MP3 audio over the internet. The message `('failed to init decode
 
 OpenAI sometimes needs a few minutes to process your payment. If you are still having issues after a few minutes, please check your OpenAI account for any issues. If you are still having issues, please get in touch with us.
 
+## Google reports "Requests ending with a model turn are not supported". What should I do?
+
+This error means a reply request ended with the assistant's own last message. It had two causes: another user message arriving while a previous reply was being generated, and an outdated "reply needed" signal starting a second reply right after the assistant finished speaking (for example after an action such as engaging supercruise). Update to a version containing both fixes and restart the application. Unanswered user messages are now placed after the earlier reply in the next prompt, and a reply is only requested when an event still needs an answer. Changing API keys or the embedding provider does not fix this issue.
+
 ## Does it work on Linux, Steam Deck, Proton, Wine?
 
 We have a native Linux version available, but it requires some special setup. Please contact us on discord and we will help you get it running.

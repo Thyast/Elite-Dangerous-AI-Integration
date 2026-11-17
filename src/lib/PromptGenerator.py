@@ -3709,7 +3709,15 @@ class PromptGenerator:
         # Initialize usage stats
         usage_stats = PromptUsageStats()
 
-        for event in events[::-1]:
+        # A user can speak while an earlier reply is being generated.
+        # Keep those unanswered requests after that reply in the next prompt.
+        pending_user_events = [
+            event for event in events
+            if isinstance(event, ConversationEvent) and event.kind == "user" and event in pending_events
+        ]
+        prompt_events = [event for event in events if event not in pending_user_events] + pending_user_events
+
+        for event in prompt_events[::-1]:
             if len(conversational_pieces) >= 50:
                 break
 
