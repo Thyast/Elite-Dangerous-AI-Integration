@@ -273,7 +273,10 @@ def test_explicit_display_opens_the_plugin_before_state_queries_and_keeps_the_fo
     assistant.config = {
         'game_actions_var': True, 'web_search_actions_var': False,
         'ui_actions_var': True, 'use_action_cache_var': cache_enabled,
+        'active_character_index': 0, 'characters': [{}],
     }
+    assistant.enabled_game_events = []
+    assistant.registered_should_reply_handlers = []
     assistant.event_manager = event_manager
     assistant.action_manager = action_manager
     assistant.llmModel = Mock()
