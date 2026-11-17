@@ -132,7 +132,8 @@ def test_action_defaults_match_registered_permissions() -> None:
         and isinstance(keyword.value.value, str)
     }
 
-    assert set(default_allowed_actions) == registered_permissions
+    # The VR recenter permission gates the voice-driven VR adjustment, not a model-facing action.
+    assert set(default_allowed_actions) - {"recenterVRView"} == registered_permissions
 
 
 def test_recenter_permission_is_added_to_existing_configs_without_reenabling_disabled_actions() -> None:

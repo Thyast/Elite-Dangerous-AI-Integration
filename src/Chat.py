@@ -1208,25 +1208,6 @@ def read_stdin(chat: Chat):
             if data.get("type") == "change_config":
                 partial = data.get("config")
                 if isinstance(partial, dict):
-                    if "selected_action_languages" in partial:
-                        try:
-                            selected_languages = partial["selected_action_languages"]
-                            if (
-                                not isinstance(selected_languages, list)
-                                or not all(isinstance(language, str) for language in selected_languages)
-                            ):
-                                raise ValueError("Selected action languages must be a list of language codes")
-                            chat.action_manager.apply_language_aliases(
-                                load_action_language_packs(),
-                                selected_languages,
-                            )
-                        except (OSError, ValueError, json.JSONDecodeError) as error:
-                            log("error", f"Failed to apply action language settings: {error}")
-                            emit_message("config", config=chat.config)
-                            partial = {
-                                key: value for key, value in partial.items()
-                                if key != "selected_action_languages"
-                            }
                     chat.config = update_config(chat.config, partial)
                     chat.assistant.config = chat.config
                     chat.plugin_manager.on_settings_changed(chat.config)

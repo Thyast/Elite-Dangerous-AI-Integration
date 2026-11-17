@@ -13,7 +13,6 @@ from .HudColorMatrix import HudColorMatrix
 from .Logger import log, show_chat_message
 from .UI import emit_message
 from .VoiceActivation import voice_config_error
-from .actions.action_language_packs import load_action_language_packs
 
 # List of game events categorized (legacy boolean defaults)
 game_events = {
@@ -912,8 +911,6 @@ class Config(TypedDict):
     web_search_actions_var: bool
     ui_actions_var: bool
     use_action_cache_var: bool
-    selected_action_languages: list[str]
-    available_action_languages: list[dict[str, str]]
     allowed_actions: dict[str, bool]
     discovery_primary_var: bool
     discovery_firegroup_var: int  # 0 keeps the current firegroup; 1-8 select one
@@ -1733,10 +1730,6 @@ def getDefaultCharacter(config: Config) -> Character:
     })
 
 def load_config() -> Config:
-    available_action_languages = [
-        {"code": code, "name": pack["name"]}
-        for code, pack in load_action_language_packs().items()
-    ]
     defaults: Config = {
         'config_version': 26,
         'commander_name': "",
@@ -1754,8 +1747,6 @@ def load_config() -> Config:
         'web_search_actions_var': True,
         'ui_actions_var': True,
         'use_action_cache_var': True,
-        'selected_action_languages': [],
-        'available_action_languages': available_action_languages,
         'allowed_actions': default_allowed_actions.copy(),
         'discovery_primary_var': True,
         'discovery_firegroup_var': 1,
