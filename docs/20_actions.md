@@ -470,8 +470,6 @@ parent. Acknowledgement from the UI is required before reporting success.
 
 16. **Toggle night vision**
 
-    With the French language pack enabled, "vision nocturne", "active la vision nocturne", and "désactive la vision nocturne" are aliases for this ship action. All three toggle the current state, like the English command.
-
     <details>
     <summary>Examples</summary>
     
@@ -662,8 +660,6 @@ Language packs are JSON files in `src/lib/actions/languages/`, named with their 
     - next in route
     </details>
 
-    With the French language pack enabled, "continue la route" and "continue la navigation" also target the next system in the route using your configured `TargetNextRouteSystem` binding. These commands do not initiate an FSD jump.
-
     <details>
     <summary>Required Keyboard Binds</summary>
 
@@ -671,8 +667,6 @@ Language packs are JSON files in `src/lib/actions/languages/`, named with their 
     </details>
 
 3. **Toggle cargo scoop**
-
-    With the French language pack enabled, "ouvre la soute" and "ferme la soute" are aliases for this ship action. Both toggle the current state, like "open cargo scoop" and "close cargo scoop".
 
     <details>
     <summary>Examples</summary>
