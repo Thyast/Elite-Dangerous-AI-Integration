@@ -23,13 +23,6 @@ GOOGLE_TRANSCRIBE_MODEL = "gemini-3.5-transcribe"
 GOOGLE_TTS_MODEL = "gemini-3.8-flash-lite-tts"
 GOOGLE_TTS_MODELS = [GOOGLE_TTS_MODEL, "gemini-3.8-flash-tts"]
 GOOGLE_TTS_VOICE = "Kore"
-GOOGLE_TTS_VOICES = [
-    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
-    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
-    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
-]
 GOOGLE_EMBEDDING_MODEL = "gemini-embedding-001"
 
 @dataclass(frozen=True)
@@ -335,7 +328,7 @@ class GoogleAIStudioPlugin(PluginBase):
                 settings.setdefault(f"{prefix}_custom_temperature", True)
 
     @override
-    def __init__(self, plugin_manifest: PluginManifest) -> None:
+    def __init__(self, plugin_manifest: PluginManifest):
         super().__init__(plugin_manifest)
         providers: list[dict[str, Any]] = []
         for provider_id, prefix, slot, title, model, reasoning in (
@@ -378,28 +371,6 @@ class GoogleAIStudioPlugin(PluginBase):
                     condition_field("voice_style_help", "instructions", "neq", "", [
                         paragraph("Describe delivery, emotion, accent, or pace. Spoken text is treated as a verbatim transcript.", "voice_style_hint"),
                     ]),
-                ]}],
-            },
-            {
-                "kind": "tts", "id": "tts", "label": "Google AI Studio", "slots": ["tts"],
-                "settings_config": [{"key": "tts", "label": "Google AI Studio Text-to-Speech", "fields": [
-                    *_fields("tts"), text_field("tts_model", "Model", GOOGLE_TTS_MODEL),
-                    paragraph("Gemini 3.8 TTS streams 24 kHz mono PCM through the native Interactions API. Requires model access. Set character Voice Instructions for tone, accent and pace; instructions are not read aloud."),
-                ]}],
-                "voice_settings_config": [{"key": "voice", "label": "Google AI Studio Voice", "fields": [
-                    select_field("voice", "Voice", GOOGLE_TTS_VOICE, GOOGLE_TTS_VOICES),
-                    textarea_field("instructions", "Voice Instructions", ""),
-                ]}],
-            },
-            {
-                "kind": "tts", "id": "tts", "label": "Google AI Studio", "slots": ["tts"],
-                "settings_config": [{"key": "tts", "label": "Google AI Studio Text-to-Speech", "fields": [
-                    *_fields("tts"), text_field("tts_model", "Model", GOOGLE_TTS_MODEL),
-                    paragraph("Gemini 3.8 TTS streams 24 kHz mono PCM through the native Interactions API. Requires model access. Set character Voice Instructions for tone, accent and pace; instructions are not read aloud."),
-                ]}],
-                "voice_settings_config": [{"key": "voice", "label": "Google AI Studio Voice", "fields": [
-                    select_field("voice", "Voice", GOOGLE_TTS_VOICE, GOOGLE_TTS_VOICES),
-                    textarea_field("instructions", "Voice Instructions", ""),
                 ]}],
             },
             {
@@ -469,10 +440,5 @@ class GoogleAIStudioPlugin(PluginBase):
             return OpenAIEmbeddingModel(
                 GOOGLE_AI_STUDIO_OPENAI_URL, api_key(settings, "embedding"),
                 string_setting(settings, "embedding_model", GOOGLE_EMBEDDING_MODEL),
-            )
-        if provider_id == "tts":
-            return GoogleAIStudioTTSModel(
-                api_key(settings, "tts"),
-                string_setting(settings, "tts_model", GOOGLE_TTS_MODEL),
             )
         raise ValueError(f"Unknown Google AI Studio model provider: {provider_id}")
