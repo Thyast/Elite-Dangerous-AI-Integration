@@ -16,6 +16,7 @@ if str(SRC_DIR) not in sys.path:
 
 from src.lib.Event import ConversationEvent, Event, GameEvent, GameEventContent, ToolEvent
 from src.lib.PromptGenerator import PromptGenerator
+from src.plugins.GoogleAIStudioPlugin import GoogleAIStudioLLMModel
 
 
 @pytest.mark.parametrize("raw_format", [False, True], ids=["projection", "raw-api"])

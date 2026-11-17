@@ -107,6 +107,6 @@ def test_model_cannot_offer_or_execute_recenter_even_with_permission(monkeypatch
         id="stale-recenter", type="function", function={"name": "recenterVRView", "arguments": "{}"},
     )
     result = manager.runAction(stale_call, {"CurrentStatus": {"event": "LoadGame"}})
-    assert result["content"] == "ERROR: Function recenterVRView does not exist!"
+    assert result["content"] == "ERROR: Function recenterVRView does not exist or is disabled!"
     game.focus.assert_not_called()
     game.keys.send.assert_not_called()

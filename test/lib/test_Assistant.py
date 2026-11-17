@@ -33,6 +33,7 @@ def make_assistant(events):
     assistant.llmModel = MagicMock()
     assistant.llmModel.generate.return_value = (None, None, ModelUsageStats())
     assistant.tts = MagicMock()
+    assistant.should_reply = lambda *_args, **_kwargs: True
     return assistant
 
 
