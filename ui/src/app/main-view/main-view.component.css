@@ -139,7 +139,8 @@
   border: 1px solid var(--hud-border);
   border-top: 0;
   border-right: 0;
-  background: #020100;
+  border-bottom-left-radius: 8px;
+  background: #161616;
 }
 
 .chat-events-label {
