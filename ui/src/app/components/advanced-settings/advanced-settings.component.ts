@@ -50,7 +50,8 @@ import QRCode from "qrcode";
 import { FontScaleService } from "../../services/font-scale.service";
 import { PluginUIService } from "../../services/plugin-ui.service";
 import { VoiceActivationSettingsComponent } from "../voice-activation-settings/voice-activation-settings.component";
-import { TranslateModule } from "@ngx-translate/core";
+import { TranslateModule, TranslateService } from "@ngx-translate/core";
+import { VrOverlayPreviewComponent } from "../vr-overlay-preview/vr-overlay-preview.component";
 
 export type AdvancedSettingsFocusTarget =
     | "commander-name"
@@ -102,6 +103,7 @@ const VR_RUNTIME_SETTINGS = [
         MatTooltipModule,
         VoiceActivationSettingsComponent,
         TranslateModule,
+        VrOverlayPreviewComponent,
     ],
     templateUrl: "./advanced-settings.component.html",
     styleUrl: "./advanced-settings.component.css",
@@ -181,6 +183,9 @@ export class AdvancedSettingsComponent implements OnDestroy {
     private vrCompatibilityRefreshTimer?: ReturnType<typeof setTimeout>;
     private vrStatusRequest = 0;
     private vrStatusDestroyed = false;
+    private vrConfigSaveTimer?: ReturnType<typeof setTimeout>;
+    private queuedVrConfig: Partial<Config> = {};
+    private unconfirmedVrConfig: Partial<Config> = {};
     expandedPanels: Record<AdvancedSettingsPanel, boolean> = {
         commander: false,
         llm: false,
@@ -264,6 +269,9 @@ export class AdvancedSettingsComponent implements OnDestroy {
             },
         );
         void this.refreshOverlayRuntimeInfo(true);
+        this.overlayChangesSubscription = this.tauriService.overlayChanges$.subscribe(() => {
+            void this.refreshOverlayRuntimeInfo(false);
+        });
         void this.loadRemoteInterfaceBindAddresses();
     }
 
@@ -287,6 +295,8 @@ export class AdvancedSettingsComponent implements OnDestroy {
     ngOnDestroy() {
         this.vrStatusDestroyed = true;
         this.vrStatusRequest++;
+        this.overlayChangesSubscription.unsubscribe();
+        void this.flushVrConfigChanges();
         // Unsubscribe from the config observable to prevent memory leaks
         if (this.configSubscription) {
             this.configSubscription.unsubscribe();
@@ -588,13 +598,27 @@ export class AdvancedSettingsComponent implements OnDestroy {
             const info = await this.tauriService.getOverlayRuntimeInfo();
             if (this.vrStatusDestroyed || request !== this.vrStatusRequest) return;
             this.overlayRuntimeInfo = info;
+            if (info.platform === "win32") {
+                try {
+                    this.openXrGazeIntegration = await this.tauriService.getOpenXrGazeIntegrationStatus();
+                    this.gazeIntegrationError = null;
+                } catch (error) {
+                    console.error("Cannot inspect OpenXR gaze integration:", error);
+                    this.openXrGazeIntegration = null;
+                    this.gazeIntegrationError = error instanceof Error ? error.message : String(error);
+                }
+            }
         } catch (error) {
             if (this.vrStatusDestroyed || request !== this.vrStatusRequest) return;
             console.error("Error loading overlay runtime info:", error);
             this.overlayRuntimeInfo = null;
         } finally {
             if (!this.vrStatusDestroyed && request === this.vrStatusRequest && schedulePolling && this.vrOverlaySelected) {
-                const delay = this.overlayCompatibility?.readiness === "waiting-for-host" ? 2000 : 5000;
+                const tracking = this.overlayRuntimeInfo;
+                const waiting = this.openXrGazeIntegration?.restartRequired
+                    || tracking?.gazeZoom?.status === "waiting"
+                    || tracking?.heightInitialization?.status === "waiting";
+                const delay = waiting ? 1500 : this.overlayCompatibility?.readiness === "waiting-for-host" ? 2000 : 5000;
                 this.vrCompatibilityRefreshTimer = setTimeout(() => void this.refreshOverlayRuntimeInfo(), delay);
             }
         }

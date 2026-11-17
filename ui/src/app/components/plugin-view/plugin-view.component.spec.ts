@@ -134,4 +134,47 @@ describe("plugin view host", () => {
     expect(invoke).toHaveBeenCalledWith("example", "settings_button", {key: "refresh", value: undefined});
     expect(root.querySelector("mat-progress-bar")?.getAttribute("aria-valuenow")).toBe("75");
   });
+
+  it("opens a single plan detail with engineering progress and nested module names", async () => {
+    await TestBed.configureTestingModule({
+      imports: [PluginViewComponent, TranslateModule.forRoot(), NoopAnimationsModule],
+      providers: [
+        {provide: ConfigService, useValue: {getCurrentConfig: () => null, getPluginSettingsConfig: () => undefined}},
+        {provide: PluginUIService, useValue: {getValue: (_guid: string, _key: string, fallback: unknown) => fallback}},
+        {provide: UIService, useValue: {changeUI$: new BehaviorSubject(null)}},
+        {provide: MatSnackBar, useValue: {open: jasmine.createSpy("open")}},
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(PluginViewComponent);
+    fixture.componentRef.setInput("view", {
+      id: "library", target: "plugin:example:library", pluginGuid: "example", label: "Library",
+      sections: [{key: "plans", label: "Plans", content: [{
+        type: "list", details_collapsible: true, items: [{
+          key: "plan", title: "Build", details: [{
+            type: "section", children: [
+              {type: "progress", value: 3, maximum: 5},
+              {type: "list", items: [{
+                key: "beam", title: "Beam Laser", suffix: "3C", tone: "warning",
+                meta: "Long Range G3 / G5 · Thermal Vent",
+              }]},
+            ],
+          }],
+        }],
+      }]}],
+    } satisfies RegisteredUIView);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const root: HTMLElement = fixture.nativeElement;
+    const details = root.querySelectorAll<HTMLDetailsElement>("details.list-row-details");
+    expect(details.length).toBe(1);
+    details[0].querySelector<HTMLElement>("summary")!.click();
+    expect(details[0].open).toBeTrue();
+    expect(details[0].textContent).toContain("Beam Laser");
+    expect(details[0].textContent).toContain("3C");
+    expect(details[0].textContent).toContain("Long Range G3 / G5 · Thermal Vent");
+    expect(details[0].querySelectorAll("mat-progress-bar").length).toBe(1);
+    expect(details[0].querySelector("mat-progress-bar")?.getAttribute("aria-valuenow")).toBe("60");
+    fixture.destroy();
+  });
 });

@@ -1,6 +1,41 @@
 export const TRANSLATIONS: Record<string, object> = {
   "en": {
-    "common": { "cancel": "Cancel", "confirm": "Confirm", "details": "Details", "moreActions": "More actions", "actionError": "Could not complete the action.", "invalidAction": "Invalid plugin action or parameters.", "pluginUnavailable": "This plugin is unavailable.", "itemsOne": "{{count}} item", "itemsMany": "{{count}} items" },
+    "chatDisplay": {
+      "events": "Events",
+      "filterHelp": "Show events in the chat. AI reactions are not affected.",
+      "settingsTitle": "Chat Settings",
+      "displayOnly": "These settings only affect chat display. Events still reach the AI immediately; messages, replies, and actions are never delayed.",
+      "groupEvents": "Group repeated events",
+      "inactivityDelay": "Inactivity delay",
+      "groupingHelp": "Each event type is grouped independently until the selected inactivity delay expires, or for 5 seconds at most. Settings are remembered locally."
+    },
+    "vrInterface": {
+      "modeHud": "VR Overlay / HUD Window",
+      "modeFull": "VR Overlay / Full Window",
+      "inGameSettings": "World-locked full window: adjust placement, size, curvature, reduction and opacity in game by voice. Settings are saved per ship size (S/M/L); an unknown size uses the ship type. A new profile inherits the last used settings.",
+      "contentLabel": "VR Content", "hud": "Avatar, Chat and HUD", "full": "Full COVAS:NEXT Interface",
+      "description": "Shows the full interface, including plugin views such as ship upgrade plans. Tabs follow your selection on the PC or voice navigation, and stay visible when the assistant is idle. Avatar, Chat and HUD switches only affect the lightweight overlay.",
+      "initError": "The VR interface could not be initialized.",
+      "reducedFrame": "Reduced window (area / {{factor}}, opacity {{opacity}}%)",
+      "settingsRestart": "Restart the assistant to apply these settings.",
+      "openXrEdvr": "Elite Dangerous: native OpenXR via",
+      "openCompositeUnsupported": "OpenComposite's OpenVR overlay backend is not supported.",
+      "gazeUnavailable": "Adaptive window sizing unavailable; the overlay remains at full size. {{reason}}",
+      "gazeWaiting": "Waiting for tracking; the window stays at full size and reconnects automatically. {{reason}}",
+      "heightUnavailable": "VR height initialization unavailable; the existing placement is kept. {{reason}}",
+      "heightWaiting": "Waiting for the headset to initialize the window height once; no automatic recentering. {{reason}}",
+      "gazeSetupTitle": "OpenXR gaze integration",
+      "gazeInstalled": "OpenXR tracking enabled.",
+      "gazeGameRestart": "OpenXR tracking changed. Restart the running VR game.",
+      "gazeNotInstalled": "OpenXR gaze integration is not enabled.",
+      "gazeComponentMissing": "Native gaze component missing. Build with npm run build:vr-gaze, or repair the installation.",
+      "gazeInstall": "Install / update OpenXR gaze integration",
+      "gazeRemove": "Remove OpenXR gaze integration",
+      "gazeInstallConfirm": "Add a per-user OpenXR API layer that reads headset orientation and position locally from VR applications. It does not change the runtime, modify EDVR, or send pose data to the network.",
+      "gazeRemoveConfirm": "Remove only the COVAS:NEXT gaze tracking layer registration. The overlay integration and your selected runtime are unchanged.",
+      "gazeSetupDone": "OpenXR tracking integration updated.",
+      "gazeSetupFailed": "Could not update OpenXR gaze integration. {{reason}}"
+    },
     "voice": {
       "mode": "Name-triggered Dialogue",
       "replacesRequiredWord": "Replaces the required-word filter: say the name to open a dialogue, then speak without repeating it.",
@@ -26,6 +61,18 @@ export const TRANSLATIONS: Record<string, object> = {
       "usage": "Say \"{{name}}\", \"Hey, {{name}}\" or \"OK, {{name}}\", with or without a command. Close with \"that's all\", \"I'm done\", \"ça sera tout\" or \"j'ai terminé\". Say \"keep listening\" or \"reste en écoute\" to suspend the timeout until explicit closing. The timeout starts after the response finishes; a quiet two-tone beep signals its expiry without AI or speech synthesis. Acknowledgments follow the configured or detected language. Restart the assistant after changing the avatar's first name or microphone settings. Only the first name is avatar-specific; other dialogue settings apply to all avatars.",
       "state": { "preparing": "Preparing", "standby": "Standby", "active": "Dialogue active", "error": "Speech recognition error" }
     },
+    "common": { "cancel": "Cancel", "confirm": "Confirm", "details": "Details", "moreActions": "More actions", "actionError": "Could not complete the action.", "invalidAction": "Invalid plugin action or parameters.", "pluginUnavailable": "This plugin is unavailable.", "itemsOne": "{{count}} item", "itemsMany": "{{count}} items" },
+    "voicePreview": {
+      "message": "Voice test message",
+      "sample": "Hello Commander. All systems are operational. We are ready for departure.",
+      "play": "Play voice preview",
+      "playing": "Playing preview...",
+      "help": "Each click generates fresh speech with this character's current voice, instructions and audio effects, using the selected output device. Keep the same text to compare repeated tests. Remote providers receive this text and may charge for each test. Automatic in-game environment effects are not applied.",
+      "completed": "Previews completed: {{count}}",
+      "failed": "Voice preview failed.",
+      "disconnected": "The backend stopped. Restart it before trying again.",
+      "timeout": "The preview did not finish within three minutes. Check the backend and audio output before retrying."
+    },
     "module": {
       "powerplant": "Power Plant", "engine": "Thrusters", "enginefast": "Enhanced Performance Thrusters", "hyperdrive": "Frame Shift Drive (FSD)", "hyperdriveovercharge": "Frame Shift Drive (Supercruise Overcharge)", "lifesupport": "Life Support", "powerdistributor": "Power Distributor", "sensors": "Sensors", "fueltank": "Fuel Tank",
       "pulselaser": "Pulse Laser", "pulselaserburst": "Burst Laser", "beamlaser": "Beam Laser", "multicannon": "Multi-cannon", "cannon": "Cannon", "slugshot": "Fragmentation Cannon", "railgun": "Railgun", "plasmaaccelerator": "Plasma Accelerator", "basicmissilerack": "Seeker Missile Rack", "dumbfirermissilerack": "Dumbfire Missile Rack", "torpedopylon": "Torpedo Pylon", "minelauncher": "Mine Launcher",
@@ -37,7 +84,42 @@ export const TRANSLATIONS: Record<string, object> = {
     }
   },
   "fr": {
-    "common": { "cancel": "Annuler", "confirm": "Confirmer", "details": "Détails", "moreActions": "Autres actions", "actionError": "Impossible d’effectuer cette action.", "invalidAction": "Action ou paramètres du plugin invalides.", "pluginUnavailable": "Ce plugin est indisponible.", "itemsOne": "{{count}} élément", "itemsMany": "{{count}} éléments" },
+    "chatDisplay": {
+      "events": "Events",
+      "filterHelp": "Afficher les événements dans le chat. Les réactions de l'IA ne sont pas modifiées.",
+      "settingsTitle": "Paramètres du chat",
+      "displayOnly": "Ces réglages concernent uniquement l'affichage du chat. Les événements parviennent immédiatement à l'IA ; les messages, réponses et actions ne sont jamais retardés.",
+      "groupEvents": "Regrouper les événements répétés",
+      "inactivityDelay": "Délai d'inactivité",
+      "groupingHelp": "Chaque type d'événement est regroupé indépendamment jusqu'à la fin du délai d'inactivité choisi, ou pendant 5 secondes au maximum. Les réglages sont mémorisés localement."
+    },
+    "vrInterface": {
+      "modeHud": "VR Overlay / Fenêtre HUD",
+      "modeFull": "VR Overlay / Fenêtre complète",
+      "inGameSettings": "Fenêtre complète ancrée dans le monde : réglez position, taille, courbure, réduction et opacité à la voix en jeu. Les réglages sont mémorisés par taille de vaisseau (S/M/L), ou par type si la taille est inconnue. Un nouveau profil reprend les derniers réglages utilisés.",
+      "contentLabel": "Contenu VR", "hud": "Avatar, chat et HUD", "full": "Interface COVAS:NEXT complète",
+      "description": "Affiche l'interface complète, y compris les vues des plugins comme les plans d'amélioration du vaisseau. Les onglets suivent ta sélection sur le PC ou les commandes vocales et restent visibles au repos. Les options Avatar, Chat et HUD ne concernent que l'overlay léger.",
+      "initError": "Impossible d'initialiser l'interface VR.",
+      "reducedFrame": "Fenêtre réduite (surface / {{factor}}, opacité {{opacity}} %)",
+      "settingsRestart": "Redémarre l'assistant pour appliquer ces réglages.",
+      "openXrEdvr": "Elite Dangerous : OpenXR natif via",
+      "openCompositeUnsupported": "Le backend d'overlay OpenVR d'OpenComposite n'est pas pris en charge.",
+      "gazeUnavailable": "Taille adaptative indisponible ; l'overlay reste à sa taille complète. {{reason}}",
+      "gazeWaiting": "En attente du suivi ; la fenêtre reste à sa taille complète et se reconnecte automatiquement. {{reason}}",
+      "heightUnavailable": "Initialisation de la hauteur VR indisponible ; la position actuelle est conservée. {{reason}}",
+      "heightWaiting": "En attente du casque pour initialiser une seule fois la hauteur de la fenêtre ; aucun recentrage automatique. {{reason}}",
+      "gazeSetupTitle": "Intégration du suivi OpenXR",
+      "gazeInstalled": "Suivi OpenXR activé.",
+      "gazeGameRestart": "Suivi OpenXR modifié. Redémarre le jeu VR en cours.",
+      "gazeNotInstalled": "Le suivi OpenXR n'est pas activé.",
+      "gazeComponentMissing": "Composant natif de suivi absent. Compile-le avec npm run build:vr-gaze ou répare l'installation.",
+      "gazeInstall": "Installer / mettre à jour le suivi OpenXR",
+      "gazeRemove": "Retirer le suivi OpenXR",
+      "gazeInstallConfirm": "Ajouter pour cet utilisateur une couche OpenXR qui lit localement l'orientation et la position du casque dans les applications VR. Elle ne change pas le runtime, ne modifie pas EDVR et n'envoie pas les poses sur le réseau.",
+      "gazeRemoveConfirm": "Retirer uniquement l'enregistrement de la couche de suivi COVAS:NEXT. L'intégration de l'overlay et le runtime sélectionné restent inchangés.",
+      "gazeSetupDone": "Intégration du suivi OpenXR mise à jour.",
+      "gazeSetupFailed": "Impossible de modifier l'intégration du suivi OpenXR. {{reason}}"
+    },
     "voice": {
       "mode": "Dialogue par prénom",
       "replacesRequiredWord": "Remplace le mot obligatoire : prononcez le prénom pour ouvrir un dialogue, puis parlez sans le répéter.",
@@ -62,6 +144,18 @@ export const TRANSLATIONS: Record<string, object> = {
       "pluginLink": "Installation de Parakeet",
       "usage": "Dites « {{name}} », « Dis, {{name}} », « Hey, {{name}} » ou « OK, {{name}} », avec ou sans commande. Terminez par « ça sera tout » ou « j'ai terminé ». Dites « reste en écoute » pour suspendre le délai jusqu'à une fin explicite. Le délai démarre après la fin de la réponse ; un bip discret à deux tons signale son expiration, sans IA ni synthèse vocale. Les confirmations suivent la langue configurée ou détectée. Redémarrez l'assistant après un changement de prénom d'avatar ou de paramètres micro. Seul le prénom est propre à l'avatar ; les autres paramètres de dialogue sont communs à tous les avatars.",
       "state": { "preparing": "Préparation", "standby": "Veille", "active": "Dialogue actif", "error": "Erreur de reconnaissance vocale" }
+    },
+    "common": { "cancel": "Annuler", "confirm": "Confirmer", "details": "Détails", "moreActions": "Autres actions", "actionError": "Impossible d’effectuer cette action.", "invalidAction": "Action ou paramètres du plugin invalides.", "pluginUnavailable": "Ce plugin est indisponible.", "itemsOne": "{{count}} élément", "itemsMany": "{{count}} éléments" },
+    "voicePreview": {
+      "message": "Message de test de la voix",
+      "sample": "Bonjour Commandant. Tous les systèmes sont opérationnels. Nous sommes prêts pour le départ.",
+      "play": "Écouter la voix",
+      "playing": "Lecture en cours...",
+      "help": "Chaque clic génère une nouvelle synthèse avec la voix, les consignes et les effets audio actuels du personnage, sur la sortie audio sélectionnée. Gardez le même texte pour comparer les essais. Les fournisseurs distants reçoivent ce texte et peuvent facturer chaque test. Les effets automatiques liés à l'environnement du jeu ne sont pas appliqués.",
+      "completed": "Essais terminés : {{count}}",
+      "failed": "Échec de l'aperçu vocal.",
+      "disconnected": "Le backend s'est arrêté. Redémarrez-le avant de réessayer.",
+      "timeout": "L'aperçu ne s'est pas terminé sous trois minutes. Vérifiez le backend et la sortie audio avant de réessayer."
     },
     "module": {
       "powerplant": "Générateur", "engine": "Propulseurs", "enginefast": "Propulseurs à performances améliorées", "hyperdrive": "Réacteur FSD", "hyperdriveovercharge": "Réacteur FSD (Surcharge Supercruise)", "lifesupport": "Système de survie", "powerdistributor": "Répartiteur de puissance", "sensors": "Capteurs", "fueltank": "Réservoir de carburant",

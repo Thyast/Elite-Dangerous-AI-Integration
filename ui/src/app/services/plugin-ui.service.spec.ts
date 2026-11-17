@@ -54,19 +54,19 @@ describe("generic plugin UI transport", () => {
     expect(snackBar.open).not.toHaveBeenCalled();
   });
 
-  it("does not confuse independent plugin requests when results are broadcast to both windows", async () => {
-    const other = new PluginUIService(tauri, translate, snackBar);
+  it("does not confuse desktop and VR plugin requests when results are broadcast to both windows", async () => {
+    const vr = new PluginUIService(tauri, translate, snackBar);
     const desktopResult = service.invoke("alpha", "refresh");
     const desktopRequest = tauri.send_command.calls.mostRecent().args[0]["request_id"];
-    const otherResult = other.invoke("alpha", "refresh");
-    const otherRequest = tauri.send_command.calls.mostRecent().args[0]["request_id"];
-    expect(otherRequest).not.toBe(desktopRequest);
+    const vrResult = vr.invoke("alpha", "refresh");
+    const vrRequest = tauri.send_command.calls.mostRecent().args[0]["request_id"];
+    expect(vrRequest).not.toBe(desktopRequest);
     output.next({type: "plugin_ui_result", timestamp: "", index: 0,
       request_id: desktopRequest, success: true, result: "desktop"});
     output.next({type: "plugin_ui_result", timestamp: "", index: 1,
-      request_id: otherRequest, success: true, result: "other"});
+      request_id: vrRequest, success: true, result: "VR"});
     expect(await desktopResult).toBe("desktop");
-    expect(await otherResult).toBe("other");
+    expect(await vrResult).toBe("VR");
   });
 
   it("shows a translated action notification once, without replaying publications or duplicate results", async () => {

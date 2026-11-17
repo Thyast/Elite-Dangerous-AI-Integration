@@ -408,7 +408,7 @@
                                     </div>
 
                                     <div class="overlay-secondary-controls">
-                                        @if (config.overlay_mode === 'vr' || config.overlay_mode === 'both') {
+                                        @if (config.overlay_mode === 'vr' || config.overlay_mode === 'vr-full' || config.overlay_mode === 'both') {
                                             <div class="vr-compatibility-card" [class.vr-compatibility-ready]="overlayCompatibility?.launch?.wouldWorkNow || overlayCompatibility?.readiness === 'waiting-for-host'">
                                                 <div>
                                                     <strong>{{ overlayCompatibility?.backendLabel || 'VR overlay' }}</strong>
@@ -562,6 +562,19 @@
                                                 <p class="preflight-helper-text">Include these details in a keyboard mapping bug report. Full details are available in Actions settings.</p>
                                             </div>
                                         }
+                                    }
+
+                                    @if (keybindsData.mapping_warnings?.length) {
+                                        <div class="preflight-issue-section">
+                                            <strong>Keyboard mapping warnings:</strong>
+                                            <ul>
+                                                @for (issue of keybindsData.mapping_warnings; track $index) {
+                                                    <li>{{ issue.action }}: {{ issue.role }} <code>{{ issue.key }}</code>
+                                                        ({{ issue.layout || 'unknown' }}, {{ issue.platform }}) — {{ issue.reason }}</li>
+                                                }
+                                            </ul>
+                                            <p class="preflight-helper-text">Full details for bug reports are available in Actions settings.</p>
+                                        </div>
                                     }
 
                                     @if (enabledActionTypes.length > 0) {

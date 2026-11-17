@@ -43,6 +43,7 @@ import { MatExpansionModule } from "@angular/material/expansion";
 import { ChatService } from "../../services/chat.service";
 import { SettingsGridComponent } from "../settings-grid/settings-grid.component";
 import { TranslateModule } from "@ngx-translate/core";
+import { VoicePreviewComponent } from "../voice-preview/voice-preview.component";
 
 import { ModelProviderDefinition, providerVoiceDisplayValue, SettingsGrid, voiceSettingsContext } from "../../services/plugin-settings";
 
@@ -110,6 +111,7 @@ interface LowHighPassPresetOption {
         MatExpansionModule,
         SettingsGridComponent,
         TranslateModule,
+        VoicePreviewComponent,
     ],
     templateUrl: "./character-settings.component.html",
     styleUrl: "./character-settings.component.scss",

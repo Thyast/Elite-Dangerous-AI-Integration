@@ -24,7 +24,7 @@ describe("voice section expansion", () => {
 
     afterEach(() => root.remove());
 
-    it("matches French names with an English GUI without changing plugin data", () => {
+    it("matches French names with an English GUI and changes real list groups without changing plugin data", () => {
         const fixture = TestBed.createComponent(SettingsFieldComponent);
         const items = [
             {key: "core", title: "Power Plant", group: "category.core"},
@@ -43,7 +43,7 @@ describe("voice section expansion", () => {
         expect(items.length).toBe(2);
     });
 
-    it("indexes visible headers and ignores inactive tabs and children of closed parents", () => {
+    it("uses one-based visible header order and ignores inactive tabs and children hidden by collapsed parents", () => {
         root.innerHTML = `
             <div class="mat-mdc-tab-body" style="display:none"><details><summary>Inactive</summary></details></div>
             <div class="mat-mdc-tab-body-active">
@@ -57,7 +57,7 @@ describe("voice section expansion", () => {
         expect(details.open).toBeFalse();
     });
 
-    it("controls a real accordion and excludes hidden children until their parent is opened", async () => {
+    it("controls a real Material accordion and excludes its hidden category until the parent is opened", async () => {
         const fixture = TestBed.createComponent(SettingsGridComponent);
         fixture.componentRef.setInput("grid", {
             key: "core-grid", label: "category.core", collapsible: true, default_collapsed: true,
@@ -89,7 +89,7 @@ describe("voice section expansion", () => {
         expect(details[1].open).toBeTrue();
     });
 
-    it("is idempotent and reports ambiguous, missing, invalid and rejected changes", () => {
+    it("is idempotent and reports ambiguous, missing, invalid and rejected changes explicitly", () => {
         root.innerHTML = `<button data-ui-section="core" aria-expanded="true">Core</button>
             <details><summary>Core</summary></details>`;
         const button = root.querySelector("button")!;

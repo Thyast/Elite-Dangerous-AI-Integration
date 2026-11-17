@@ -9,8 +9,14 @@ import { Config, ConfigService } from "../services/config.service";
 import { EventMessage, EventService } from "../services/event.service";
 import { GenUiService } from "../services/gen-ui.service";
 
-import { TranslateModule } from '@ngx-translate/core';
-import { OverlayViewComponent } from './overlay-view.component';
+describe("overlay chat-only fallback", () => {
+    let fixture: ComponentFixture<OverlayViewComponent>;
+    let config: BehaviorSubject<Config | null>;
+    let events: BehaviorSubject<EventMessage[]>;
+    let send: jasmine.Spy;
+    const message: ChatMessage = {
+        type: "chat", timestamp: "", index: 0, role: "covas", message: "Ready commander",
+    };
 
     beforeEach(async () => {
         config = new BehaviorSubject<Config | null>(null);
@@ -33,16 +39,12 @@ import { OverlayViewComponent } from './overlay-view.component';
         }).compileComponents();
     });
 
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      imports: [OverlayViewComponent, TranslateModule.forRoot()]
-    })
-    .compileComponents();
-    
-    fixture = TestBed.createComponent(OverlayViewComponent);
-    component = fixture.componentInstance;
-    fixture.detectChanges();
-  });
+    function create(chatOnly: boolean): OverlayViewComponent {
+        fixture = TestBed.createComponent(OverlayViewComponent);
+        fixture.componentRef.setInput("chatOnly", chatOnly);
+        fixture.detectChanges();
+        return fixture.componentInstance;
+    }
 
     function emit(kind: "assistant_speaking" | "assistant_completed"): void {
         events.next([{

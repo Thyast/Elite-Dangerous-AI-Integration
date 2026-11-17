@@ -1,4 +1,5 @@
-import { ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from "@angular/core";
+import { ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild, inject } from "@angular/core";
+import { ActivatedRoute } from "@angular/router";
 import { CommonModule } from "@angular/common";
 import { MatButtonModule } from "@angular/material/button";
 import { MatIconModule } from "@angular/material/icon";
@@ -33,9 +34,10 @@ import { ActionsContainerComponent } from "../components/actions-container/actio
 import { PluginViewComponent } from "../components/plugin-view/plugin-view.component";
 import { PluginUIService } from "../services/plugin-ui.service";
 import { RegisteredUIView } from "../services/plugin-ui";
-import { TranslateModule } from "@ngx-translate/core";
-import { UISectionService } from "../services/ui-section.service";
+import { TranslateModule, TranslateService } from "@ngx-translate/core";
 import { VoiceActivationStatusComponent } from "../components/voice-activation-status/voice-activation-status.component";
+import { OverlayViewComponent } from "../overlay-view/overlay-view.component";
+import { UISectionService } from "../services/ui-section.service";
 
 const CHAT_SHOW_EVENTS_KEY = "covas.ui.chat-show-events";
 
@@ -67,6 +69,7 @@ const CHAT_SHOW_EVENTS_KEY = "covas.ui.chat-show-events";
         PluginViewComponent,
         TranslateModule,
         VoiceActivationStatusComponent,
+        OverlayViewComponent,
     ],
     templateUrl: "./main-view.component.html",
     styleUrl: "./main-view.component.css",
@@ -120,10 +123,15 @@ export class MainViewComponent implements OnInit, OnDestroy {
     public isQuestEditorOpen = false;
     private systemSubscription?: Subscription;
     private pluginViewsSubscription?: Subscription;
-    private sectionSubscription?: Subscription;
     pluginViews: RegisteredUIView[] = [];
     configPluginViews: RegisteredUIView[] = [];
     private requestedTab: string | null = null;
+    showChatEvents = localStorage.getItem(CHAT_SHOW_EVENTS_KEY) !== "false";
+
+    setShowChatEvents(show: boolean): void {
+        localStorage.setItem(CHAT_SHOW_EVENTS_KEY, String(show));
+        this.showChatEvents = show;
+    }
 
     constructor(
         private tauri: TauriService,
@@ -136,9 +144,6 @@ export class MainViewComponent implements OnInit, OnDestroy {
         private uiService: UIService,
         private snackBar: MatSnackBar,
         private pluginUI: PluginUIService,
-        private host: ElementRef<HTMLElement>,
-        private changeDetector: ChangeDetectorRef,
-        private sections: UISectionService,
     ) {
         this.policyService.usageDisclaimerAccepted$.subscribe(
             (accepted) => {
@@ -173,11 +178,22 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 this.snackBar.open(message, "OK", { duration: 7000 });
                 result = { success: false, error: message };
             }
-            void this.tauri.send_command({
-                type: "ui_section_result", request_id: request.request_id,
-                timestamp: new Date().toISOString(), ...result,
-            }).catch(error => console.error("Could not acknowledge UI section change:", error));
+            if (!this.isOverlayInterface) {
+                void this.tauri.send_command({
+                    type: "ui_section_result", request_id: request.request_id,
+                    timestamp: new Date().toISOString(), ...result,
+                }).catch(error => console.error("Could not acknowledge UI section change:", error));
+            }
         });
+        if (this.isOverlayInterface) {
+            this.vrAdjustmentSubscription = this.uiService.vrAdjustmentActive$.subscribe(active => {
+                this.vrAdjustmentActive = active;
+            });
+            this.uiVisibilitySubscription = this.uiService.overlayInterfaceVisible$.subscribe(visible => {
+                this.overlayInterfaceVisible = visible;
+                document.documentElement.classList.toggle("overlay-window", !visible);
+            });
+        }
         this.pluginViewsSubscription = this.pluginUI.views$.subscribe(views => {
             this.pluginViews = views.filter(view => (view.modes ?? ['running']).includes('running'));
             this.configPluginViews = views.filter(view => (view.modes ?? ['running']).includes('configuring'));
@@ -287,6 +303,9 @@ export class MainViewComponent implements OnInit, OnDestroy {
 
     ngOnDestroy(): void { // Implement ngOnDestroy
         this.sectionSubscription?.unsubscribe();
+        this.vrAdjustmentSubscription?.unsubscribe();
+        this.uiVisibilitySubscription?.unsubscribe();
+        if (this.isOverlayInterface) document.documentElement.classList.remove("overlay-window");
         this.pluginViewsSubscription?.unsubscribe();
         if (this.systemSubscription) {
             this.systemSubscription.unsubscribe();
@@ -314,11 +333,20 @@ export class MainViewComponent implements OnInit, OnDestroy {
             ...(this.hasLogbook ? ['logbook'] : []), 'search', 'actions'];
     }
 
-    onRuntimeTabSelected(index: number): void {
+    onTabSelected(index: number): void {
         if (index === this.selectedTabIndex) return;
         this.selectedTabIndex = index;
         const target = [...this.builtinRuntimeTabs(), ...this.pluginViews.map(view => view.target)][index];
-        if (target) this.uiService.showTab(target);
+        if (target) {
+            this.requestedTab = target;
+            this.uiService.showTab(target);
+        }
+    }
+
+    private selectRequestedTab(): void {
+        if (!this.requestedTab) return;
+        const index = [...this.builtinRuntimeTabs(), ...this.pluginViews.map(view => view.target)].indexOf(this.requestedTab);
+        if (index >= 0) this.selectedTabIndex = index;
     }
 
     private getCurrentGameModeLabel(currentStatusData: any): string {

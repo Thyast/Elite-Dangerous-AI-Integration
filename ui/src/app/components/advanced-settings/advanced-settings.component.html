@@ -622,13 +622,27 @@
                 </div>
 
                 <div class="overlay-secondary-controls">
-                    @if (config.overlay_mode === 'vr' || config.overlay_mode === 'both') {
+                    @if (vrOverlaySelected) {
                         <div class="vr-compatibility-card" [class.vr-compatibility-ready]="overlayCompatibility?.launch?.wouldWorkNow || overlayCompatibility?.readiness === 'waiting-for-host'">
                             <div>
                                 <strong>{{ overlayCompatibility?.backendLabel || 'VR overlay' }}</strong>
                                 <p>{{ overlayRuntimeSummary }}</p>
                                 @if (overlayCompatibility?.frameHealth; as health) {
                                     <p><strong>Overlay delivery:</strong> {{ health.message }}</p>
+                                }
+                                @if (overlayCompatibility?.connectedApplication) {
+                                    <p>Connected to {{ overlayCompatibility?.connectedApplication }}.</p>
+                                }
+                                @if (overlayRuntimeInfo?.selectedBackend !== 'openvr') {
+                                    <p>
+                                        {{ 'vrInterface.openXrEdvr' | translate }}
+                                        <a href="https://github.com/characterecho-sean/edvr-unofficial-patch"
+                                           target="_blank" rel="noopener noreferrer">EDVR</a>.
+                                        {{ 'vrInterface.openCompositeUnsupported' | translate }}
+                                    </p>
+                                }
+                                @if (overlayCompatibility?.requiresOpenXRAppRestart) {
+                                    <p>Restart any running VR applications for this change to take effect.</p>
                                 }
                             </div>
                             <div class="vr-compatibility-actions">
@@ -671,13 +685,6 @@
 
                         <section class="vr-control-group">
                             <h4>Placement</h4>
-                            @if (config.overlay_vr_anchor === 'world' && overlayRuntimeInfo?.heightInitialization; as height) {
-                                @if (height.status === 'unavailable') {
-                                    <p role="alert" class="vr-height-status">{{ 'vrInterface.heightUnavailable' | translate: { reason: height.message } }}</p>
-                                } @else if (height.status === 'waiting') {
-                                    <p role="status" class="vr-height-status">{{ 'vrInterface.heightWaiting' | translate: { reason: height.message } }}</p>
-                                }
-                            }
                             <div class="vr-control-grid vr-placement-grid">
                                 <div class="overlay-slider-field">
                                     <label>Horizontal: {{ config.overlay_vr_horizontal_offset }} m</label>
@@ -694,7 +701,7 @@
                                 <div class="overlay-slider-field">
                                     <label>Distance: {{ config.overlay_vr_distance_offset }} m</label>
                                     <mat-slider min="-1.9" max="1.5" step="0.01" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_distance_offset" (ngModelChange)="onConfigChange({overlay_vr_distance_offset: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_distance_offset" (ngModelChange)="onVrConfigChange({overlay_vr_distance_offset: $event})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                             </div>

@@ -200,11 +200,11 @@ describe("VR slider configuration updates", () => {
         expect(component.chatEventGrouping).toEqual({ enabled: false, delaySeconds: 2 });
     });
 
-    it("allows distance offsets from -1.5 to 1.5 metres in the placement slider", () => {
+    it("allows distance offsets from -1.9 to 1.5 metres in the placement slider", () => {
         const slider = fixture.debugElement.query(
             By.css(".vr-placement-grid .overlay-slider-field:last-child mat-slider"),
         ).injector.get(MatSlider);
-        expect(slider.min).toBe(-1.5);
+        expect(slider.min).toBe(-1.9);
         expect(slider.max).toBe(1.5);
         expect(slider.step).toBe(0.01);
     });
@@ -487,6 +487,7 @@ describe("VR slider configuration updates", () => {
         tick(3000);
         expect(getRuntime).toHaveBeenCalledTimes(2);
         expect(notify).not.toHaveBeenCalled();
+        component.ngOnDestroy();
     }));
 
     it("polls full-window height initialization without adaptive sizing and hides it in the HUD mode", fakeAsync(() => {
@@ -518,5 +519,6 @@ describe("VR slider configuration updates", () => {
         configs.next({ ...config, overlay_mode: "vr", overlay_vr_anchor: "world" });
         fixture.detectChanges();
         expect(fixture.nativeElement.querySelector(".vr-height-status")).toBeNull();
+        component.ngOnDestroy();
     }));
 });
