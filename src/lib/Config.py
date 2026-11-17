@@ -1835,6 +1835,7 @@ def load_config() -> Config:
             data = json.load(file)
             if data:
                 data = migrate(data)
+                data.pop("selected_action_languages", None)
                 merged_config = merge_config_data(defaults, data)
                 if migrate_audio_devices(merged_config):
                     try:
@@ -1857,7 +1858,10 @@ def load_config() -> Config:
 def save_config(config: Config):
     config_file = Path("config.json")
     with open(config_file, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4)
+        json.dump({
+            key: value for key, value in config.items()
+            if key not in {"available_action_languages", "selected_action_languages"}
+        }, f, indent=4)
 
 
 def assign_ptt(config: Config, controller_manager, index: int = 0):
@@ -2075,6 +2079,7 @@ def update_config(config: Config, data: dict) -> Config:
 
     data.pop('wake_word_name', None)
     data.pop('tools_var', None)
+    data.pop("selected_action_languages", None)
     for key in LEGACY_PROVIDER_SETTING_KEYS:
         data.pop(key, None)
 
@@ -2097,7 +2102,10 @@ def update_config(config: Config, data: dict) -> Config:
             agent_tries = 1
         data["agent_llm_max_tries"] = agent_tries
 
-    new_config = cast(Config, {**config, **data})
+    new_config = cast(Config, {
+        key: value for key, value in {**config, **data}.items()
+        if key not in {"available_action_languages", "selected_action_languages"}
+    })
     if validate_config(new_config) is None:
         emit_message("config", config=config)
         return config

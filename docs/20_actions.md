@@ -582,6 +582,8 @@ This is a list of all currently supported actions the AI can perform. Just talk 
     - let's go
     </details>
 
+    Optional translated command aliases can be enabled in **Settings → Actions → Additional command languages**. English commands remain available regardless of this setting. Translated aliases use exact phrase matching and require the action cache to be enabled.
+
     <details>
     <summary>Required Keyboard Binds</summary>
 
@@ -593,6 +595,10 @@ This is a list of all currently supported actions the AI can perform. Just talk 
     - ToggleCargoScoop (auto retract when deployed)
     - DeployHardpointToggle (auto retract when deployed)
     </details>
+
+### Adding an action language pack
+
+Language packs are JSON files in `src/lib/actions/languages/`, named with their language code. The backend discovers and loads every pack automatically; adding a pack does not require a configuration change. Each pack has a display `name` and an `aliases` array; every alias groups spoken `phrases` in a non-empty array sharing the same registered `action` and `arguments`. Packs add aliases only—English commands remain available. Aliases that conflict with an English command or map the same phrase to different actions are skipped with a warning, so a collision cannot override English or prevent startup.
 
 2. **Target next system in route**
 

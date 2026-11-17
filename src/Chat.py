@@ -62,6 +62,7 @@ def parse_plugin_provider(provider: str) -> tuple[str, str] | None:
 
 
 from lib.actions.Actions import register_actions
+from lib.actions.action_language_packs import load_action_language_packs
 from lib.ControllerManager import ControllerManager
 from lib.EDKeys import EDKeys
 from lib.Event import (
@@ -955,6 +956,8 @@ class Chat:
                 "in_system_navigation", False
             ),
         )
+
+        self.action_manager.apply_language_aliases(load_action_language_packs())
 
         log("info", "Actions ready.")
         show_chat_message("info", "Actions ready.")

@@ -10,6 +10,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.lib.ActionManager import ActionManager
+from src.lib.actions import action_language_packs
+from src.lib.actions.action_language_packs import load_action_language_packs
 
 
 def make_tool_call(name: str, arguments: dict | None = None) -> ChatCompletionMessageFunctionToolCall:
@@ -169,6 +171,181 @@ def test_permissionless_actions_remain_available() -> None:
     assert [tool["function"]["name"] for tool in tools] == [
         "permissionlessAction"
     ]
+
+
+def test_aliases_from_all_language_packs_are_applied_and_replaced() -> None:
+    manager = ActionManager()
+
+    class MemoryCache:
+        def __init__(self) -> None:
+            self.values: dict[str, object] = {}
+
+        def get(self, key: str, default: object = None) -> object:
+            return self.values.get(key, default)
+
+        def set(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+        def delete(self, key: str) -> None:
+            self.values.pop(key, None)
+
+    manager.action_cache = MemoryCache()  # type: ignore[assignment]
+    manager.registerAction(
+        "FsdJump",
+        "Enter supercruise",
+        {"type": "object", "properties": {}},
+        lambda args, states: "started",
+        cache_prefill={"supercruise": {"jump_type": "supercruise"}},
+    )
+    manager.registerAction(
+        "target_next_system_in_route",
+        "Target the next system in route",
+        {"type": "object", "properties": {}},
+        lambda args, states: "targeted",
+        cache_prefill={"continue route": {}},
+    )
+    manager.registerAction(
+        "nightVisionToggle",
+        "Toggle night vision",
+        {"type": "object", "properties": {}},
+        lambda args, states: "toggled",
+        action_type="ship",
+        cache_prefill={"night vision": {}},
+    )
+    manager.registerAction(
+        "toggleCargoScoop",
+        "Toggle cargo scoop",
+        {"type": "object", "properties": {}},
+        lambda args, states: "toggled",
+        action_type="mainship",
+        cache_prefill={"cargo scoop": {}},
+    )
+    tools = manager.getToolsList("mainship", True, False, False)
+
+    packs = load_action_language_packs()
+    packs["test"] = {
+        "aliases": [{
+            "phrase": "continue route in another language",
+            "action": "target_next_system_in_route",
+            "arguments": {},
+        }]
+    }
+    manager.apply_language_aliases(packs)
+    expected_aliases = {
+        "vitesse de croisière": ("FsdJump", {"jump_type": "supercruise"}),
+        "passer en vitesse de croisière": ("FsdJump", {"jump_type": "supercruise"}),
+        "passe en vitesse de croisière": ("FsdJump", {"jump_type": "supercruise"}),
+        "passe en vitesse de coisière": ("FsdJump", {"jump_type": "supercruise"}),
+        "continue la route": ("target_next_system_in_route", {}),
+        "continue la navigation": ("target_next_system_in_route", {}),
+        "vision nocturne": ("nightVisionToggle", {}),
+        "active la vision nocturne": ("nightVisionToggle", {}),
+        "désactive la vision nocturne": ("nightVisionToggle", {}),
+        "ouvre la soute": ("toggleCargoScoop", {}),
+        "ferme la soute": ("toggleCargoScoop", {}),
+    }
+    for phrase, (action_name, arguments) in expected_aliases.items():
+        prediction = manager.predict_action(phrase, tools)
+        assert prediction is not None
+        assert prediction[0].function.name == action_name
+        assert json.loads(prediction[0].function.arguments) == arguments
+    assert manager.predict_action("continue route in another language", tools) is not None
+
+    manager.apply_language_aliases({})
+
+    for phrase in expected_aliases:
+        assert manager.predict_action(phrase, tools) is None
+    assert manager.predict_action("continue route in another language", tools) is None
+    assert manager.predict_action("supercruise", tools) is not None
+    assert manager.predict_action("continue route", tools) is not None
+    assert manager.predict_action("night vision", tools) is not None
+    assert manager.predict_action("cargo scoop", tools) is not None
+
+
+@pytest.mark.parametrize("phrases", [None, "command", [], [""], ["   "], ["valid", 42]])
+def test_language_pack_rejects_invalid_phrases(
+    phrases: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack = {
+        "name": "Test",
+        "aliases": [{"phrases": phrases, "action": "FsdJump", "arguments": {}}],
+    }
+    (tmp_path / "test.json").write_text(json.dumps(pack), encoding="utf-8")
+    monkeypatch.setattr(action_language_packs, "LANGUAGE_PACKS_DIRECTORY", tmp_path)
+
+    with pytest.raises(ValueError, match="Invalid action alias"):
+        load_action_language_packs()
+
+
+def test_language_alias_conflicting_with_english_command_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ActionManager()
+    warnings: list[str] = []
+    monkeypatch.setattr("src.lib.ActionManager.log", lambda level, message: warnings.append(message))
+    manager.registerAction(
+        "FsdJump",
+        "Enter supercruise",
+        {"type": "object", "properties": {}},
+        lambda args, states: "started",
+        cache_prefill={"supercruise": {"jump_type": "supercruise"}},
+    )
+
+    manager.apply_language_aliases({
+        "fr": {
+            "aliases": [{
+                "phrase": "supercruise",
+                "action": "FsdJump",
+                "arguments": {"jump_type": "next_system"},
+            }]
+        }
+    })
+
+    tools = manager.getToolsList("mainship", True, False, False)
+    prediction = manager.predict_action("supercruise", tools)
+    assert prediction is not None
+    assert json.loads(prediction[0].function.arguments) == {"jump_type": "supercruise"}
+    assert any("conflicts with an English command" in warning for warning in warnings)
+
+
+def test_ambiguous_language_alias_is_skipped_without_affecting_other_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ActionManager()
+
+    class MemoryCache:
+        def __init__(self) -> None:
+            self.values: dict[str, object] = {}
+
+        def get(self, key: str, default: object = None) -> object:
+            return self.values.get(key, default)
+
+        def set(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+        def delete(self, key: str) -> None:
+            self.values.pop(key, None)
+
+    manager.action_cache = MemoryCache()  # type: ignore[assignment]
+    warnings: list[str] = []
+    monkeypatch.setattr("src.lib.ActionManager.log", lambda level, message: warnings.append(message))
+    for action_name in ("firstAction", "secondAction"):
+        manager.registerAction(action_name, action_name, {}, lambda args, states: "done")
+
+    manager.apply_language_aliases({
+        "fr": {"aliases": [
+            {"phrase": "phrase commune", "action": "firstAction", "arguments": {}},
+            {"phrase": "autre phrase", "action": "firstAction", "arguments": {}},
+        ]},
+        "de": {"aliases": [
+            {"phrase": "phrase commune", "action": "secondAction", "arguments": {}},
+        ]},
+    })
+
+    tools = manager.getToolsList("ship", True, False, False)
+    assert manager.predict_action("phrase commune", tools) is None
+    prediction = manager.predict_action("autre phrase", tools)
+    assert prediction is not None
+    assert prediction[0].function.name == "firstAction"
+    assert any("Skipping ambiguous command alias" in warning for warning in warnings)
 
 
 def test_station_actions_require_docked_status() -> None:
