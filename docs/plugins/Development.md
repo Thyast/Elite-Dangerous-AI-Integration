@@ -141,6 +141,9 @@ The `PluginHelper` class provides several methods for interacting with the COVAS
 
 ### State Management
 
+- `helper.get_current_state() -> tuple[list[Event], ProjectedStates]`:
+   Get the current events and projection snapshots.
+
 - `helper.register_projection(projection: Projection)`:  
    Register a projection to maintain state over time. Projections are used to track and update state in response to events.
 
@@ -165,6 +168,21 @@ The `PluginHelper` class provides several methods for interacting with the COVAS
 
 - `helper.register_status_generator(status_generator: Callable[[dict[str, dict]], list[tuple[str, Any]]])`:  
    Register a status generator callback for adding information to the model's status context. The callable takes the current projected states and returns a list of (title, content) tuples.
+
+- `helper.prepare_navigation(system: str) -> NavigationPreparation`:
+   Prepare in-game navigation to an exact system using the enabled
+   `plotToTarget`, `galaxyMapOpenOrClose` and `target_next_system_in_route`
+   actions. The commander must be aboard the main ship, with no FSD charge or
+   jump in progress. Docked (including inside the hangar) and landed ships are
+   supported: plotting a route is separate from taking off or jumping.
+
+   Returns `status` (`ready`, `arrived`, `blocked` or `failed`), `system`,
+   `active_destination`, `next_jump` and `message`. Only `ready` confirms the
+   requested destination, closed galaxy map and selected next jump target; it
+   does not mean the ship is cleared for departure. This method never undocks,
+   takes off, changes throttle or engages the FSD. `arrived` means local work
+   may still be pending. Disabled actions and unconfirmed routes are reported
+   explicitly; callers must not present them as a prepared route.
 
 ### Input Simulation
 

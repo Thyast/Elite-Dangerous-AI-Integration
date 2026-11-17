@@ -729,9 +729,10 @@ def fsd_jump(args, projected_states):
 
 def next_system_in_route(args, projected_states):
     nav_info = get_state_dict(projected_states, 'NavInfo')
-    if not nav_info.get('NextJumpTarget'):
+    if not nav_info.get('NavRoute'):
         return "cannot target next system in route as no navigation route is currently set"
 
+    setGameWindowActive()
     keys.send('TargetNextRouteSystem')
     return "Targeting next system in route"
 
