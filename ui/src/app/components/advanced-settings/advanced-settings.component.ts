@@ -67,8 +67,7 @@ export type AdvancedSettingsFocusTarget =
 type AdvancedSettingsPanel = "commander" | "llm" | "agent-llm" | "stt" | "tts" | "vision" | "embedding" | "overlay" | "remote-interface";
 
 const VR_RUNTIME_SETTINGS = [
-    ["overlay_vr_anchor", "vrAnchor"], ["overlay_vr_content", "vrContent"],
-    ["overlay_vr_gaze_zoom", "vrGazeZoom"], ["overlay_vr_gaze_reduction_factor", "vrGazeReductionFactor"],
+    ["overlay_vr_anchor", "vrAnchor"],
     ["overlay_vr_size_meters", "vrSizeMeters"], ["overlay_vr_horizontal_offset", "vrHorizontalOffset"],
     ["overlay_vr_vertical_offset", "vrVerticalOffset"], ["overlay_vr_distance_offset", "vrDistanceOffset"],
     ["overlay_vr_tilt_degrees", "vrTiltDegrees"], ["overlay_vr_yaw_degrees", "vrYawDegrees"],
@@ -540,7 +539,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
 
     get overlayRuntimeInstalled(): boolean {
         const info = this.overlayRuntimeInfo;
-        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "both" || Boolean(info?.packageInstalled && (
+        return this.vrOverlaySelected || Boolean(info?.packageInstalled && (
             info.openxrAvailable ||
             Boolean(info.openxrRuntimeManifestPath) ||
             info.openvrRuntimeInstalled ||
@@ -554,7 +553,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
     }
 
     get vrOverlaySelected(): boolean {
-        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "both";
+        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "vr-full" || this.config?.overlay_mode === "both";
     }
 
     get desktopOverlayBackendLabel(): string {
@@ -601,6 +600,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
             if (schedulePolling && this.vrOverlaySelected && (
                 this.overlayCompatibility?.readiness === "waiting-for-host" || this.openXrGazeIntegration?.restartRequired
                 || this.overlayRuntimeInfo.gazeZoom?.status === "waiting"
+                || this.overlayRuntimeInfo.heightInitialization?.status === "waiting"
             )) {
                 this.vrCompatibilityRefreshTimer = setTimeout(() => void this.refreshOverlayRuntimeInfo(), 1500);
             }
@@ -678,21 +678,11 @@ export class AdvancedSettingsComponent implements OnDestroy {
         }
     }
 
-    onGazeReductionFactorChange(value: number | null): void {
-        if (value === null || !Number.isFinite(value) || value < 1) {
-            this.snackBar.open(this.gazeTranslate.instant("vrInterface.gazeInvalidFactor"), "OK", { duration: 5000 });
-            return;
-        }
-        this.onVrConfigChange({ overlay_vr_gaze_reduction_factor: value });
-    }
-
     get vrSettingsRestartRequired(): boolean {
         const active = this.overlayRuntimeInfo?.activeVrSettings;
         const config = this.config;
-        return !!active && !!config && VR_RUNTIME_SETTINGS.some(([key, runtimeKey]) => {
-            if (key === "overlay_vr_gaze_reduction_factor" && !active.vrGazeZoom && !config.overlay_vr_gaze_zoom) return false;
-            return active[runtimeKey] !== config[key];
-        });
+        if (config?.overlay_mode === "vr-full") return false;
+        return !!active && !!config && VR_RUNTIME_SETTINGS.some(([key, runtimeKey]) => active[runtimeKey] !== config[key]);
     }
 
     requestOpenXrGazeIntegration(action: "install" | "uninstall"): void {
@@ -1015,7 +1005,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
     async onConfigChange(partialConfig: Partial<Config>) {
         if (partialConfig.overlay_mode !== undefined) {
             clearTimeout(this.vrCompatibilityRefreshTimer);
-            if (partialConfig.overlay_mode === "vr" || partialConfig.overlay_mode === "both") {
+            if (partialConfig.overlay_mode === "vr" || partialConfig.overlay_mode === "vr-full" || partialConfig.overlay_mode === "both") {
                 void this.refreshOverlayRuntimeInfo();
             }
         }

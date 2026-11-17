@@ -63,6 +63,41 @@ describe("generic list settings", () => {
         expect(actions).toEqual([{ action: "rename", rowKey: "one", value: "Renamed" }]);
     });
 
+    it("renders a left checkbox, greys suspended modules and keeps the unchecked box orange", () => {
+        const fixture = createList();
+        const field = fixture.componentInstance.field;
+        const module = {key: "beam", title: "Beam Laser", meta: "Long Range G5",
+            checked: false, tone: "muted", checkbox_action: "set_module_enabled",
+            checkbox_label: "Include module", checkbox_payload: {plan_id: "plan", step_id: "beam"}};
+        fixture.componentRef.setInput("field", {...field, items: [module]});
+        fixture.detectChanges();
+        const root: HTMLElement = fixture.nativeElement;
+        const input = root.querySelector<HTMLInputElement>(".row-checkbox")!;
+        const title = root.querySelector<HTMLElement>(".list-row-title")!;
+        expect(input.checked).toBeFalse();
+        expect(root.querySelector(".list-row")?.classList.contains("row-suspended")).toBeTrue();
+        expect(getComputedStyle(input).borderTopColor).toBe("rgb(255, 152, 0)");
+        expect(getComputedStyle(title).color).toBe("rgb(136, 136, 136)");
+        expect(input.getBoundingClientRect().left).toBeLessThan(title.getBoundingClientRect().left);
+        const actions: unknown[] = [];
+        fixture.componentInstance.uiAction.subscribe(action => actions.push(action));
+        input.click();
+        expect(actions).toEqual([{action: "set_module_enabled", payload: {
+            plan_id: "plan", step_id: "beam", enabled: true,
+        }}]);
+        // The server owns the state: retain the previous selection until it responds.
+        expect(input.checked).toBeFalse();
+        fixture.componentRef.setInput("field", {...field, items: [{...module, checked: true}]});
+        fixture.detectChanges();
+        expect(input.checked).toBeTrue();
+        input.click();
+        expect(actions[1]).toEqual({action: "set_module_enabled", payload: {
+            plan_id: "plan", step_id: "beam", enabled: false,
+        }});
+        expect(input.checked).toBeTrue();
+        fixture.destroy();
+    });
+
     it("keeps the compact summary visible with details initially closed", () => {
         const fixture = createList();
         fixture.componentRef.setInput("field", {...fixture.componentInstance.field,

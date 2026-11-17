@@ -1,5 +1,12 @@
 # Available Voices
 ## Edge TTS
+
+Edge TTS requires an internet connection. COVAS waits up to 20 seconds for the
+first audio data and tolerates gaps of up to 15 seconds. A timeout or a response
+without audio is retried once after one second, only if no decoded audio has
+been emitted yet. Phrases that have already started are never replayed
+automatically. If recovery fails, the synthesis error is displayed.
+
 | Name | Gender | Locale | Content | Personality |
 | - | - | - | - | - |
 | af-ZA-AdriNeural | Female | af-ZA | General | Friendly, Positive |

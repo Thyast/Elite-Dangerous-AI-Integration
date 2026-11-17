@@ -89,7 +89,7 @@ function harness(overrides = {}) {
     advance(ms) {
       for (let elapsed = 0; elapsed < ms; elapsed += 50) {
         time += 50;
-        callback();
+        callback?.();
       }
     },
   };
@@ -253,4 +253,59 @@ test('changes the area factor live, never enlarges beyond configured size, and r
     assert.throws(() => h.zoom.setReductionFactor(value), /at least 1/);
   }
   h.zoom.close();
+});
+
+test('fades the reduced window to its configured opacity, restores it when focused, paused or closed', () => {
+  const opacities = [];
+  const h = harness({ options: { reducedOpacity: 0.25, setOpacity: value => { opacities.push(value); return true; } } });
+  h.advance(1500);
+  assert.deepEqual(opacities, []);
+  h.setPose(away);
+  h.advance(450);
+  assert.equal(opacities.length, 1);
+  assert.ok(opacities[0] > 0.25 && opacities[0] < 1);
+  h.advance(2000);
+  assert.equal(opacities.at(-1), 0.25);
+  assert.ok(opacities.every(value => value >= 0.25 && value <= 1));
+  const settled = opacities.length;
+  h.advance(1000);
+  assert.equal(opacities.length, settled);
+  h.zoom.setReducedOpacity(0.1);
+  h.advance(100);
+  assert.equal(opacities.at(-1), 0.1);
+  h.setPose(centered);
+  h.advance(2000);
+  assert.equal(opacities.at(-1), 1);
+  h.setPose(away);
+  h.advance(2000);
+  h.zoom.setPaused(true);
+  assert.equal(opacities.at(-1), 1);
+  h.zoom.setPaused(false);
+  h.advance(2000);
+  assert.equal(opacities.at(-1), 0.1);
+  h.zoom.close();
+  assert.equal(opacities.at(-1), 1);
+  assert.equal(h.widths.at(-1), 1);
+});
+
+test('keeps full opacity when tracking is lost and rejects invalid or failed opacity updates', () => {
+  const opacities = [];
+  const h = harness({ options: { reducedOpacity: 0.5, setOpacity: value => { opacities.push(value); return true; } } });
+  h.setPose(away);
+  h.advance(2000);
+  assert.equal(opacities.at(-1), 0.5);
+  h.setPose(null);
+  h.advance(2000);
+  assert.equal(opacities.at(-1), 1);
+  for (const value of [0, 0.09, 1.01, -1, NaN, Infinity]) {
+    assert.throws(() => h.zoom.setReducedOpacity(value), /between 10% and 100%/);
+    assert.throws(() => harness({ options: { reducedOpacity: value } }), /between 10% and 100%/);
+  }
+  h.zoom.close();
+  const failing = harness({ options: { reducedOpacity: 0.25, setOpacity: () => false } });
+  failing.setPose(away);
+  failing.advance(500);
+  assert.equal(failing.errors.length, 1);
+  assert.equal(failing.closed, 1);
+  assert.deepEqual(failing.zoom.getState(), { status: 'unavailable', message: 'The VR window could not update its opacity.' });
 });

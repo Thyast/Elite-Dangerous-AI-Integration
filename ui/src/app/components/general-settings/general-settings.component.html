@@ -402,7 +402,7 @@
                                     </div>
 
                                     <div class="overlay-secondary-controls">
-                                        @if (config.overlay_mode === 'vr' || config.overlay_mode === 'both') {
+                                        @if (config.overlay_mode === 'vr' || config.overlay_mode === 'vr-full' || config.overlay_mode === 'both') {
                                             <div class="vr-compatibility-card" [class.vr-compatibility-ready]="overlayCompatibility?.launch?.wouldWorkNow">
                                                 <div>
                                                     <strong>{{ overlayCompatibility?.backendLabel || 'VR overlay' }}</strong>

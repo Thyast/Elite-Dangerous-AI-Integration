@@ -236,9 +236,12 @@ def test_default_config_uses_plugins_and_has_no_legacy_provider_settings(monkeyp
     assert config["llm_provider"].startswith("plugin:")
     assert config["agent_llm_provider"].startswith("plugin:")
     assert config["embedding_provider"].startswith("plugin:")
-    assert config["overlay_vr_content"] == "hud"
-    assert config["overlay_vr_gaze_zoom"] is False
-    assert config["overlay_vr_gaze_reduction_factor"] == 5.0
+    assert "overlay_vr_content" not in config
+    assert "overlay_vr_gaze_zoom" not in config
+    assert config["overlay_vr_full_profiles"] == {}
+    assert config["overlay_vr_full_last"] == {}
+    assert config["overlay_vr_gaze_reduction_factor"] == 1.0
+    assert config["overlay_vr_gaze_reduced_opacity"] == 0.25
     assert "tools_var" not in config
     assert not set(ConfigModule.LEGACY_PROVIDER_SETTING_KEYS).intersection(config)
 
@@ -249,12 +252,14 @@ def test_previous_gaze_zoom_uses_new_default_area_factor_without_reinterpreting_
     monkeypatch.chdir(tmp_path)
     previous = dict(ConfigModule.load_config())
     previous.pop("overlay_vr_gaze_reduction_factor")
+    previous.pop("overlay_vr_gaze_reduced_opacity")
     previous["overlay_vr_gaze_zoom"] = True
     previous["overlay_vr_gaze_zoom_multiplier"] = 2.5
     (tmp_path / "config.json").write_text(json.dumps(previous), encoding="utf-8")
     restored = ConfigModule.load_config()
-    assert restored["overlay_vr_gaze_zoom"] is True
+    assert "overlay_vr_gaze_zoom" not in restored
     assert restored["overlay_vr_gaze_reduction_factor"] == 5
+    assert restored["overlay_vr_gaze_reduced_opacity"] == 0.25
     assert "overlay_vr_gaze_zoom_multiplier" not in restored
 
 
@@ -467,3 +472,44 @@ def test_technical_profile_rename_does_not_change_activation(monkeypatch, tmp_pa
     assert updated["characters"][0]["name"] == "Default (Copy)"
     assert updated["characters"][0]["first_name"] == "Simone"
     assert ConfigModule.validate_config(updated) is updated
+
+
+def test_legacy_full_vr_mode_preserves_last_position_and_disabled_zoom(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.chdir(tmp_path)
+    previous = dict(ConfigModule.load_config())
+    previous.pop("overlay_vr_full_last")
+    previous.update(
+        overlay_mode="vr", overlay_vr_content="interface", overlay_vr_gaze_zoom=False,
+        overlay_vr_vertical_offset=-0.35, overlay_vr_gaze_reduction_factor=9,
+    )
+    (tmp_path / "config.json").write_text(json.dumps(previous), encoding="utf-8")
+    restored = ConfigModule.load_config()
+    assert restored["overlay_mode"] == "vr-full"
+    assert restored["overlay_vr_full_last"]["overlay_vr_vertical_offset"] == -0.35
+    assert restored["overlay_vr_full_last"]["overlay_vr_gaze_reduction_factor"] == 1
+    assert restored["overlay_vr_full_profiles"] == {}
+    assert "overlay_vr_content" not in restored
+    assert "overlay_vr_gaze_zoom" not in restored
+
+
+def test_full_vr_profiles_survive_config_save_and_load_without_affecting_hud(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    config = ConfigModule.load_config()
+    fields = (
+        "overlay_vr_horizontal_offset", "overlay_vr_vertical_offset", "overlay_vr_distance_offset",
+        "overlay_vr_tilt_degrees", "overlay_vr_yaw_degrees", "overlay_vr_size_meters",
+        "overlay_vr_curvature", "overlay_vr_gaze_reduction_factor", "overlay_vr_gaze_reduced_opacity",
+    )
+    small = {key: config[key] for key in fields}
+    small["overlay_vr_vertical_offset"] = -0.25
+    medium = {**small, "overlay_vr_vertical_offset": 0.4, "overlay_vr_gaze_reduction_factor": 9.0}
+    config["overlay_vr_full_profiles"] = {"size:S": small, "size:M": medium, "type:new_ship": small}
+    config["overlay_vr_full_last"] = medium
+    ConfigModule.save_config(config)
+    restored = ConfigModule.load_config()
+    assert restored["overlay_vr_full_profiles"] == config["overlay_vr_full_profiles"]
+    assert restored["overlay_vr_full_last"] == medium
+    assert restored["overlay_vr_vertical_offset"] == 0
+    assert restored["overlay_vr_gaze_reduction_factor"] == 1

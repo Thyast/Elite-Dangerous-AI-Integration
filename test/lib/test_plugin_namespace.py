@@ -36,6 +36,17 @@ def test_list_confirmation_and_action_notification_scope_only_the_translation_ke
     assert original['confirmation'] == '@delete'
 
 
+def test_row_checkbox_scopes_accessible_label_without_rewriting_action_payload():
+    original = {'checkbox_label': '@include', 'checkbox_action': 'set_enabled',
+                'checked': False, 'checkbox_payload': {'label': '@user-data', 'key': '@module'}}
+    exported = PluginNamespace('alpha').presentation(original)
+    assert exported['checkbox_label'] == 'plugin.alpha.include'
+    assert exported['checkbox_payload'] == original['checkbox_payload']
+    assert exported['checkbox_action'] == 'set_enabled'
+    assert exported['checked'] is False
+    assert original['checkbox_label'] == '@include'
+
+
 class LocalPlugin(PluginBase):
     def __init__(self, guid):
         super().__init__(PluginManifest(json.dumps({'guid': guid, 'name': 'Local plugin'})))

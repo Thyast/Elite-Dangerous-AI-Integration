@@ -506,7 +506,7 @@ export class GeneralSettingsComponent implements OnDestroy {
     async onConfigChange(partialConfig: Partial<Config>) {
         if (partialConfig.overlay_mode !== undefined) {
             clearTimeout(this.vrCompatibilityRefreshTimer);
-            if (partialConfig.overlay_mode === "vr" || partialConfig.overlay_mode === "both") {
+            if (partialConfig.overlay_mode === "vr" || partialConfig.overlay_mode === "vr-full" || partialConfig.overlay_mode === "both") {
                 void this.refreshOverlayRuntimeInfo();
             }
         }
@@ -555,7 +555,7 @@ export class GeneralSettingsComponent implements OnDestroy {
 
     get overlayRuntimeInstalled(): boolean {
         const info = this.overlayRuntimeInfo;
-        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "both" || Boolean(info?.packageInstalled && (
+        return this.vrOverlaySelected || Boolean(info?.packageInstalled && (
             info.openxrAvailable ||
             Boolean(info.openxrRuntimeManifestPath) ||
             info.openvrRuntimeInstalled ||
@@ -569,7 +569,7 @@ export class GeneralSettingsComponent implements OnDestroy {
     }
 
     get vrOverlaySelected(): boolean {
-        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "both";
+        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "vr-full" || this.config?.overlay_mode === "both";
     }
 
     get desktopOverlayBackendLabel(): string {

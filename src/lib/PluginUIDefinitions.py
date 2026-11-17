@@ -142,6 +142,10 @@ class ListRow(TypedDict):
     details: NotRequired[list['UIComponent']]
     summary: NotRequired[list['UIComponent']]
     highlighted: NotRequired[bool]
+    checked: NotRequired[bool]
+    checkbox_action: NotRequired[str]
+    checkbox_payload: NotRequired[dict[str, Any]]
+    checkbox_label: NotRequired[str]
 
 
 class List(UINode):

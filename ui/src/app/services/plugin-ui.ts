@@ -149,6 +149,10 @@ export interface ListRow {
   details?: UIComponent[];
   summary?: UIComponent[];
   highlighted?: boolean;
+  checked?: boolean;
+  checkbox_action?: string;
+  checkbox_payload?: Record<string, unknown>;
+  checkbox_label?: string;
 }
 
 export interface UIViewSection {

@@ -1,15 +1,17 @@
 import ast
 import copy
+from collections.abc import Mapping
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from typing import Any
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
-from lib.VrOverlayAdjustment import POSITION_LIMITS, VrOverlayAdjustment, is_adjustment_request, parse_movement, reduction_request
+from lib.VrOverlayAdjustment import PROFILE_DEFAULTS, POSITION_LIMITS, VrOverlayAdjustment, is_adjustment_request, normalize_command, opacity_request, parse_movement, reduction_request, ship_profile_key
 
 
 @pytest.mark.parametrize("text", [
@@ -68,10 +70,19 @@ def test_invalid_and_ambiguous_commands_are_rejected(text):
         parse_movement(text)
 
 
+class ProfileSave(dict):
+    """Full-window saves store a whole profile; compare the values a test expects to be persisted."""
+
+    def __eq__(self, other):
+        return isinstance(other, Mapping) and all(key in self and self[key] == value for key, value in other.items())
+
+    __hash__ = None
+
+
 class Harness:
     def __init__(self):
         self.config = {key: 0.0 for key in POSITION_LIMITS}
-        self.config.update(ui_actions_var=True, unrelated="preserved")
+        self.config.update(ui_actions_var=True, unrelated="preserved", overlay_mode="vr-full")
         self.config.update(game_actions_var=True, allowed_actions={"recenterVRView": True})
         self.messages = []
         self.replies = []
@@ -88,7 +99,8 @@ class Harness:
         )
 
     def save(self, values):
-        self.saves.append(copy.deepcopy(values))
+        saved = ProfileSave({**values.get("overlay_vr_full_last", {}), **copy.deepcopy(values)})
+        self.saves.append(saved)
         self.config = {**self.config, **values}
 
     @property
@@ -99,13 +111,154 @@ class Harness:
         result = {
             "request_id": self.request["request_id"], "success": True,
             "active": self.request["operation"] not in ("finish", "cancel"),
-            "config": {key: self.config.get(key, 0.0) for key in POSITION_LIMITS}, **overrides,
+            "config": {key: self.control.settings()[key] for key in POSITION_LIMITS}, **overrides,
         }
         self.control.handle_result(result)
 
     def begin(self):
         assert self.control.handle_input("ajuste la position de la fen\u00eatre de Covas:Next")
         self.respond()
+
+
+@pytest.mark.parametrize("ship,key", [
+    ({"Type": "sidewinder", "LandingPadSize": "S"}, "size:S"),
+    ({"Type": "krait_mkii", "LandingPadSize": "M"}, "size:M"),
+    ({"Type": "anaconda", "LandingPadSize": "L"}, "size:L"),
+    ({"Type": "New_Ship", "LandingPadSize": "Unknown"}, "type:new_ship"),
+    ({"Type": "Unknown", "LandingPadSize": "Unknown"}, None),
+])
+def test_ship_profile_prefers_known_pad_size_and_falls_back_to_ship_type(ship, key):
+    assert ship_profile_key(ship) == key
+
+
+def full_harness():
+    h = Harness()
+    h.config.update(overlay_mode="vr-full", overlay_vr_full_last=dict(PROFILE_DEFAULTS), overlay_vr_full_profiles={})
+    return h
+
+
+@pytest.mark.parametrize("command", [
+    "ajuste la position de la fen\u00eatre de Covas:Next", "facteur de r\u00e9duction \u00e0 cinq",
+    "opacit\u00e9 \u00e0 25 %", "taille de la fen\u00eatre 1 m\u00e8tre",
+])
+def test_hud_window_mode_refuses_in_game_adjustment_but_keeps_recentering(command):
+    h = Harness()
+    h.config["overlay_mode"] = "vr"
+    assert h.control.handle_input(command)
+    assert not h.messages and not h.saves and not h.control.active
+    assert h.replies[-1][1]
+    h.control.update_ship({"Type": "sidewinder", "LandingPadSize": "S"}, force=True)
+    assert not h.messages
+    assert h.control.handle_input("recentre la vue VR")
+    assert h.request["operation"] == "recenter"
+
+
+def apply_ship(h, size, ship_type="test"):
+    h.control.update_ship({"Type": ship_type, "LandingPadSize": size}, force=True)
+    assert h.request["operation"] == "apply_profile"
+    values = h.request["config"]
+    h.respond(active=False, config=values)
+    return values
+
+
+def test_full_window_profiles_inherit_last_values_save_by_size_and_restore_on_switch():
+    h = full_harness()
+    apply_ship(h, "S", "sidewinder")
+    assert not h.recenter.called
+    h.control.persist({"overlay_vr_vertical_offset": 0.3, "overlay_vr_gaze_reduction_factor": 5})
+    small = dict(h.config["overlay_vr_full_last"])
+    assert h.config["overlay_vr_vertical_offset"] == 0
+    assert h.config["overlay_vr_full_profiles"] == {"size:S": small}
+    assert apply_ship(h, "M", "krait_mkii") == small
+    assert "size:M" not in h.config["overlay_vr_full_profiles"]
+    h.control.persist({"overlay_vr_vertical_offset": -0.2, "overlay_vr_gaze_reduction_factor": 1})
+    medium = dict(h.config["overlay_vr_full_last"])
+    assert apply_ship(h, "S", "eagle") == small
+    assert h.config["overlay_vr_full_last"] == small
+    assert apply_ship(h, "L", "anaconda") == small
+    assert apply_ship(h, "M") == medium
+    h.control.update_ship({"Type": "another_medium", "LandingPadSize": "M"})
+    assert h.control.pending is None
+    assert not h.recenter.called
+
+
+def test_profile_restart_and_unknown_ship_size_do_not_overwrite_other_profiles():
+    h = full_harness()
+    h.config["overlay_vr_full_profiles"]["type:new_ship"] = {**PROFILE_DEFAULTS, "overlay_vr_vertical_offset": -0.4}
+    assert apply_ship(h, "Unknown", "NEW_SHIP")["overlay_vr_vertical_offset"] == -0.4
+    h.control.persist({"overlay_vr_horizontal_offset": 0.5})
+    h.config["overlay_vr_full_profiles"]["size:S"] = dict(PROFILE_DEFAULTS)
+    restarted = full_harness()
+    restarted.config = copy.deepcopy(h.config)
+    assert apply_ship(restarted, "Unknown", "new_ship")["overlay_vr_horizontal_offset"] == 0.5
+    assert apply_ship(restarted, "Unknown", "unknown")["overlay_vr_vertical_offset"] == -0.4
+    restarted.control.persist({"overlay_vr_vertical_offset": 0.7})
+    assert set(restarted.config["overlay_vr_full_profiles"]) == {"type:new_ship", "size:S"}
+
+
+def test_switch_during_adjustment_is_deferred_and_cancel_does_not_save_a_profile():
+    h = full_harness()
+    apply_ship(h, "S")
+    h.begin()
+    h.control.update_ship({"Type": "krait", "LandingPadSize": "M"})
+    h.control.tick()
+    assert h.control.pending is None
+    assert h.control.applied_ship_key == "size:S"
+    h.control.handle_input("annuler")
+    h.respond()
+    assert not h.config["overlay_vr_full_profiles"]
+    h.control.tick()
+    assert h.request["operation"] == "apply_profile"
+    h.respond(active=False, config=h.request["config"])
+    assert h.control.applied_ship_key == "size:M"
+
+
+def test_invalid_or_rejected_profile_is_reported_without_saving_or_recentering():
+    h = full_harness()
+    h.config["overlay_vr_full_profiles"]["size:S"] = {"overlay_vr_gaze_reduction_factor": 0.5}
+    h.control.update_ship({"LandingPadSize": "S"})
+    assert h.control.pending is None
+    assert h.replies[-1][1] is True
+    h.config["overlay_vr_full_profiles"]["size:S"] = dict(PROFILE_DEFAULTS)
+    h.control.update_ship({"LandingPadSize": "S"}, force=True)
+    h.respond(success=False, error="Native failure")
+    assert not h.saves
+    assert h.control.applied_ship_key is None
+    assert h.replies[-1][1] is True
+    assert not h.recenter.called
+
+
+@pytest.mark.parametrize("command,size,curve", [
+    ("taille de la fenetre a un metre", 1, 0),
+    ("set window size to 50 cm", 0.5, 0),
+    ("courbure a trente degres", 0.9, 30 / 360),
+    ("set curvature to 180 degrees", 0.9, 0.5),
+    ("courbure a 0 degres", 0.9, 0),
+    ("courbure a zero degres", 0.9, 0),
+    ("set curvature to zero degrees", 0.9, 0),
+])
+def test_voice_appearance_is_applied_and_saved_to_the_active_ship_profile(command, size, curve):
+    h = full_harness()
+    apply_ship(h, "L")
+    assert h.control.handle_input(command)
+    assert h.request["operation"] == "set_appearance"
+    assert h.request["size"] == size
+    assert h.request["curvature"] == curve
+    h.respond(size=size, curvature=curve, previous={"size": 0.9, "curvature": 0})
+    assert h.config["overlay_vr_full_profiles"]["size:L"]["overlay_vr_size_meters"] == size
+    assert h.config["overlay_vr_full_last"]["overlay_vr_curvature"] == curve
+
+
+@pytest.mark.parametrize("command", [
+    "taille a 0.05 m", "taille a 4 m", "courbure a 181 degres", "courbure a -5 degres",
+    "facteur de reduction a 0.5", "facteur de reduction a -1",
+])
+def test_in_game_profile_limits_reject_invalid_appearance_and_factors(command):
+    h = full_harness()
+    apply_ship(h, "M")
+    assert h.control.handle_input(command)
+    assert h.control.pending is None
+    assert h.replies[-1][1] is True
 
 
 def test_commands_only_intercept_placement_requests_outside_a_session():
@@ -350,7 +503,7 @@ def test_transaction_previews_then_saves_only_on_validation_and_waits_for_finish
     position["overlay_vr_vertical_offset"] = 0.1
     h.respond(config=position)
     assert h.config == initial
-    assert h.messages[-1] == {"type": "vr_placement_state", "active": True, "config": position}
+    assert h.messages[-1] == {"type": "vr_placement_state", "active": True, "config": {**PROFILE_DEFAULTS, **position}}
     h.config["unrelated"] = "edited on desktop during preview"
     h.control.handle_input("valider la position")
     assert h.request["operation"] == "commit"
@@ -522,6 +675,7 @@ def test_chat_routes_inputs_before_conversation_and_saves_only_the_position_fiel
         "show_chat_message": Mock(), "save_config": lambda config: saved.append(config),
         "emit_message": lambda kind, **payload: messages.append((kind, payload)),
         "cast": lambda _type, value: value, "Config": dict,
+        "Any": Any,
     }
     exec(compile(ast.Module(body=methods, type_ignores=[]), str(source), "exec"), namespace)
     chat = SimpleNamespace(
@@ -559,7 +713,7 @@ def test_voice_area_factor_updates_the_live_overlay_and_persists_only_after_ack(
     assert h.request["factor"] == factor
     h.respond(reduction_factor=factor, previous_factor=5, active=False)
     assert h.saves == [{"overlay_vr_gaze_reduction_factor": factor}]
-    assert h.config["overlay_vr_gaze_reduction_factor"] == factor
+    assert h.control.settings()["overlay_vr_gaze_reduction_factor"] == factor
 
 
 def test_voice_factor_failures_restore_the_live_value_and_do_not_end_position_adjustment():
@@ -606,8 +760,8 @@ def test_factor_commands_during_adjustment_update_immediately_and_keep_the_posit
     h.control.handle_input("annuler")
     h.respond()
     assert not h.control.active
-    assert h.config["overlay_vr_gaze_reduction_factor"] == factor
-    assert h.config["overlay_vr_vertical_offset"] == 0
+    assert h.control.settings()["overlay_vr_gaze_reduction_factor"] == factor
+    assert h.control.settings()["overlay_vr_vertical_offset"] == 0
 
 
 @pytest.mark.parametrize("command,axis,delta", [
@@ -624,3 +778,73 @@ def test_stt_signed_increments_reach_the_native_adjustment_unchanged(command, ax
     assert h.request["axis"] == axis
     assert h.request["delta"] == delta
     assert not h.saves
+
+
+@pytest.mark.parametrize("command,opacity", [
+    ("opacit\u00e9 \u00e0 25 %", 0.25),
+    ("r\u00e8gle l'opacit\u00e9 de la fen\u00eatre r\u00e9duite \u00e0 40%", 0.4),
+    ("Simone, mets l'opacit\u00e9 r\u00e9duite \u00e0 vingt pour cent", 0.2),
+    ("transparence \u00e0 75 pour cent", 0.25),
+    ("transparence de la fen\u00eatre en miniature \u00e0 0 %", 1),
+    ("set reduced opacity to 30 percent", 0.3),
+    ("set the minimized window opacity to 100%", 1),
+    ("transparency 90%", 0.1),
+])
+def test_voice_reduced_opacity_updates_the_live_overlay_and_persists_only_after_ack(command, opacity):
+    assert opacity_request(normalize_command(command, "Simone")) is not None
+    h = Harness()
+    assert h.control.handle_input(command)
+    assert not h.control.active
+    assert not h.saves
+    assert h.request["operation"] == "set_opacity"
+    assert h.request["opacity"] == opacity
+    h.respond(reduced_opacity=opacity, previous_opacity=0.25, active=False)
+    assert h.saves == [{"overlay_vr_gaze_reduced_opacity": opacity}]
+    assert "pour cent" in h.replies[-1][0] or "percent" in h.replies[-1][0]
+    assert not h.replies[-1][1]
+
+
+@pytest.mark.parametrize("command", [
+    "opacit\u00e9", "opacit\u00e9 \u00e0 5 %", "opacit\u00e9 \u00e0 120 %", "transparence \u00e0 95 %",
+    "opacit\u00e9 \u00e0 25 degr\u00e9s", "opacit\u00e9 \u00e0 beaucoup", "set opacity to minus 20 percent",
+])
+def test_invalid_reduced_opacity_commands_are_rejected_without_a_request(command):
+    h = Harness()
+    assert h.control.handle_input(command)
+    assert h.control.pending is None
+    assert not h.messages
+    assert h.replies[-1][1]
+
+
+def test_opacity_during_adjustment_keeps_the_draft_and_failed_saves_restore_the_live_value():
+    h = Harness()
+    h.begin()
+    assert "opacit\u00e9" in h.replies[-1][0]
+    h.control.handle_input("plus haut")
+    position = {**h.control.draft, "overlay_vr_vertical_offset": 0.25}
+    h.respond(config=position)
+    h.control.save = Mock(side_effect=OSError("Disk full"))
+    assert h.control.handle_input("opacit\u00e9 \u00e0 50 %")
+    h.respond(reduced_opacity=0.5, previous_opacity=0.25)
+    assert h.request["operation"] == "restore_opacity"
+    assert h.request["opacity"] == 0.25
+    h.respond(reduced_opacity=0.25, previous_opacity=0.5)
+    assert h.control.active
+    assert h.control.draft == position
+    h.control.save = h.save
+    assert h.control.handle_input("opacit\u00e9 \u00e0 50 %")
+    h.respond(reduced_opacity=0.5, previous_opacity=0.25)
+    assert h.saves == [{"overlay_vr_gaze_reduced_opacity": 0.5}]
+    assert h.control.active
+    h.control.handle_input("annuler")
+    h.respond()
+    assert not h.control.active
+    assert h.control.settings()["overlay_vr_gaze_reduced_opacity"] == 0.5
+
+
+def test_invalid_opacity_acknowledgement_is_reported_without_saving():
+    h = Harness()
+    h.control.handle_input("opacit\u00e9 \u00e0 50 %")
+    h.respond(reduced_opacity=5, previous_opacity=0.25)
+    assert not h.saves
+    assert h.replies[-1][1]

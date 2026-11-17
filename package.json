@@ -36,7 +36,7 @@
     "package:run": "run-script-os",
     "package:run:win32": "cd dist/win-unpacked/ && start covas-next-ui.exe",
     "package:run:linux": "cd dist/linux-unpacked/ && ./covas-next",
-    "test:overlay": "node --test test/electron/desktop-overlay-lifecycle.test.js test/electron/vr-gaze-zoom.test.js test/electron/vr-placement-adjustment.test.js test/electron/openvr-head-pose.test.js test/electron/openxr-head-pose.test.js test/electron/openxr-gaze-integration.test.js test/electron/vr-head-pose.test.js"
+    "test:overlay": "node --test test/electron/desktop-overlay-lifecycle.test.js test/electron/vr-gaze-zoom.test.js test/electron/vr-placement-adjustment.test.js test/electron/openvr-head-pose.test.js test/electron/openxr-head-pose.test.js test/electron/openxr-gaze-integration.test.js test/electron/vr-head-pose.test.js test/electron/vr-bridge-console.test.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",

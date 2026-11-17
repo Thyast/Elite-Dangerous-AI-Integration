@@ -22,8 +22,6 @@ describe("VrOverlayPreviewComponent", () => {
             overlay_vr_yaw_degrees: 0,
             overlay_vr_size_meters: 0.9,
             overlay_vr_curvature: 0,
-            overlay_vr_gaze_zoom: false,
-            overlay_vr_gaze_reduction_factor: 5,
         };
         update({});
     });
@@ -158,55 +156,6 @@ describe("VrOverlayPreviewComponent", () => {
         expect(points().length).toBeGreaterThan(flat.length);
         expect(points()[0][1]).toBeLessThan(flat[0][1]);
         expect(points()[0][0]).not.toBe(flat[0][0]);
-    });
-
-    it("shows a centered empty blue inner frame at the actual area reduction, updating without moving the full window", () => {
-        update({ overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true });
-        const fullPoints = fixture.componentInstance.overlayPoints;
-        const full = bounds();
-        for (const factor of [1, 5, 9, 12.5]) {
-            update({ overlay_vr_gaze_reduction_factor: factor });
-            const reduced = bounds(".reduced-window");
-            expect(reduced.x).toBeCloseTo(full.x, 1);
-            expect(reduced.y).toBeCloseTo(full.y, 1);
-            expect(reduced.width / full.width).toBeCloseTo(1 / Math.sqrt(factor), 3);
-            expect(reduced.height / full.height).toBeCloseTo(1 / Math.sqrt(factor), 3);
-            expect(reduced.width * reduced.height / (full.width * full.height)).toBeCloseTo(1 / factor, 3);
-            expect(fixture.componentInstance.overlayPoints).toBe(fullPoints);
-        }
-        const frame = root.querySelector(".reduced-window")!;
-        expect(getComputedStyle(frame).fill).toBe("none");
-        expect(getComputedStyle(frame).stroke).toBe("rgb(66, 165, 245)");
-        expect(frame.querySelector("title")).not.toBeNull();
-    });
-
-    it("projects the reduced window with the same offsets, pitch, yaw and curvature as the runtime", () => {
-        update({
-            overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true, overlay_vr_gaze_reduction_factor: 9,
-            overlay_vr_horizontal_offset: 0.7, overlay_vr_vertical_offset: 0.2,
-            overlay_vr_distance_offset: -0.5, overlay_vr_tilt_degrees: 30,
-            overlay_vr_yaw_degrees: -40, overlay_vr_curvature: 0.25,
-        });
-        const reducedPoints = fixture.componentInstance.reducedOverlayPoints;
-        if (reducedPoints === null) throw new Error("Expected the reduced-size outline for a world-locked adaptive window.");
-        update({ overlay_vr_size_meters: config.overlay_vr_size_meters / 3 });
-        expect(fixture.componentInstance.overlayPoints).toBe(reducedPoints);
-    });
-
-    it("hides the reduced frame and legend when reduction is disabled, head locked, or the factor is invalid", () => {
-        update({ overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true });
-        expect(root.querySelector(".reduced-key")).not.toBeNull();
-        for (const changes of [
-            { overlay_vr_gaze_zoom: false },
-            { overlay_vr_gaze_zoom: true, overlay_vr_anchor: "head" as const },
-            ...[0, 0.5, NaN, Infinity].map(factor => ({
-                overlay_vr_anchor: "world" as const, overlay_vr_gaze_reduction_factor: factor,
-            })),
-        ]) {
-            update(changes);
-            expect(root.querySelector(".reduced-window")).toBeNull();
-            expect(root.querySelector(".reduced-key")).toBeNull();
-        }
     });
 
     it("keeps projections finite at all slider extremes, including windows crossing the viewer plane", () => {

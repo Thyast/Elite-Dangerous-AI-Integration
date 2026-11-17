@@ -10,7 +10,7 @@
     <div class="vr-adjustment-frame" aria-hidden="true">
         @if (reducedFramePercent; as percent) {
             <div class="vr-reduced-frame" [style.width.%]="percent" [style.height.%]="percent">
-                <span>{{ 'vrInterface.reducedFrame' | translate: { factor: config?.overlay_vr_gaze_reduction_factor } }}</span>
+                <span>{{ 'vrInterface.reducedFrame' | translate: { factor: config?.overlay_vr_gaze_reduction_factor, opacity: reducedOpacityPercent } }}</span>
             </div>
         }
     </div>
@@ -19,11 +19,7 @@
 <main class="app" [class.red]="isInCombat" [@.disabled]="isOverlayInterface" [style.display]="showOverlayChat ? 'none' : null">
     @if (!showRuntimeView) {
         <div class="settings-container">
-            <app-settings-menu (questEditorVisibilityChange)="onQuestEditorVisibilityChange($event)"></app-settings-menu>
-            @for (view of configPluginViews; track view.target) {
-                <h2>{{ view.label | translate }}</h2>
-                <app-plugin-view [view]="view" />
-            }
+            <app-settings-menu [pluginViews]="configPluginViews" (questEditorVisibilityChange)="onQuestEditorVisibilityChange($event)"></app-settings-menu>
         </div>
     } @else {
         <div class="runtime-container">

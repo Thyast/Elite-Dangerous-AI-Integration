@@ -537,12 +537,13 @@
                             <mat-option value="disabled">Disabled</mat-option>
                             <mat-option value="desktop">Desktop Overlay</mat-option>
                             <mat-option value="standalone">Standalone Window</mat-option>
-                            <mat-option value="vr">VR Overlay</mat-option>
+                            <mat-option value="vr">{{ 'vrInterface.modeHud' | translate }}</mat-option>
+                            <mat-option value="vr-full">{{ 'vrInterface.modeFull' | translate }}</mat-option>
                             <!--<mat-option value="both">Both</mat-option>-->
                         </mat-select>
                     </mat-form-field>
 
-                    @if (config.overlay_mode !== 'disabled') {
+                    @if (config.overlay_mode !== 'disabled' && config.overlay_mode !== 'vr-full') {
                         <div class="overlay-toggle-column">
                             <mat-slide-toggle
                                 [(ngModel)]="config.overlay_show_avatar"
@@ -615,7 +616,7 @@
                 </div>
 
                 <div class="overlay-secondary-controls">
-                    @if (config.overlay_mode === 'vr' || config.overlay_mode === 'both') {
+                    @if (vrOverlaySelected) {
                         <div class="vr-compatibility-card" [class.vr-compatibility-ready]="overlayCompatibility?.launch?.wouldWorkNow">
                             <div>
                                 <strong>{{ overlayCompatibility?.backendLabel || 'VR overlay' }}</strong>
@@ -655,20 +656,12 @@
                             </div>
                         </div>
 
-                        <mat-form-field>
-                            <mat-label>{{ 'vrInterface.contentLabel' | translate }}</mat-label>
-                            <mat-select [ngModel]="config.overlay_vr_content"
-                                        (ngModelChange)="onVrConfigChange({overlay_vr_content: $event})">
-                                <mat-option value="hud">{{ 'vrInterface.hud' | translate }}</mat-option>
-                                <mat-option value="interface">{{ 'vrInterface.full' | translate }}</mat-option>
-                            </mat-select>
-                        </mat-form-field>
-                        @if (config.overlay_vr_content === 'interface') {
+                        @if (config.overlay_mode === 'vr-full') {
                             <p class="vr-control-group">
-                                {{ 'vrInterface.description' | translate }}
+                                {{ 'vrInterface.inGameSettings' | translate }}
                             </p>
                         }
-
+                        @if (config.overlay_mode !== 'vr-full') {
                         <mat-form-field class="vr-anchor-field">
                             <mat-label>VR Anchor</mat-label>
                             <mat-select [(ngModel)]="config.overlay_vr_anchor"
@@ -739,27 +732,22 @@
                                 </div>
                             </div>
                         </section>
-                        <section class="vr-control-group vr-adaptive-size">
-                            <h4>{{ 'vrInterface.gazeTitle' | translate }}</h4>
-                            @if (config.overlay_vr_anchor === 'world') {
-                                <mat-slide-toggle [ngModel]="config.overlay_vr_gaze_zoom"
-                                                  (ngModelChange)="onVrConfigChange({overlay_vr_gaze_zoom: $event})">
-                                    {{ 'vrInterface.gazeEnabled' | translate }}
-                                </mat-slide-toggle>
-                                <mat-form-field>
-                                    <mat-label>{{ 'vrInterface.gazeReductionFactor' | translate }}</mat-label>
-                                    <input matInput type="number" min="1" step="1"
-                                           [ngModel]="config.overlay_vr_gaze_reduction_factor"
-                                           (ngModelChange)="onGazeReductionFactorChange($event)"
-                                           (blur)="flushVrConfigChanges()">
-                                </mat-form-field>
-                                @if (overlayRuntimeInfo?.gazeZoom; as gaze) {
-                                    @if (gaze.status === 'unavailable' && config.overlay_vr_gaze_zoom) {
-                                        <p role="alert">{{ 'vrInterface.gazeUnavailable' | translate: { reason: gaze.message } }}</p>
-                                    } @else if (gaze.status === 'waiting' && config.overlay_vr_gaze_zoom) {
-                                        <p role="status" class="vr-tracking-waiting">{{ 'vrInterface.gazeWaiting' | translate: { reason: gaze.message } }}</p>
+                        } @else {
+                        <section class="vr-control-group vr-tracking-setup">
+                                    @if (overlayRuntimeInfo?.heightInitialization; as height) {
+                                        @if (height.status === 'unavailable') {
+                                            <p role="alert" class="vr-height-status">{{ 'vrInterface.heightUnavailable' | translate: { reason: height.message } }}</p>
+                                        } @else if (height.status === 'waiting') {
+                                            <p role="status" class="vr-height-status">{{ 'vrInterface.heightWaiting' | translate: { reason: height.message } }}</p>
+                                        }
                                     }
-                                }
+                                    @if (overlayRuntimeInfo?.gazeZoom; as gaze) {
+                                        @if (gaze.status === 'unavailable') {
+                                            <p role="alert">{{ 'vrInterface.gazeUnavailable' | translate: { reason: gaze.message } }}</p>
+                                        } @else if (gaze.status === 'waiting') {
+                                            <p role="status" class="vr-tracking-waiting">{{ 'vrInterface.gazeWaiting' | translate: { reason: gaze.message } }}</p>
+                                        }
+                                    }
                                 @if (overlayRuntimeInfo?.platform === 'win32' && overlayRuntimeInfo?.selectedBackend !== 'openvr') {
                                     @if (openXrGazeIntegration; as integration) {
                                         <p>{{ (integration.enabled ? 'vrInterface.gazeInstalled' : 'vrInterface.gazeNotInstalled') | translate }}</p>
@@ -785,10 +773,8 @@
                                         <p role="alert">{{ gazeIntegrationError }}</p>
                                     }
                                 }
-                            } @else {
-                                <p>{{ 'vrInterface.requiresWorldAnchor' | translate }}</p>
-                            }
                         </section>
+                        }
                         @if (vrSettingsRestartRequired) {
                             <p role="status" class="vr-assistant-restart">{{ 'vrInterface.settingsRestart' | translate }}</p>
                         }

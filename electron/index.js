@@ -11,8 +11,9 @@ import contextMenu from 'electron-context-menu';
 import pino from 'pino';
 import { WebSocketServer } from 'ws';
 import {VROverlay} from '@covas-labs/electron-vr';
-import { createOptionalVrGazeZoom, createVrHeadPoseReader } from './vr-head-pose.js';
+import { createOptionalVrGazeZoom, createVrHeadPoseReader, createVrHeightInitialization } from './vr-head-pose.js';
 import { createOpenXrGazeIntegration } from './openxr-gaze-integration.js';
+import { validateReducedOpacity } from './vr-gaze-zoom.js';
 import { createVrPlacementAdjustment, getOverlayPlacement, handleVrPlacementRequest } from './vr-placement-adjustment.js';
 import {
   configure as configureNativeOverlay,
@@ -25,6 +26,9 @@ import {
   normalizeDesktopOverlayScreen,
   selectOverlayDisplay,
 } from './desktop-overlay-lifecycle.js';
+import { installVrBridgeConsoleFilter } from './vr-bridge-console.js';
+
+installVrBridgeConsoleFilter();
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 const isLinux = process.platform === 'linux';
@@ -151,10 +155,12 @@ function normalizeOverlayOptions(opts = {}) {
   if (!Number.isFinite(reductionFactor) || reductionFactor < 1) {
     throw new Error('The VR gaze area reduction factor must be a finite number of at least 1.');
   }
+  const reducedOpacity = opts.vrGazeReducedOpacity ?? 0.25;
+  validateReducedOpacity(reducedOpacity);
   const desktopPlacement = normalizeDesktopOverlayScreen(opts.screenId);
   const mode = opts.mode === 'screen'
     ? 'desktop'
-    : ['disabled', 'desktop', 'standalone', 'vr', 'both'].includes(opts.mode)
+    : ['disabled', 'desktop', 'standalone', 'vr', 'vr-full', 'both'].includes(opts.mode)
       ? opts.mode
       : 'desktop';
   const vrHorizontalOffset = Number.isFinite(opts.vrHorizontalOffset)
@@ -184,10 +190,11 @@ function normalizeOverlayOptions(opts = {}) {
     vrSizeMeters: Number.isFinite(opts.vrSizeMeters) && opts.vrSizeMeters > 0
       ? opts.vrSizeMeters
       : 0.9,
-    vrAnchor: opts.vrAnchor === 'world' ? 'world' : 'head',
-    vrContent: opts.vrContent === 'interface' ? 'interface' : 'hud',
-    vrGazeZoom: opts.vrGazeZoom === true,
+    vrAnchor: mode === 'vr-full' || opts.vrAnchor === 'world' ? 'world' : 'head',
+    vrContent: mode === 'vr-full' ? 'interface' : 'hud',
+    vrGazeZoom: mode === 'vr-full' && reductionFactor > 1,
     vrGazeReductionFactor: reductionFactor,
+    vrGazeReducedOpacity: reducedOpacity,
     vrHorizontalOffset,
     vrVerticalOffset,
     vrDistanceOffset,
@@ -224,9 +231,6 @@ async function getOverlayRuntimeInfo() {
   try {
     const compatibility = await VROverlay.getCompatibilityReport();
     const runtimeInfo = compatibility.diagnostics;
-    if (opts.vrGazeZoom && opts.vrAnchor !== 'world') {
-      throw new Error('VR gaze zoom requires a world-locked overlay. Change VR Anchor or disable gaze zoom.');
-    }
     return {
       ...runtimeInfo,
       packageInstalled: true,
@@ -945,7 +949,14 @@ async function createVrOverlayWindow(opts) {
         : refreshedCompatibility.launch.message);
     }
 
-    const gaze = await createOptionalVrGazeZoom({ controller: vrOverlay, options: opts, placement, logger });
+    const gaze = await createOptionalVrGazeZoom({
+      controller: vrOverlay, options: opts, placement, logger,
+      setOpacity(value) {
+        if (overlayWindow.isDestroyed()) return false;
+        overlayWindow.webContents.send('vr-overlay-opacity', value);
+        return true;
+      },
+    });
     gazeZoom = gaze.controller;
     gazeZoomStatus = gaze.state;
     if (gazeZoom) {
@@ -985,6 +996,16 @@ async function createVrOverlayWindow(opts) {
       }
     },
   });
+  const heightInitialization = await createVrHeightInitialization({
+    controller: vrOverlay, options: opts, adjustment: placementAdjustment, logger,
+  });
+  overlayWindow.once('close', () => {
+    try {
+      heightInitialization.close();
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to close VR height initialization.');
+    }
+  });
   return {
     kind: 'vr',
     window: overlayWindow,
@@ -992,8 +1013,9 @@ async function createVrOverlayWindow(opts) {
     controller: vrOverlay,
     gazeZoomStatus,
     getGazeState: () => gazeZoom?.getState() ?? gazeZoomStatus,
+    getHeightState: heightInitialization.getState,
     placementAdjustment,
-    nativeControllers: [placementAdjustment, ...(gazeZoom ? [gazeZoom] : [])],
+    nativeControllers: [placementAdjustment, heightInitialization, ...(gazeZoom ? [gazeZoom] : [])],
     runtimeInfo,
     cleanedUp: false,
   };
@@ -1042,7 +1064,7 @@ async function createManagedOverlay(opts) {
       cleanedUp: false,
     };
   }
-  if (normalized.mode === 'vr') {
+  if (normalized.mode === 'vr' || normalized.mode === 'vr-full') {
     return await createVrOverlayWindow(normalized);
   }
   if (normalized.mode === 'standalone') {
@@ -1079,6 +1101,7 @@ async function createManagedOverlay(opts) {
       placementAdjustment: vrOverlay.placementAdjustment,
       gazeZoomStatus: vrOverlay.gazeZoomStatus,
       getGazeState: vrOverlay.getGazeState,
+      getHeightState: vrOverlay.getHeightState,
       nativeControllers: [...vrOverlay.nativeControllers, desktopOverlay.nativeController],
       runtimeInfo: vrOverlay.runtimeInfo,
       cleanedUp: false,
@@ -1464,7 +1487,10 @@ app.whenReady().then(async ()=>{
         }
       });
     }
-    return { gazeZoom: floatingOverlay.getGazeState?.() ?? floatingOverlay.gazeZoomStatus ?? { status: 'disabled' } };
+    return {
+      gazeZoom: floatingOverlay.getGazeState?.() ?? floatingOverlay.gazeZoomStatus ?? { status: 'disabled' },
+      heightInitialization: floatingOverlay.getHeightState?.() ?? { status: 'disabled' },
+    };
   });
   ipcMain.handle('destroy_floating_overlay', async (event) => {
     if (floatingOverlay) {
@@ -1490,6 +1516,7 @@ app.whenReady().then(async ()=>{
     ...await getOverlayRuntimeInfo(),
     activeVrSettings: floatingOverlay?.placementAdjustment?.getSettings() ?? null,
     gazeZoom: floatingOverlay?.getGazeState?.(),
+    heightInitialization: floatingOverlay?.getHeightState?.(),
   }));
   ipcMain.handle('get_openxr_gaze_integration_status', async () => gazeIntegration.getStatus());
   ipcMain.handle('openxr_gaze_integration_action', async (_event, action) => {

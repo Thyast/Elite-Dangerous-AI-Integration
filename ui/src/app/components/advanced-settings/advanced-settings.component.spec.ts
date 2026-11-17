@@ -40,6 +40,7 @@ describe("VR slider configuration updates", () => {
         wake_word_timeout: 10, wake_word_source: "main", wake_word_first_command: "retranscribe",
         ptt_inverted_var: false, mute_during_response_var: false, game_actions_var: true,
         web_search_actions_var: true, ui_actions_var: true, use_action_cache_var: true,
+        selected_action_languages: [], available_action_languages: [],
         allowed_actions: {}, discovery_primary_var: true, discovery_firegroup_var: 1,
         weapon_types: [], prefer_primary_bindings: false, in_system_navigation: true,
         chat_local_tabbed_var: false, chat_wing_tabbed_var: false, chat_system_tabbed_var: true,
@@ -51,12 +52,40 @@ describe("VR slider configuration updates", () => {
         overlay_mode: "vr", overlay_position: "right", overlay_screen_id: -1,
         overlay_standalone_transparent: true, overlay_standalone_background_color: "#000000",
         overlay_vr_size_meters: 0.9, overlay_vr_anchor: "head",
-        overlay_vr_content: "hud",
-        overlay_vr_gaze_zoom: false, overlay_vr_gaze_reduction_factor: 5,
+        overlay_vr_gaze_reduction_factor: 1, overlay_vr_gaze_reduced_opacity: 0.25,
         overlay_vr_horizontal_offset: 0, overlay_vr_vertical_offset: 0,
         overlay_vr_distance_offset: 0, overlay_vr_tilt_degrees: 0,
         overlay_vr_yaw_degrees: 0, overlay_vr_curvature: 0, plugin_settings: {},
     };
+
+    it("keeps the HUD preview but exposes only tracking setup for the full-window mode", () => {
+        fixture.detectChanges();
+        const root: HTMLElement = fixture.nativeElement;
+        expect(root.querySelector("app-vr-overlay-preview")).not.toBeNull();
+        expect(root.querySelector(".vr-adaptive-size")).toBeNull();
+        expect(root.querySelector(".vr-tracking-setup")).toBeNull();
+        configs.next({ ...initialConfig, overlay_mode: "vr-full" });
+        component.overlayRuntimeInfo = runtimeInfo();
+        component.openXrGazeIntegration = {
+            supported: true, available: true, installed: true, enabled: true, restartRequired: false,
+        };
+        fixture.detectChanges();
+        expect(component.vrOverlaySelected).toBeTrue();
+        expect(root.querySelector("app-vr-overlay-preview")).toBeNull();
+        expect(root.querySelector(".vr-anchor-field")).toBeNull();
+        expect(root.querySelector(".vr-placement-grid")).toBeNull();
+        expect(root.querySelector(".vr-adaptive-size")).toBeNull();
+        expect(root.querySelector(".overlay-toggle-column")).toBeNull();
+        expect(root.querySelector(".vr-tracking-setup button")).not.toBeNull();
+        expect(root.textContent).not.toContain("vrInterface.contentLabel");
+        expect(component.vrSettingsRestartRequired).toBeFalse();
+        configs.next(initialConfig);
+        fixture.detectChanges();
+        expect(root.querySelector("app-vr-overlay-preview")).not.toBeNull();
+        expect(root.querySelector(".vr-placement-grid")).not.toBeNull();
+        expect(root.querySelector(".vr-tracking-setup")).toBeNull();
+        expect(root.textContent).not.toContain("vrInterface.gazeInstalled");
+    });
 
     function runtimeInfo(config = initialConfig): OverlayRuntimeInfo {
         return {
@@ -69,8 +98,9 @@ describe("VR slider configuration updates", () => {
             },
             activeVrSettings: {
                 alwaysOnTop: true, mode: "vr",
-                vrAnchor: config.overlay_vr_anchor, vrContent: config.overlay_vr_content,
-                vrGazeZoom: config.overlay_vr_gaze_zoom, vrGazeReductionFactor: config.overlay_vr_gaze_reduction_factor,
+                vrAnchor: config.overlay_vr_anchor, vrContent: "hud",
+                vrGazeZoom: config.overlay_vr_gaze_reduction_factor > 1, vrGazeReductionFactor: config.overlay_vr_gaze_reduction_factor,
+                vrGazeReducedOpacity: config.overlay_vr_gaze_reduced_opacity,
                 vrSizeMeters: config.overlay_vr_size_meters,
                 vrHorizontalOffset: config.overlay_vr_horizontal_offset, vrVerticalOffset: config.overlay_vr_vertical_offset,
                 vrDistanceOffset: config.overlay_vr_distance_offset, vrTiltDegrees: config.overlay_vr_tilt_degrees,
@@ -239,56 +269,6 @@ describe("VR slider configuration updates", () => {
         expect(changeConfig.calls.count()).toBe(7);
     }));
 
-    it("requires world anchoring to enable adaptive sizing and batches its area factor", fakeAsync(() => {
-        const section: HTMLElement = fixture.nativeElement.querySelector(".vr-adaptive-size");
-        expect(section.textContent).toContain("vrInterface.requiresWorldAnchor");
-        expect(section.querySelector("mat-slide-toggle")).toBeNull();
-        expect(section.querySelector("input")).toBeNull();
-        expect(section.querySelector("button")).toBeNull();
-        component.onVrConfigChange({ overlay_vr_anchor: "world" });
-        fixture.detectChanges();
-        const toggle = fixture.debugElement.queryAll(By.directive(MatSlideToggle))
-            .find(element => element.nativeElement.textContent.includes("vrInterface.gazeEnabled"));
-        expect(toggle).toBeDefined();
-        expect(section.textContent).not.toContain("vrInterface.requiresWorldAnchor");
-        toggle!.triggerEventHandler("ngModelChange", true);
-        component.onGazeReductionFactorChange(5);
-        tick(200);
-        expect(changeConfig).toHaveBeenCalledOnceWith({
-            overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true, overlay_vr_gaze_reduction_factor: 5,
-        });
-    }));
-
-    it("rejects invalid area factors instead of saving them", fakeAsync(() => {
-        for (const value of [null, 0, 0.5, NaN, Infinity]) {
-            component.onGazeReductionFactorChange(value);
-        }
-        tick(300);
-        expect(changeConfig).not.toHaveBeenCalled();
-        expect(component.config?.overlay_vr_gaze_reduction_factor).toBe(5);
-        component.onGazeReductionFactorChange(12.5);
-        tick(200);
-        expect(changeConfig).toHaveBeenCalledOnceWith({ overlay_vr_gaze_reduction_factor: 12.5 });
-    }));
-
-    it("updates the reduced-size settings frame immediately when editing the factor, before debounced saving", fakeAsync(() => {
-        component.onVrConfigChange({ overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true });
-        fixture.detectChanges();
-        const root: HTMLElement = fixture.nativeElement;
-        const full = root.querySelector(".overlay-window")!.getAttribute("points");
-        const before = root.querySelector(".reduced-window")!.getAttribute("points");
-        fixture.debugElement.query(By.css(".vr-adaptive-size input"))
-            .triggerEventHandler("ngModelChange", 9);
-        fixture.detectChanges();
-        expect(root.querySelector(".reduced-window")!.getAttribute("points")).not.toBe(before);
-        expect(root.querySelector(".overlay-window")!.getAttribute("points")).toBe(full);
-        expect(changeConfig).not.toHaveBeenCalled();
-        tick(200);
-        expect(changeConfig).toHaveBeenCalledOnceWith({
-            overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true, overlay_vr_gaze_reduction_factor: 9,
-        });
-    }));
-
     it("ignores stale slider echoes until the latest value is confirmed, without hiding unrelated updates", fakeAsync(() => {
         component.onVrConfigChange({ overlay_vr_horizontal_offset: 0.5 });
         tick(200);
@@ -375,18 +355,18 @@ describe("VR slider configuration updates", () => {
         expect(changeConfig).not.toHaveBeenCalled();
     });
 
-    it("places the sliders directly after the preview and adaptive sizing after all placement controls", () => {
+    it("places the sliders directly after the preview without adaptive sizing in the HUD mode", () => {
         const root: HTMLElement = fixture.nativeElement;
         const preview = root.querySelector("app-vr-overlay-preview")!;
         expect(preview.nextElementSibling?.querySelector("h4")?.textContent).toBe("Placement");
         expect(Array.from(root.querySelectorAll(".overlay-secondary-controls section h4"), heading => heading.textContent)).toEqual([
-            "Placement", "Orientation", "Appearance", "vrInterface.gazeTitle",
+            "Placement", "Orientation", "Appearance",
         ]);
         expect(preview.querySelector("p")).toBeNull();
     });
 
     it("shows game restart text only when tracking actually changed for a running host", async () => {
-        configs.next({ ...initialConfig, overlay_vr_anchor: "world" });
+        configs.next({ ...initialConfig, overlay_mode: "vr-full" });
         component.overlayRuntimeInfo = runtimeInfo();
         component.openXrGazeIntegration = { supported: true, available: true, installed: true, enabled: true, restartRequired: false };
         fixture.detectChanges();
@@ -402,17 +382,17 @@ describe("VR slider configuration updates", () => {
     });
 
     it("compares UI edits with live settings, retains the notice on save, and clears it after overlay recreation", fakeAsync(() => {
-        const config: Config = { ...initialConfig, overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true };
+        const config: Config = { ...initialConfig };
         configs.next(config);
         component.overlayRuntimeInfo = runtimeInfo(config);
         expect(component.vrSettingsRestartRequired).toBeFalse();
-        component.onGazeReductionFactorChange(9);
+        component.onVrConfigChange({ overlay_vr_size_meters: 1.2 });
         expect(component.vrSettingsRestartRequired).toBeTrue();
-        component.onGazeReductionFactorChange(5);
+        component.onVrConfigChange({ overlay_vr_size_meters: 0.9 });
         expect(component.vrSettingsRestartRequired).toBeFalse();
-        component.onGazeReductionFactorChange(9);
+        component.onVrConfigChange({ overlay_vr_size_meters: 1.2 });
         tick(200);
-        const updated = { ...config, overlay_vr_gaze_reduction_factor: 9 };
+        const updated = { ...config, overlay_vr_size_meters: 1.2 };
         configs.next(updated);
         expect(component.vrSettingsRestartRequired).toBeTrue();
         expect(getRuntime).not.toHaveBeenCalled();
@@ -424,7 +404,7 @@ describe("VR slider configuration updates", () => {
     }));
 
     it("refreshes actual runtime settings for already-applied voice factors and positioning instead of requiring a restart", fakeAsync(() => {
-        const config: Config = { ...initialConfig, overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true };
+        const config: Config = { ...initialConfig, overlay_vr_anchor: "world", overlay_vr_gaze_reduction_factor: 5 };
         configs.next(config);
         component.overlayRuntimeInfo = runtimeInfo(config);
         const updated = { ...config, overlay_vr_gaze_reduction_factor: 9, overlay_vr_vertical_offset: 0.2 };
@@ -437,26 +417,27 @@ describe("VR slider configuration updates", () => {
         expect(changeConfig).not.toHaveBeenCalled();
     }));
 
-    it("does not request assistant restarts without an active overlay or for an unused factor", () => {
+    it("does not request assistant restarts without an active overlay or for adaptive sizing in the HUD mode", () => {
         component.overlayRuntimeInfo = { ...runtimeInfo(), activeVrSettings: null };
-        component.onGazeReductionFactorChange(9);
+        component.config = { ...initialConfig, overlay_vr_size_meters: 1.2 };
         expect(component.vrSettingsRestartRequired).toBeFalse();
         component.overlayRuntimeInfo = runtimeInfo();
+        component.config = { ...initialConfig, overlay_vr_gaze_reduction_factor: 9, overlay_vr_gaze_reduced_opacity: 0.5 };
         expect(component.vrSettingsRestartRequired).toBeFalse();
     });
 
     it("links EDVR for OpenXR and hides OpenXR setup text and buttons for an OpenVR backend", () => {
-        configs.next({ ...initialConfig, overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true });
+        configs.next({ ...initialConfig, overlay_mode: "vr-full" });
         component.overlayRuntimeInfo = runtimeInfo();
         component.openXrGazeIntegration = { supported: true, available: true, installed: true, enabled: true, restartRequired: false };
         fixture.detectChanges();
         const root: HTMLElement = fixture.nativeElement;
         expect(root.querySelector<HTMLAnchorElement>('a[href*="edvr-unofficial-patch"]')?.href)
             .toBe("https://github.com/characterecho-sean/edvr-unofficial-patch");
-        expect(root.querySelector(".vr-adaptive-size button[mat-stroked-button]")).not.toBeNull();
+        expect(root.querySelector(".vr-tracking-setup button[mat-stroked-button]")).not.toBeNull();
         component.overlayRuntimeInfo = { ...runtimeInfo(), selectedBackend: "openvr" };
         fixture.detectChanges();
-        expect(root.querySelector(".vr-adaptive-size button[mat-stroked-button]")).toBeNull();
+        expect(root.querySelector(".vr-tracking-setup button[mat-stroked-button]")).toBeNull();
         expect(root.textContent).not.toContain("vrInterface.gazeInstalled");
         expect(root.querySelector('a[href*="edvr-unofficial-patch"]')).toBeNull();
     });
@@ -470,23 +451,23 @@ describe("VR slider configuration updates", () => {
     });
 
     it("shows the full-size fallback warning only when the live overlay reports unavailable tracking", () => {
-        configs.next({ ...initialConfig, overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true });
+        configs.next({ ...initialConfig, overlay_mode: "vr-full" });
         component.overlayRuntimeInfo = { ...runtimeInfo(), gazeZoom: { status: "active" } };
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector(".vr-adaptive-size [role=alert]")).toBeNull();
+        expect(fixture.nativeElement.querySelector(".vr-tracking-setup [role=alert]")).toBeNull();
         component.overlayRuntimeInfo = {
             ...runtimeInfo(), gazeZoom: { status: "unavailable", message: "Headset tracking is unavailable." },
         };
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector(".vr-adaptive-size [role=alert]").textContent)
+        expect(fixture.nativeElement.querySelector(".vr-tracking-setup [role=alert]").textContent)
             .toContain("vrInterface.gazeUnavailable");
         component.overlayRuntimeInfo = { ...runtimeInfo(), gazeZoom: { status: "active" } };
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector(".vr-adaptive-size [role=alert]")).toBeNull();
+        expect(fixture.nativeElement.querySelector(".vr-tracking-setup [role=alert]")).toBeNull();
     });
 
     it("shows waiting as information and refreshes until OpenXR tracking becomes active", fakeAsync(() => {
-        const config: Config = { ...initialConfig, overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true };
+        const config: Config = { ...initialConfig, overlay_mode: "vr-full" };
         configs.next(config);
         getRuntime.and.returnValues(
             Promise.resolve({ ...runtimeInfo(config), gazeZoom: { status: "waiting", message: "Waiting for the game." } }),
@@ -498,7 +479,7 @@ describe("VR slider configuration updates", () => {
         fixture.detectChanges();
         expect(fixture.nativeElement.querySelector(".vr-tracking-waiting").getAttribute("role")).toBe("status");
         expect(fixture.nativeElement.querySelector(".vr-tracking-waiting").textContent).toContain("vrInterface.gazeWaiting");
-        expect(fixture.nativeElement.querySelector(".vr-adaptive-size [role=alert]")).toBeNull();
+        expect(fixture.nativeElement.querySelector(".vr-tracking-setup [role=alert]")).toBeNull();
         tick(1500);
         fixture.detectChanges();
         expect(component.overlayRuntimeInfo?.gazeZoom?.status).toBe("active");
@@ -506,5 +487,36 @@ describe("VR slider configuration updates", () => {
         tick(3000);
         expect(getRuntime).toHaveBeenCalledTimes(2);
         expect(notify).not.toHaveBeenCalled();
+    }));
+
+    it("polls full-window height initialization without adaptive sizing and hides it in the HUD mode", fakeAsync(() => {
+        const config: Config = { ...initialConfig, overlay_mode: "vr-full", overlay_vr_gaze_reduction_factor: 1 };
+        configs.next(config);
+        getRuntime.and.returnValues(
+            Promise.resolve({ ...runtimeInfo(config), heightInitialization: { status: "waiting", message: "Waiting for the headset." } }),
+            Promise.resolve({ ...runtimeInfo(config), heightInitialization: { status: "active" } }),
+        );
+        (component.refreshOverlayRuntimeInfo as jasmine.Spy).and.callThrough();
+        void component.refreshOverlayRuntimeInfo(true);
+        flushMicrotasks();
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector(".vr-height-status").getAttribute("role")).toBe("status");
+        expect(fixture.nativeElement.querySelector(".vr-height-status").textContent).toContain("vrInterface.heightWaiting");
+        tick(1500);
+        fixture.detectChanges();
+        expect(component.overlayRuntimeInfo?.heightInitialization?.status).toBe("active");
+        expect(fixture.nativeElement.querySelector(".vr-height-status")).toBeNull();
+        tick(3000);
+        expect(getRuntime).toHaveBeenCalledTimes(2);
+        component.overlayRuntimeInfo = {
+            ...runtimeInfo(config), heightInitialization: { status: "unavailable", message: "Native tracking unavailable." },
+        };
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector(".vr-height-status").getAttribute("role")).toBe("alert");
+        expect(fixture.nativeElement.querySelector(".vr-height-status").textContent).toContain("vrInterface.heightUnavailable");
+        (component.refreshOverlayRuntimeInfo as jasmine.Spy).and.resolveTo();
+        configs.next({ ...config, overlay_mode: "vr", overlay_vr_anchor: "world" });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector(".vr-height-status")).toBeNull();
     }));
 });

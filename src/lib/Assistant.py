@@ -858,6 +858,12 @@ class Assistant:
             events = list(reversed(events))
             new_events = [event for event in events if event.responded_at == None]
             self.pending = []
+
+            # reply_pending can be set again from stale pending events between the start of this
+            # thread and the pending reset above. Only reply when unanswered history needs it.
+            if not self.should_reply(projected_states, new_events):
+                log('debug', 'Skipping reply: no unanswered event requires a response')
+                return
             
             memories = self.event_manager.get_latest_memories(limit=5)
 
@@ -972,12 +978,13 @@ class Assistant:
         finally:
             self.is_replying = False
 
-    def should_reply(self, states:dict[str, Any]):
+    def should_reply(self, states:dict[str, Any], events: list[Event] | None = None):
         character = self.config['characters'][self.config['active_character_index']]
-        if len(self.pending) == 0:
+        candidates = self.pending if events is None else events
+        if len(candidates) == 0:
             return False
 
-        for event in self.pending:
+        for event in candidates:
             # check if pending contains conversational events
             if isinstance(event, ConversationEvent) and event.kind == "user":
                 if getattr(event, 'do_not_reply', False):

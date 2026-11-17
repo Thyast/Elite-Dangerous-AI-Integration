@@ -1,6 +1,5 @@
 import { Component, Input } from "@angular/core";
 import { Config } from "../../services/config.service";
-import { TranslateModule } from "@ngx-translate/core";
 
 type PreviewConfig = Pick<Config,
     | "overlay_vr_anchor"
@@ -11,8 +10,6 @@ type PreviewConfig = Pick<Config,
     | "overlay_vr_yaw_degrees"
     | "overlay_vr_size_meters"
     | "overlay_vr_curvature"
-    | "overlay_vr_gaze_zoom"
-    | "overlay_vr_gaze_reduction_factor"
 >;
 
 interface Point3D {
@@ -24,7 +21,6 @@ interface Point3D {
 @Component({
     selector: "app-vr-overlay-preview",
     standalone: true,
-    imports: [TranslateModule],
     templateUrl: "./vr-overlay-preview.component.html",
     styleUrl: "./vr-overlay-preview.component.css",
 })
@@ -32,16 +28,10 @@ export class VrOverlayPreviewComponent {
     @Input({ required: true }) config!: PreviewConfig;
 
     get overlayPoints(): string {
-        return this.projectWindow(1);
+        return this.projectWindow();
     }
 
-    get reducedOverlayPoints(): string | null {
-        const { overlay_vr_anchor: anchor, overlay_vr_gaze_zoom: enabled, overlay_vr_gaze_reduction_factor: factor } = this.config;
-        return anchor === "world" && enabled && Number.isFinite(factor) && factor >= 1
-            ? this.projectWindow(1 / Math.sqrt(factor)) : null;
-    }
-
-    private projectWindow(scale: number): string {
+    private projectWindow(): string {
         const config = this.config;
         const worldLocked = config.overlay_vr_anchor === "world";
         // Match Electron placement, relative to a forward-facing viewer at 1.4 m.
@@ -50,7 +40,7 @@ export class VrOverlayPreviewComponent {
         const distance = Math.max(0.1, (worldLocked ? 2 : 1.1) + config.overlay_vr_distance_offset);
         const pitch = config.overlay_vr_tilt_degrees * Math.PI / 180;
         const yaw = config.overlay_vr_yaw_degrees * Math.PI / 180;
-        const width = config.overlay_vr_size_meters * scale;
+        const width = config.overlay_vr_size_meters;
         const halfHeight = width * 9 / 16 / 2;
         const arc = config.overlay_vr_curvature * 2 * Math.PI;
         const segments = arc > 0 ? 32 : 1;

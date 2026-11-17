@@ -103,9 +103,12 @@ export class MainViewComponent implements OnInit, OnDestroy {
     vrAdjustmentActive = false;
     get reducedFramePercent(): number | null {
         const factor = this.config?.overlay_vr_gaze_reduction_factor;
-        return this.config?.overlay_vr_anchor === "world" && this.config.overlay_vr_gaze_zoom
-            && typeof factor === "number" && Number.isFinite(factor) && factor >= 1
+        return this.config?.overlay_mode === "vr-full"
+            && typeof factor === "number" && Number.isFinite(factor) && factor > 1
             ? 100 / Math.sqrt(factor) : null;
+    }
+    get reducedOpacityPercent(): number {
+        return Math.round((this.config?.overlay_vr_gaze_reduced_opacity ?? 0.25) * 1000) / 10;
     }
     overlayInterfaceVisible = true;
     get showOverlayChat(): boolean {
@@ -422,8 +425,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 this.config
                 && this.config.overlay_mode !== "disabled"
                 && (this.config.overlay_show_avatar || this.config.overlay_show_chat || this.config.overlay_show_hud
-                    || ((this.config.overlay_mode === "vr" || this.config.overlay_mode === "both")
-                        && this.config.overlay_vr_content === "interface"))
+                    || this.config.overlay_mode === "vr-full")
             ) {
                 await this.createOverlay();
             }
@@ -454,28 +456,37 @@ export class MainViewComponent implements OnInit, OnDestroy {
             }
 
             const screenId = this.config?.overlay_screen_id ?? -1; // -1 for primary screen
+            const full = this.config?.overlay_mode === "vr-full";
+            const settings = full ? { ...this.config, ...this.config?.overlay_vr_full_last } : this.config;
 
             const result = await this.tauri.createOverlay({
                 alwaysOnTop: true,
                 screenId: screenId,
                 mode: this.config?.overlay_mode ?? "desktop",
-                vrContent: this.config?.overlay_vr_content ?? "hud",
-                vrGazeZoom: this.config?.overlay_vr_gaze_zoom ?? false,
-                vrGazeReductionFactor: this.config?.overlay_vr_gaze_reduction_factor ?? 5,
+                vrContent: full ? "interface" : "hud",
+                vrGazeZoom: full && (settings?.overlay_vr_gaze_reduction_factor ?? 1) > 1,
+                vrGazeReductionFactor: settings?.overlay_vr_gaze_reduction_factor ?? 1,
+                vrGazeReducedOpacity: settings?.overlay_vr_gaze_reduced_opacity ?? 0.25,
                 standaloneTransparent: this.config?.overlay_standalone_transparent ?? true,
                 standaloneBackgroundColor: this.config?.overlay_standalone_background_color ?? "#000000",
-                vrSizeMeters: this.config?.overlay_vr_size_meters ?? 0.9,
-                vrAnchor: this.config?.overlay_vr_anchor ?? "head",
-                vrHorizontalOffset: this.config?.overlay_vr_horizontal_offset ?? 0,
-                vrVerticalOffset: this.config?.overlay_vr_vertical_offset ?? 0,
-                vrDistanceOffset: this.config?.overlay_vr_distance_offset ?? 0,
-                vrTiltDegrees: this.config?.overlay_vr_tilt_degrees ?? 0,
-                vrYawDegrees: this.config?.overlay_vr_yaw_degrees ?? 0,
-                vrCurvature: this.config?.overlay_vr_curvature ?? 0,
+                vrSizeMeters: settings?.overlay_vr_size_meters ?? 0.9,
+                vrAnchor: full ? "world" : this.config?.overlay_vr_anchor ?? "head",
+                vrHorizontalOffset: settings?.overlay_vr_horizontal_offset ?? 0,
+                vrVerticalOffset: settings?.overlay_vr_vertical_offset ?? 0,
+                vrDistanceOffset: settings?.overlay_vr_distance_offset ?? 0,
+                vrTiltDegrees: settings?.overlay_vr_tilt_degrees ?? 0,
+                vrYawDegrees: settings?.overlay_vr_yaw_degrees ?? 0,
+                vrCurvature: settings?.overlay_vr_curvature ?? 0,
             });
             if (result?.gazeZoom.status === "unavailable") {
                 this.snackBar.open(
                     this.translate.instant("vrInterface.gazeUnavailable", { reason: result.gazeZoom.message }),
+                    "OK", { duration: 10000 },
+                );
+            }
+            if (result?.heightInitialization?.status === "unavailable") {
+                this.snackBar.open(
+                    this.translate.instant("vrInterface.heightUnavailable", { reason: result.heightInitialization.message }),
                     "OK", { duration: 10000 },
                 );
             }

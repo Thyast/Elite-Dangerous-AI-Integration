@@ -18,6 +18,47 @@ import { UIMessage, UISectionRequest, UIService } from "../services/ui.service";
 import { PluginUIService } from "../services/plugin-ui.service";
 import { RegisteredUIView } from "../services/plugin-ui";
 import { TranslateModule } from "@ngx-translate/core";
+import { SettingsMenuComponent } from "../components/settings-menu/settings-menu.component";
+import { MatTabsModule } from "@angular/material/tabs";
+import { MatIconModule } from "@angular/material/icon";
+
+describe("offline plugin settings tabs", () => {
+    it("renders the upgrade panel inside its own tab", async () => {
+        await TestBed.configureTestingModule({
+            imports: [SettingsMenuComponent, NoopAnimationsModule, TranslateModule.forRoot()],
+            providers: [
+                { provide: ConfigService, useValue: {
+                    config$: of(null), system$: of({}),
+                    plugin_settings_message$: of({ has_plugin_settings: false, plugin_settings_configs: {} }),
+                } },
+                { provide: PolicyService, useValue: { usageDisclaimerAccepted$: of(true) } },
+                { provide: MatSnackBar, useValue: { open: jasmine.createSpy("open") } },
+            ],
+        }).overrideComponent(SettingsMenuComponent, { set: {
+            imports: [CommonModule, MatTabsModule, MatIconModule, TranslateModule],
+            schemas: [NO_ERRORS_SCHEMA],
+        } }).compileComponents();
+        const fixture = TestBed.createComponent(SettingsMenuComponent);
+        fixture.componentInstance.pluginViews = [{
+            id: "upgrades", target: "plugin:ship:upgrades", pluginGuid: "ship",
+            label: "Ship upgrade plan", modes: ["configuring", "running"],
+            sections: [{ key: "plans", label: "Plans" }],
+        }];
+        fixture.detectChanges();
+        const tabs = fixture.debugElement.queryAll(By.css('[role="tab"]'));
+        expect(tabs.length).toBeGreaterThan(1);
+        const tab = tabs[tabs.length - 1];
+        expect(tab.nativeElement.textContent).toContain("Ship upgrade plan");
+        tab.nativeElement.click();
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+        const panel = fixture.debugElement.query(By.css("app-plugin-view"));
+        expect(panel).not.toBeNull();
+        expect(panel.properties["view"]).toEqual(fixture.componentInstance.pluginViews[0]);
+        fixture.destroy();
+    });
+});
 
 describe("full VR interface lifecycle and voice navigation", () => {
     let fixture: ComponentFixture<MainViewComponent>;
@@ -108,6 +149,16 @@ describe("full VR interface lifecycle and voice navigation", () => {
         expect(tauri.send_command).toHaveBeenCalledOnceWith(jasmine.objectContaining({ type: "init_overlay" }));
     });
 
+    it("passes offline plugin panels to the settings tabs instead of rendering them below settings", () => {
+        const component = create();
+        component.showRuntimeView = false;
+        views.next([{ ...plan, modes: ["configuring", "running"] }]);
+        fixture.detectChanges();
+        const settings = fixture.debugElement.query(By.css("app-settings-menu"));
+        expect(settings.properties["pluginViews"]).toEqual(component.configPluginViews);
+        expect(fixture.debugElement.queryAll(By.css(".settings-container > app-plugin-view")).length).toBe(0);
+    });
+
     it("keeps only the Events filter in the runtime chat without grouping controls", () => {
         create();
         const root: HTMLElement = fixture.nativeElement;
@@ -174,6 +225,18 @@ describe("full VR interface lifecycle and voice navigation", () => {
         expect(tauri.send_command).not.toHaveBeenCalled();
     });
 
+    it("reports unavailable height initialization even when adaptive sizing is disabled", async () => {
+        routeData.overlayInterface = false;
+        const component = create();
+        configs.next({ overlay_mode: "vr", overlay_vr_anchor: "world" } as Config);
+        tauri.createOverlay.and.resolveTo({
+            gazeZoom: { status: "disabled" },
+            heightInitialization: { status: "unavailable", message: "Tracking is unavailable." },
+        });
+        await component.createOverlay();
+        expect(notify).toHaveBeenCalledWith("vrInterface.heightUnavailable", "OK", { duration: 10000 });
+    });
+
     it("honors voice requests arriving before a plugin has published its views", () => {
         const component = create();
         messages.next({ type: "ui", timestamp: "", index: 0, show: plan.target, submenu: "plan" });
@@ -199,15 +262,38 @@ describe("full VR interface lifecycle and voice navigation", () => {
         routeData.overlayInterface = false;
         const component = create();
         component.config = {
-            overlay_mode: "vr", overlay_vr_content: "interface",
-            overlay_vr_gaze_zoom: true, overlay_vr_gaze_reduction_factor: 5, overlay_vr_anchor: "world",
+            overlay_mode: "vr-full",
+            overlay_vr_gaze_reduction_factor: 5, overlay_vr_gaze_reduced_opacity: 0.4,
+            overlay_vr_anchor: "world",
             overlay_show_avatar: false, overlay_show_chat: false, overlay_show_hud: false,
         } as Config;
         await component.start();
         expect(tauri.createOverlay).toHaveBeenCalledOnceWith(jasmine.objectContaining({
-            mode: "vr", vrContent: "interface", vrGazeZoom: true, vrGazeReductionFactor: 5, vrAnchor: "world",
+            mode: "vr-full", vrContent: "interface", vrGazeZoom: true, vrGazeReductionFactor: 5,
+            vrGazeReducedOpacity: 0.4, vrAnchor: "world",
         }));
         expect(tauri.send_start_signal).toHaveBeenCalled();
+    });
+
+    it("starts the full window with its last ship settings, independently of the HUD placement", async () => {
+        routeData.overlayInterface = false;
+        const component = create();
+        const config = { overlay_mode: "vr-full" } as Config;
+        component.config = {
+            ...config,
+            overlay_mode: "vr-full", overlay_vr_anchor: "head", overlay_vr_vertical_offset: 0.8,
+            overlay_vr_gaze_reduction_factor: 9,
+            overlay_vr_full_last: {
+                overlay_vr_vertical_offset: -0.3, overlay_vr_size_meters: 1.2,
+                overlay_vr_gaze_reduction_factor: 1, overlay_vr_gaze_reduced_opacity: 0.4,
+            },
+        };
+        await component.createOverlay();
+        expect(tauri.createOverlay).toHaveBeenCalledOnceWith(jasmine.objectContaining({
+            mode: "vr-full", vrContent: "interface", vrAnchor: "world",
+            vrVerticalOffset: -0.3, vrSizeMeters: 1.2, vrGazeZoom: false,
+            vrGazeReductionFactor: 1, vrGazeReducedOpacity: 0.4,
+        }));
     });
 
     it("hides only the VR GUI and restores its selected plugin tab without restarting", () => {
@@ -246,7 +332,7 @@ describe("full VR interface lifecycle and voice navigation", () => {
         routeData.overlayInterface = false;
         const component = create();
         component.config = {
-            overlay_mode: "vr", overlay_vr_content: "hud",
+            overlay_mode: "vr",
             overlay_show_avatar: false, overlay_show_chat: false, overlay_show_hud: false,
         } as Config;
         await component.start();
@@ -255,17 +341,20 @@ describe("full VR interface lifecycle and voice navigation", () => {
 
     it("draws non-interactive full and reduced frames only during VR adjustment and updates the actual area live", () => {
         configs.next({
-            overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true, overlay_vr_gaze_reduction_factor: 5,
+            overlay_mode: "vr", overlay_vr_anchor: "world", overlay_vr_gaze_reduction_factor: 5,
         } as Config);
         create();
         const root: HTMLElement = fixture.nativeElement;
         expect(root.querySelector(".vr-adjustment-frame")).toBeNull();
         adjusting.next(true);
         fixture.detectChanges();
+        expect(root.querySelector(".vr-reduced-frame")).toBeNull();
+        configs.next({ ...configs.value!, overlay_mode: "vr-full" });
+        fixture.detectChanges();
         const outer = root.querySelector(".vr-adjustment-frame")!;
         expect(getComputedStyle(outer).pointerEvents).toBe("none");
         expect(getComputedStyle(outer).position).toBe("fixed");
-        for (const factor of [1, 5, 9, 12.5]) {
+        for (const factor of [5, 9, 12.5]) {
             configs.next({ ...configs.value!, overlay_vr_gaze_reduction_factor: factor });
             fixture.detectChanges();
             const inner = root.querySelector<HTMLElement>(".vr-reduced-frame")!;
@@ -290,11 +379,11 @@ describe("full VR interface lifecycle and voice navigation", () => {
         adjusting.next(true);
         for (const changes of [
             { overlay_vr_anchor: "head" },
-            { overlay_vr_gaze_zoom: false },
+            { overlay_vr_gaze_reduction_factor: 1 },
             ...[0, NaN, Infinity].map(factor => ({ overlay_vr_gaze_reduction_factor: factor })),
         ]) {
             configs.next({
-                overlay_vr_anchor: "world", overlay_vr_gaze_zoom: true, overlay_vr_gaze_reduction_factor: 5,
+                overlay_vr_anchor: "world", overlay_vr_gaze_reduction_factor: 5,
                 ...changes,
             } as Config);
             fixture.detectChanges();
@@ -312,7 +401,7 @@ describe("full VR interface lifecycle and voice navigation", () => {
     it("keeps the full interface and assistant running when gaze tracking is unavailable", async () => {
         routeData.overlayInterface = false;
         const component = create();
-        component.config = { overlay_mode: "vr", overlay_vr_content: "interface", overlay_vr_gaze_zoom: true } as Config;
+        component.config = { overlay_mode: "vr-full", overlay_vr_gaze_reduction_factor: 5 } as Config;
         tauri.createOverlay.and.resolveTo({
             gazeZoom: { status: "unavailable", message: "Restart EDVR after installing gaze tracking" },
         });

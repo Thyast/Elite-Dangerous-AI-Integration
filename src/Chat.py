@@ -445,7 +445,7 @@ class Chat:
             assistant_name=self.character["first_name"],
         )
 
-    def _save_vr_position(self, values: dict[str, float]) -> None:
+    def _save_vr_position(self, values: dict[str, Any]) -> None:
         updated = cast(Config, {**self.config, **values})
         save_config(updated)
         self.config = updated
@@ -464,6 +464,9 @@ class Chat:
 
     def emit_runtime_state(self):
         _, projected_states = self.event_manager.get_current_state()
+        ship = projected_states.get("ShipInfo")
+        if ship is not None:
+            self.vr_adjustment.update_ship(ship.model_dump() if hasattr(ship, "model_dump") else ship, force=True)
         emit_message("running_config", config=self.config)
         if self.vr_adjustment.active:
             self.vr_adjustment.publish()
@@ -558,6 +561,9 @@ class Chat:
         self.submit_input(result.text)
 
     def on_event(self, event: Event, projected_states: dict[str, Any]):
+        ship = projected_states.get("ShipInfo")
+        if ship is not None:
+            self.vr_adjustment.update_ship(ship.model_dump() if hasattr(ship, "model_dump") else ship)
         for key, value in projected_states.items():
             if self.previous_states.get(key, None) != value:
                 send_message(

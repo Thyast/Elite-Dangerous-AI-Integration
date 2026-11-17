@@ -51,13 +51,17 @@ export function isLookingAtOverlay(pose, placement, width, curvature = 0) {
 
 export function createVrGazeZoom({
   controller, reader, placement, sizeMeters, curvature, reductionFactor = 5, logger,
+  reducedOpacity = 1, setOpacity = () => true,
   now = () => performance.now(), setIntervalFn = setInterval, clearIntervalFn = clearInterval,
 }) {
   if (!Number.isFinite(reductionFactor) || reductionFactor < 1) {
     throw new Error('The VR gaze area reduction factor must be a finite number of at least 1.');
   }
+  validateReducedOpacity(reducedOpacity);
   let scale = 1;
+  let dim = 0;
   let appliedWidth = sizeMeters;
+  let appliedOpacity = 1;
   let focused = true;
   let candidateSince = null;
   let previousTime = now();
@@ -77,6 +81,17 @@ export function createVrGazeZoom({
     appliedWidth = width;
   }
 
+  function applyOpacity(opacity) {
+    const endpoint = opacity === 1 || opacity === reducedOpacity;
+    if (opacity === appliedOpacity || (!endpoint && Math.abs(opacity - appliedOpacity) < 0.005)) {
+      return;
+    }
+    if (setOpacity(opacity) === false) {
+      throw new Error('The VR window could not update its opacity.');
+    }
+    appliedOpacity = opacity;
+  }
+
   function stop() {
     if (stopped) {
       return;
@@ -84,14 +99,18 @@ export function createVrGazeZoom({
     stopped = true;
     clearIntervalFn(timer);
     try {
-      applyWidth(sizeMeters);
+      try {
+        applyOpacity(1);
+      } finally {
+        applyWidth(sizeMeters);
+      }
     } finally {
       reader.close();
     }
   }
 
   function tick() {
-    if (stopped) {
+    if (stopped || reductionFactor === 1) {
       return;
     }
     if (paused) {
@@ -132,11 +151,18 @@ export function createVrGazeZoom({
         }
       }
       const target = focused ? 1 : 1 / Math.sqrt(reductionFactor);
-      scale += (target - scale) * (1 - Math.exp(-elapsed / 100));
+      const smoothing = 1 - Math.exp(-elapsed / 100);
+      scale += (target - scale) * smoothing;
       if (Math.abs(target - scale) < 0.001) {
         scale = target;
       }
+      const dimTarget = focused ? 0 : 1;
+      dim += (dimTarget - dim) * smoothing;
+      if (Math.abs(dimTarget - dim) < 0.001) {
+        dim = dimTarget;
+      }
       applyWidth(sizeMeters * scale);
+      applyOpacity(dim === 1 ? reducedOpacity : 1 - (1 - reducedOpacity) * dim);
     } catch (error) {
       failureReason = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, 'VR gaze zoom failed; disabling tracking and restoring the configured size.');
@@ -149,8 +175,10 @@ export function createVrGazeZoom({
   }
 
   try {
-    timer = setIntervalFn(tick, 50);
-    timer.unref?.();
+    if (reductionFactor > 1) {
+      timer = setIntervalFn(tick, 50);
+      timer.unref?.();
+    }
   } catch (error) {
     stop();
     throw error;
@@ -162,6 +190,7 @@ export function createVrGazeZoom({
         return { status: 'unavailable', message: failureReason };
       }
       if (stopped) return { status: 'disabled' };
+      if (reductionFactor === 1) return { status: 'disabled' };
       const readerState = reader.getState?.();
       if (readerState && readerState.status !== 'active') return readerState;
       if (trackingLost) return { status: 'unavailable', message: 'Headset tracking is unavailable.' };
@@ -169,9 +198,13 @@ export function createVrGazeZoom({
     },
     setPaused(value) {
       if (stopped) return;
-      if (value) applyWidth(sizeMeters);
+      if (value) {
+        applyWidth(sizeMeters);
+        applyOpacity(1);
+      }
       paused = value;
       scale = 1;
+      dim = 0;
       focused = true;
       candidateSince = null;
       previousTime = now();
@@ -180,7 +213,44 @@ export function createVrGazeZoom({
       if (!Number.isFinite(value) || value < 1) {
         throw new Error('The VR gaze area reduction factor must be a finite number of at least 1.');
       }
+      if (value === 1) {
+        applyWidth(sizeMeters);
+        applyOpacity(1);
+        scale = 1;
+        dim = 0;
+        focused = true;
+        candidateSince = null;
+        clearIntervalFn(timer);
+        timer = null;
+      } else if (reductionFactor === 1 && !stopped) {
+        previousTime = now();
+        timer = setIntervalFn(tick, 50);
+        timer.unref?.();
+      }
       reductionFactor = value;
     },
+    setReducedOpacity(value) {
+      validateReducedOpacity(value);
+      reducedOpacity = value;
+    },
+    setAppearance(width, curve) {
+      if (!Number.isFinite(width) || width < 0.1 || width > 3 || !Number.isFinite(curve) || curve < 0 || curve > 0.5) {
+        throw new Error('Invalid VR window size or curvature.');
+      }
+      applyWidth(width);
+      sizeMeters = width;
+      curvature = curve;
+      scale = 1;
+      dim = 0;
+      focused = true;
+      candidateSince = null;
+      applyOpacity(1);
+    },
   };
+}
+
+export function validateReducedOpacity(value) {
+  if (!Number.isFinite(value) || value < 0.1 || value > 1) {
+    throw new Error('The reduced VR window opacity must be between 10% and 100%.');
+  }
 }

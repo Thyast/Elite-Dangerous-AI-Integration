@@ -945,16 +945,17 @@ class Config(TypedDict):
     overlay_show_avatar: bool
     overlay_show_hud: bool
     overlay_show_chat: bool
-    overlay_mode: Literal['disabled', 'desktop', 'standalone', 'vr', 'both']
+    overlay_mode: Literal['disabled', 'desktop', 'standalone', 'vr', 'vr-full', 'both']
     overlay_position: Literal['left', 'right', 'left-medium', 'left-small', 'right-medium', 'right-small']
     overlay_screen_id: int
     overlay_standalone_transparent: bool
     overlay_standalone_background_color: str
     overlay_vr_size_meters: float
     overlay_vr_anchor: Literal['head', 'world']
-    overlay_vr_content: Literal['hud', 'interface']
-    overlay_vr_gaze_zoom: bool
+    overlay_vr_full_profiles: dict[str, dict[str, float]]
+    overlay_vr_full_last: dict[str, float]
     overlay_vr_gaze_reduction_factor: float
+    overlay_vr_gaze_reduced_opacity: float
     overlay_vr_horizontal_offset: float
     overlay_vr_vertical_offset: float
     overlay_vr_distance_offset: float
@@ -1610,6 +1611,21 @@ def migrate(data: dict) -> dict:
         data['config_version'] = 26
 
     data.pop('wake_word_name', None)
+    if 'overlay_vr_gaze_zoom' in data:
+        if not data.pop('overlay_vr_gaze_zoom'):
+            data['overlay_vr_gaze_reduction_factor'] = 1.0
+        else:
+            data.setdefault('overlay_vr_gaze_reduction_factor', 5.0)
+    if data.pop('overlay_vr_content', None) == 'interface' and data.get('overlay_mode') in ('vr', 'both'):
+        data['overlay_mode'] = 'vr-full'
+        data.setdefault('overlay_vr_full_last', {
+            key: value for key, value in data.items()
+            if key in (
+                'overlay_vr_horizontal_offset', 'overlay_vr_vertical_offset', 'overlay_vr_distance_offset',
+                'overlay_vr_tilt_degrees', 'overlay_vr_yaw_degrees', 'overlay_vr_size_meters',
+                'overlay_vr_curvature', 'overlay_vr_gaze_reduction_factor', 'overlay_vr_gaze_reduced_opacity',
+            )
+        })
     data.pop('tools_var', None)
 
     for key in LEGACY_PROVIDER_SETTING_KEYS:
@@ -1648,9 +1664,8 @@ def merge_config_data(defaults: dict, user: dict):
                 print(f"Warning: Config type mismatch for '{key}', using default")
                 continue
 
-            # Plugin settings
-            if key in {"plugin_settings", "tts_voice_settings"}:
-                # Copy plugin settings directly, since we don't know what settings are supposed to be there.
+            # Dictionaries whose keys are defined at runtime.
+            if key in {"plugin_settings", "tts_voice_settings", "overlay_vr_full_profiles", "overlay_vr_full_last"}:
                 merge[key] = user.get(key) or {}
                 continue
                 
@@ -1803,9 +1818,10 @@ def load_config() -> Config:
         "overlay_standalone_background_color": "#000000",
         "overlay_vr_size_meters": 0.9,
         "overlay_vr_anchor": "head",
-        "overlay_vr_content": "hud",
-        "overlay_vr_gaze_zoom": False,
-        "overlay_vr_gaze_reduction_factor": 5.0,
+        "overlay_vr_full_profiles": {},
+        "overlay_vr_full_last": {},
+        "overlay_vr_gaze_reduction_factor": 1.0,
+        "overlay_vr_gaze_reduced_opacity": 0.25,
         "overlay_vr_horizontal_offset": 0.0,
         "overlay_vr_vertical_offset": 0.0,
         "overlay_vr_distance_offset": 0.0,

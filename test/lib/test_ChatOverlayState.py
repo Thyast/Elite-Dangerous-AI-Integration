@@ -20,11 +20,11 @@ def test_new_overlay_receives_running_state_and_plugin_panels() -> None:
     states = {"ShipInfo": {"ShipIdent": "TEST"}}
     plugins = SimpleNamespace(broadcast_plugin_ui=Mock())
     chat = SimpleNamespace(
-        config={"overlay_vr_content": "interface"},
+        config={"overlay_mode": "vr-full"},
         event_manager=SimpleNamespace(get_current_state=lambda: ([], states)),
         plugin_manager=plugins,
         previous_states={},
-        vr_adjustment=SimpleNamespace(active=False),
+        vr_adjustment=SimpleNamespace(active=False, update_ship=Mock()),
         _emit_voice_activation=Mock(),
     )
 
@@ -36,6 +36,7 @@ def test_new_overlay_receives_running_state_and_plugin_panels() -> None:
         ("states", {"states": states}),
     ]
     plugins.broadcast_plugin_ui.assert_called_once_with()
+    chat.vr_adjustment.update_ship.assert_called_once_with(states["ShipInfo"], force=True)
     assert chat.previous_states == states
     assert chat.previous_states is not states
     chat.vr_adjustment.active = True

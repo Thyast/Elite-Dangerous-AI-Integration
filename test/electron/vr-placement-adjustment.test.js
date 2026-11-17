@@ -20,12 +20,19 @@ function harness(overrides = {}, readHeadPose = () => ({
   let accept = true;
   const adjustment = createVrPlacementAdjustment({
     options, placement, readHeadPose,
-    controller: { setPlacement(value) { calls.push(['placement', value]); return accept; } },
+    controller: {
+      setPlacement(value) { calls.push(['placement', value]); return accept; },
+      setSizeMeters(value) { calls.push(['size', value]); return true; },
+      setCurvature(value) { calls.push(['curvature', value]); return true; },
+    },
     gazeZoom: {
       setPaused(value) { calls.push(['pause', value]); },
       setReductionFactor(value) { calls.push(['factor', value]); },
+      setReducedOpacity(value) { calls.push(['opacity', value]); },
+      setAppearance(size, curvature) { calls.push(['appearance', size, curvature]); },
     },
   });
+
   return {
     adjustment, placement, original, calls, options,
     handle: (operation, values = {}) => adjustment.handle({ operation, session_id: 'session', ...values }),
@@ -34,6 +41,57 @@ function harness(overrides = {}, readHeadPose = () => ({
   };
 }
 
+const shipProfile = {
+    overlay_vr_horizontal_offset: 0.5, overlay_vr_vertical_offset: -0.2,
+    overlay_vr_distance_offset: 0.3, overlay_vr_tilt_degrees: 10, overlay_vr_yaw_degrees: -15,
+    overlay_vr_size_meters: 1.2, overlay_vr_curvature: 0.1,
+    overlay_vr_gaze_reduction_factor: 1, overlay_vr_gaze_reduced_opacity: 0.25,
+  };
+
+  test('ship profiles update placement and appearance without changing the tracking origin or recentering', async () => {
+    const h = harness();
+    h.adjustment.initializeHeight({ position: { y: 1.8 } });
+    const result = await h.handle('apply_profile', { config: shipProfile });
+    assert.deepEqual(result, { active: false, config: shipProfile });
+    assert.ok(Math.abs(h.placement.position.y - (1.8 - 0.2 - 720 / 1280 / 2)) < 1e-12);
+    assert.equal(h.placement.position.x, 0);
+    assert.equal(h.placement.position.z, -2.3);
+    const settings = h.adjustment.getSettings();
+    assert.equal(settings.vrSizeMeters, 1.2);
+    assert.equal(settings.vrGazeReductionFactor, 1);
+    assert.deepEqual(h.calls.at(-1), ['pause', false]);
+    h.handle('begin');
+    h.handle('move', { axis: 'vertical', delta: 0.1 });
+    await assert.rejects(h.handle('apply_profile', { config: shipProfile }), /Finish or cancel/);
+    h.handle('cancel');
+    assert.equal(h.adjustment.getSettings().vrVerticalOffset, -0.2);
+  });
+
+  test('invalid ship profiles and runtime rejection leave live settings unchanged', async () => {
+    const h = harness();
+    const original = h.adjustment.getSettings();
+    for (const config of [{}, { ...shipProfile, overlay_vr_gaze_reduction_factor: 0.5 }, { ...shipProfile, overlay_vr_vertical_offset: NaN }]) {
+      await assert.rejects(h.handle('apply_profile', { config }), /Invalid VR/);
+      assert.deepEqual(h.adjustment.getSettings(), original);
+    }
+    h.reject();
+    await assert.rejects(h.handle('apply_profile', { config: shipProfile }), /rejected/);
+    assert.deepEqual(h.adjustment.getSettings(), original);
+    assert.deepEqual(h.placement, h.original);
+  });
+
+  test('live appearance changes survive cancellation of the separate position transaction', () => {
+    const h = harness({ vrCurvature: 0 });
+    h.handle('begin');
+    const result = h.handle('set_appearance', { size: 1.5, curvature: 0.25 });
+    assert.deepEqual(result.previous, { size: 0.9, curvature: 0 });
+    h.handle('move', { axis: 'vertical', delta: 0.1 });
+    h.handle('cancel');
+    assert.equal(h.adjustment.getSettings().vrSizeMeters, 1.5);
+    assert.equal(h.adjustment.getSettings().vrCurvature, 0.25);
+    assert.deepEqual(h.placement, h.original);
+    assert.throws(() => h.handle('set_appearance', { size: 0.05, curvature: 0 }), /between/);
+  });
 test('keeps the existing world/head placement and quaternion contract', () => {
   const world = getOverlayPlacement('world', 0.9);
   assert.deepEqual(world.position, { x: -0.5, y: 1.4 - (720 / 1280) / 2, z: -2 });
@@ -59,6 +117,83 @@ test('previews movements synchronously and suspends zoom without changing saved 
     assert.equal(h.options.vrVerticalOffset, 0.1);
     assert.equal(h.calls.filter(([kind]) => kind === 'placement').length, 1);
   }
+});
+
+test('initializes only world height from tracking once, preserving saved offsets on restart', () => {
+  for (const height of [0, 1.1, 1.8]) {
+    for (const offset of [-0.4, 0, 0.35]) {
+      const h = harness({ vrVerticalOffset: offset, vrTiltDegrees: 15, vrYawDegrees: -10 });
+      const settings = h.adjustment.getSettings();
+      const pose = { position: { x: 9, y: height, z: -4 }, direction: { x: 1, y: 0.5, z: 0 } };
+      assert.equal(h.adjustment.initializeHeight(pose), true);
+      assert.ok(Math.abs(h.placement.position.y - (height + offset - 720 / 1280 / 2)) < 1e-12);
+      assert.equal(h.placement.position.x, h.original.position.x);
+      assert.equal(h.placement.position.z, h.original.position.z);
+      assert.deepEqual(h.placement.rotation, h.original.rotation);
+      assert.deepEqual(h.adjustment.getSettings(), settings);
+      const initialized = structuredClone(h.placement);
+      h.adjustment.initializeHeight({ position: { y: height + 0.5 } });
+      assert.deepEqual(h.placement, initialized);
+      assert.equal(h.calls.length, 1);
+      h.handle('begin');
+      h.handle('move', { axis: 'vertical', delta: 0.1 });
+      h.handle('commit');
+      h.handle('finish');
+      const restarted = harness(h.adjustment.getSettings());
+      restarted.adjustment.initializeHeight(pose);
+      assert.deepEqual(restarted.placement, h.placement);
+      restarted.handle('begin');
+      restarted.handle('move', { axis: 'vertical', delta: 0.1 });
+      restarted.handle('cancel');
+      assert.deepEqual(restarted.placement, h.placement);
+    }
+  }
+});
+
+test('height initialization waits for tracking and does not interfere with head anchoring or voice adjustments', () => {
+  const h = harness();
+  assert.equal(h.adjustment.initializeHeight(null), false);
+  assert.deepEqual(h.placement, h.original);
+  h.handle('begin');
+  h.handle('move', { axis: 'vertical', delta: 0.1 });
+  const draft = structuredClone(h.placement);
+  assert.equal(h.adjustment.initializeHeight({ position: { y: 1.8 } }), false);
+  assert.deepEqual(h.placement, draft);
+  h.handle('cancel');
+  assert.equal(h.adjustment.initializeHeight({ position: { y: 1.8 } }), true);
+  assert.ok(Math.abs(h.placement.position.y - (1.8 + 0.1 - 720 / 1280 / 2)) < 1e-12);
+  for (const y of [NaN, Infinity, '1.8', undefined]) {
+    const invalid = harness();
+    assert.throws(() => invalid.adjustment.initializeHeight({ position: { y } }), /valid headset height/);
+    assert.deepEqual(invalid.placement, invalid.original);
+  }
+  const rejected = harness();
+  rejected.reject();
+  assert.throws(() => rejected.adjustment.initializeHeight({ position: { y: 1.8 } }), /rejected/);
+  assert.deepEqual(rejected.placement, rejected.original);
+  rejected.accept();
+  assert.equal(rejected.adjustment.initializeHeight({ position: { y: 1.8 } }), true);
+  const head = harness({ vrAnchor: 'head' });
+  assert.equal(head.adjustment.initializeHeight(null), true);
+  assert.deepEqual(head.placement, head.original);
+  assert.deepEqual(head.calls, []);
+});
+
+test('explicit recenter wins over pending height initialization and can still recenter an initialized window', async () => {
+  let resolvePose;
+  const h = harness({}, () => new Promise(resolve => { resolvePose = resolve; }));
+  const pending = h.handle('recenter');
+  assert.equal(h.adjustment.initializeHeight({ position: { y: 2 } }), false);
+  resolvePose({ position: { x: 3, y: 1.6, z: 4 }, direction: { x: -1, y: 0, z: 0 } });
+  await pending;
+  const recentered = structuredClone(h.placement);
+  assert.equal(h.adjustment.initializeHeight({ position: { y: 2 } }), true);
+  assert.deepEqual(h.placement, recentered);
+  const initialized = harness();
+  initialized.adjustment.initializeHeight({ position: { y: 1.2 } });
+  await initialized.handle('recenter');
+  assert.ok(Math.abs(initialized.placement.position.y - (1.7 + 0.1 - 720 / 1280 / 2)) < 1e-12);
+  assert.ok(Math.abs(initialized.placement.position.x - 1) < 1e-12);
 });
 
 test('cancel restores exact translation/rotation and resumes zoom; commit waits for persistence', () => {
@@ -166,7 +301,7 @@ test('cleanup restores unconfirmed placement and does not revert a confirmed pos
 test('unavailable GUI, bad request IDs and HUD-only mode are actionable errors', () => {
   assert.throws(() => handleVrPlacementRequest({ request_id: 'test' }, null), /No active VR overlay/);
   assert.throws(() => handleVrPlacementRequest({}, harness().adjustment), /request ID/);
-  assert.throws(() => harness({ vrContent: 'hud' }).handle('begin'), /Full COVAS:NEXT Interface/);
+  assert.throws(() => harness({ vrContent: 'hud' }).handle('begin'), /Full Window/);
   const h = harness();
   assert.throws(() => h.adjustment.handle({ operation: 'begin' }), /session ID/);
   assert.equal(handleVrPlacementRequest({
@@ -192,6 +327,26 @@ test('changes area factors live without an adjustment session and preserves them
   for (const factor of [0, -1, NaN, Infinity, '5']) {
     assert.throws(() => h.handle('set_reduction', { factor }), /at least 1/);
   }
+});
+
+test('changes the reduced opacity live and preserves it when cancelling placement', () => {
+  const h = harness();
+  let result = h.adjustment.handle({ operation: 'set_opacity', opacity: 0.4 });
+  assert.deepEqual(result, { active: false, reduced_opacity: 0.4, previous_opacity: 0.25 });
+  assert.deepEqual(h.calls.at(-1), ['opacity', 0.4]);
+  h.handle('begin');
+  h.handle('move', { axis: 'vertical', delta: 0.1 });
+  result = h.handle('set_opacity', { opacity: 0.1 });
+  assert.equal(result.previous_opacity, 0.4);
+  h.handle('cancel');
+  assert.deepEqual(h.placement, h.original);
+  assert.equal(h.adjustment.getSettings().vrGazeReducedOpacity, 0.1);
+  const restored = h.handle('restore_opacity', { opacity: 0.4 });
+  assert.deepEqual(restored, { active: false, reduced_opacity: 0.4, previous_opacity: 0.1 });
+  for (const opacity of [0, 0.05, 1.5, -1, NaN, Infinity, '0.5', undefined]) {
+    assert.throws(() => h.handle('set_opacity', { opacity }), /between 10% and 100%/);
+  }
+  assert.equal(h.adjustment.getSettings().vrGazeReducedOpacity, 0.4);
 });
 
 test('reports actual live settings for UI restart notices, including voice previews and factor changes', () => {

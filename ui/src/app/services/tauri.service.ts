@@ -199,10 +199,11 @@ export interface BackendLifecycleMessage extends BaseMessage {
 export interface OverlayCreateOptions {
     alwaysOnTop: boolean;
     screenId?: number;
-    mode?: "disabled" | "desktop" | "standalone" | "vr" | "both";
+    mode?: "disabled" | "desktop" | "standalone" | "vr" | "vr-full" | "both";
     vrContent?: "hud" | "interface";
     vrGazeZoom?: boolean;
     vrGazeReductionFactor?: number;
+    vrGazeReducedOpacity?: number;
     standaloneTransparent?: boolean;
     standaloneBackgroundColor?: string;
     vrSizeMeters?: number;
@@ -217,6 +218,7 @@ export interface OverlayCreateOptions {
 
 export interface OverlayCreateResult {
     gazeZoom: { status: "disabled" | "active" } | { status: "unavailable" | "waiting"; message: string };
+    heightInitialization?: OverlayCreateResult["gazeZoom"];
 }
 
 export interface OpenXrGazeIntegrationState {
@@ -230,6 +232,7 @@ export interface OpenXrGazeIntegrationState {
 export interface OverlayRuntimeInfo {
     activeVrSettings?: OverlayCreateOptions | null;
     gazeZoom?: OverlayCreateResult["gazeZoom"];
+    heightInitialization?: OverlayCreateResult["gazeZoom"];
     platform: string;
     probeMode: string;
     openxrAvailable: boolean;
