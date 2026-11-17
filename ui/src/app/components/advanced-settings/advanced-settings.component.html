@@ -671,6 +671,13 @@
 
                         <section class="vr-control-group">
                             <h4>Placement</h4>
+                            @if (config.overlay_vr_anchor === 'world' && overlayRuntimeInfo?.heightInitialization; as height) {
+                                @if (height.status === 'unavailable') {
+                                    <p role="alert" class="vr-height-status">{{ 'vrInterface.heightUnavailable' | translate: { reason: height.message } }}</p>
+                                } @else if (height.status === 'waiting') {
+                                    <p role="status" class="vr-height-status">{{ 'vrInterface.heightWaiting' | translate: { reason: height.message } }}</p>
+                                }
+                            }
                             <div class="vr-control-grid vr-placement-grid">
                                 <div class="overlay-slider-field">
                                     <label>Horizontal: {{ config.overlay_vr_horizontal_offset }} m</label>

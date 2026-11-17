@@ -121,6 +121,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
     private sectionSubscription?: Subscription;
     pluginViews: RegisteredUIView[] = [];
     configPluginViews: RegisteredUIView[] = [];
+    private requestedTab: string | null = null;
 
     constructor(
         private tauri: TauriService,
@@ -180,6 +181,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
             this.configPluginViews = views.filter(view => (view.modes ?? ['running']).includes('configuring'));
             const visibleCount = this.builtinRuntimeTabs().length + this.pluginViews.length;
             if (this.selectedTabIndex >= visibleCount) this.selectedTabIndex = 0;
+            this.selectRequestedTab();
         });
         this.applyHudColors(this.configService.systemInfo);
         this.systemSubscription = this.configService.system$.subscribe((system) => {
@@ -226,8 +228,8 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 }
                 const tabName = uiMessage.show;
                 if (!tabName) return;
-                const targetIndex = [...this.builtinRuntimeTabs(), ...this.pluginViews.map(view => view.target)].indexOf(tabName);
-                if (targetIndex >= 0) this.selectedTabIndex = targetIndex;
+                this.requestedTab = tabName;
+                this.selectRequestedTab();
             }
         )
 
