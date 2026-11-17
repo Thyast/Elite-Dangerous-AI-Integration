@@ -30,6 +30,7 @@ def chat(monkeypatch):
     instance.tts.play_listening_end_tone.side_effect = lambda: TTSLine()
     instance.ttsModel = model
     instance.assistant = SimpleNamespace(reply_pending=False, is_replying=False)
+    instance.vr_adjustment = SimpleNamespace(active=False, handle_input=lambda _: False, tick=lambda: None)
     instance.event_manager = MagicMock()
     instance._voice_mode_enabled = True
     instance._voice_activation_provider = "test-stt"

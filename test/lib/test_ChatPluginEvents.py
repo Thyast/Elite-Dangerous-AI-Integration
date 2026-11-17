@@ -14,6 +14,7 @@ from lib.Event import ConversationEvent, PluginEvent
 def chat(monkeypatch):
     instance = ChatModule.Chat.__new__(ChatModule.Chat)
     instance.previous_states = {}
+    instance.vr_adjustment = Mock(active=False)
     sent = Mock()
     displayed = Mock()
     monkeypatch.setattr(ChatModule, "send_message", sent)

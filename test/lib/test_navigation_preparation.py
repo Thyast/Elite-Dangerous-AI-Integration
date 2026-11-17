@@ -249,7 +249,7 @@ def test_plot_timeout_reports_actual_destination_and_clears_search_text(monkeypa
     monkeypatch.setattr(plotter_module, "hotkey", hotkey)
     result = plotter._plot_galaxy_route(system_name, None, {"Location": {"StarSystem": "Muth"}})
     hotkey.assert_called_once_with("ctrl", "a")
-    keys.send_text.assert_called_once_with(system_name)
+    keys.send_text.assert_called_once_with(system_name.split('+', 1)[0])
     assert "does not establish" in result
     assert (active_destination or "No navigation route") in result
 
