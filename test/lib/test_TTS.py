@@ -1,14 +1,20 @@
 import base64
+import threading
 from math import ceil
 from httpx import Response
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 from time import sleep
 from src.lib.Config import map_character_tts_postprocessing
 from src.lib.TTS import TTS
 from src.lib.Models import OpenAITTSModel, EdgeTTSModel
 from src.plugins.MistralPlugin import MistralTTSModel
 import numpy as np
+import pyaudio
+
+
+class StopPlayback(BaseException):
+    pass
 
 
 def dominant_frequency(samples: np.ndarray, sample_rate: int = 24_000) -> float:
@@ -245,6 +251,248 @@ def test_tts_dropped_line_completes_without_speaking(mock_pyaudio):
 
     assert line.is_completed()
     assert mock_model.synthesize.call_count == 0
+
+
+@pytest.fixture
+def controlled_tts(mock_pyaudio, monkeypatch):
+    monkeypatch.setattr('src.lib.TTS.threading.Thread.start', lambda self: None)
+    monkeypatch.setattr('src.lib.TTS.log', MagicMock())
+    monkeypatch.setattr('src.lib.TTS.show_chat_message', MagicMock())
+    mock_pyaudio["audio"].get_device_count.return_value = 1
+    mock_pyaudio["audio"].get_device_info_by_index.return_value = {
+        "name": "TestDevice",
+        "maxOutputChannels": 2,
+    }
+    model = MagicMock(spec=OpenAITTSModel)
+    model.synthesize.return_value = [b'\x00\x00' * 1024]
+    return TTS(model, output_device="TestDevice")
+
+
+@pytest.fixture
+def playback_sleep(monkeypatch):
+    wait = MagicMock()
+    test_thread = threading.current_thread()
+
+    def controlled_sleep(seconds):
+        if threading.current_thread() is test_thread:
+            wait(seconds)
+        else:
+            sleep(seconds)
+
+    monkeypatch.setattr('src.lib.TTS.sleep', controlled_sleep)
+    return wait
+
+
+@pytest.mark.parametrize(
+    "devices, expected",
+    [
+        ([
+            {"name": "TestDevice", "maxOutputChannels": 0},
+            {"name": "TestDevice Speakers", "maxOutputChannels": 2},
+            {"name": "TestDevice", "maxOutputChannels": 2},
+        ], 2),
+        ([
+            {"name": "TestDevice", "maxOutputChannels": 0},
+            {"name": "TestDevice Speakers", "maxOutputChannels": 2},
+        ], 1),
+        ([{"name": "TestDevice", "maxOutputChannels": 0}], None),
+        ([{"name": "OtherDevice", "maxOutputChannels": 2}], None),
+    ],
+)
+def test_output_device_selection_ignores_input_only_devices(controlled_tts, devices, expected):
+    controlled_tts.p.get_device_count.return_value = len(devices)
+    controlled_tts.p.get_device_info_by_index.side_effect = devices
+
+    assert controlled_tts._get_output_device_index() == expected
+
+
+@pytest.mark.parametrize("cleanup_error", [None, OSError(-9999, "Close failed")])
+def test_playback_closes_stream_without_masking_start_error(
+    controlled_tts, mock_pyaudio, cleanup_error,
+):
+    stream = mock_pyaudio["stream"]
+    error = OSError(-9999, "Unanticipated host error")
+    stream.start_stream.side_effect = error
+    stream.close.side_effect = cleanup_error
+    controlled_tts._is_playing = True
+
+    with pytest.raises(OSError) as exc_info:
+        controlled_tts._playback_loop()
+
+    assert exc_info.value is error
+    assert controlled_tts._is_playing is False
+    stream.close.assert_called_once()
+
+
+def test_host_error_is_not_retried_on_the_broken_stream(controlled_tts, mock_pyaudio):
+    stream = mock_pyaudio["stream"]
+    error = OSError(-9999, "Unanticipated host error")
+    stream.write.side_effect = error
+
+    with pytest.raises(OSError) as exc_info:
+        controlled_tts._playback_one("Hello world", stream)
+
+    assert exc_info.value is error
+    stream.write.assert_called_once()
+
+
+def test_output_underflow_still_retries_the_chunk(controlled_tts, mock_pyaudio):
+    stream = mock_pyaudio["stream"]
+    stream.write.side_effect = [OSError(pyaudio.paOutputUnderflowed, "Output underflowed"), None]
+
+    controlled_tts._playback_one("Hello world", stream)
+
+    assert stream.write.call_count == 2
+    assert stream.write.call_args_list[0] == stream.write.call_args_list[1]
+
+
+@pytest.mark.parametrize("item_type", ["text", "audio_file"])
+@pytest.mark.parametrize("failure_stage", ["open", "start", "write"])
+def test_playback_recovers_from_host_error(
+    controlled_tts, mock_pyaudio, monkeypatch, tmp_path, item_type, failure_stage, playback_sleep,
+):
+    tts = controlled_tts
+    failed_stream = mock_pyaudio["stream"]
+    error = OSError(-9999, "Unanticipated host error")
+    if failure_stage == "open":
+        mock_pyaudio["audio"].open.side_effect = error
+    elif failure_stage == "start":
+        failed_stream.start_stream.side_effect = error
+    else:
+        failed_stream.write.side_effect = error
+    recovered_audio = MagicMock()
+    recovered_audio.get_device_count.return_value = 1
+    recovered_audio.get_device_info_by_index.return_value = {
+        "name": "TestDevice",
+        "maxOutputChannels": 2,
+    }
+    recovered_stream = recovered_audio.open.return_value
+    create_audio = MagicMock(return_value=recovered_audio)
+    monkeypatch.setattr('src.lib.TTS.pyaudio.PyAudio', create_audio)
+    assert_closed = (
+        failed_stream.close.assert_not_called
+        if failure_stage == "open"
+        else failed_stream.close.assert_called_once
+    )
+    mock_pyaudio["audio"].terminate.side_effect = assert_closed
+    on_complete = MagicMock()
+    delays = []
+
+    def wait(seconds):
+        delays.append(seconds)
+        if seconds == 1:
+            assert tts._is_playing is False
+            assert tts.has_queued_items()
+            on_complete.assert_not_called()
+        else:
+            raise StopPlayback()
+
+    playback_sleep.side_effect = wait
+    if item_type == "audio_file":
+        audio_file = tmp_path / "voice.wav"
+        audio_file.touch()
+        monkeypatch.setattr(
+            'src.lib.TTS.miniaudio.stream_file',
+            lambda *args, **kwargs: iter([np.zeros(1024, dtype=np.int16)]),
+        )
+        tts.play_audio_file(str(audio_file), on_complete=on_complete)
+        line = None
+    else:
+        line = tts.say("Hello world", on_complete=on_complete)
+
+    with pytest.raises(StopPlayback):
+        tts._playback_thread()
+
+    mock_pyaudio["audio"].terminate.assert_called_once()
+    create_audio.assert_called_once()
+    assert_closed()
+    if failure_stage == "write":
+        failed_stream.write.assert_called_once()
+    else:
+        failed_stream.write.assert_not_called()
+    recovered_stream.write.assert_called_once()
+    recovered_stream.close.assert_called_once()
+    assert recovered_audio.open.call_args.kwargs["output_device_index"] == 0
+    on_complete.assert_called_once()
+    if line is not None:
+        assert line.is_completed()
+    assert tts.get_is_playing() is False
+    assert delays == [1, 0.1]
+    from src.lib.TTS import show_chat_message
+    message = " ".join(str(arg) for arg in show_chat_message.call_args.args)
+    assert "Audio output error" in message
+    assert "TestDevice" in message
+    assert "exclusive" in message
+    assert "-9999" in message
+    assert "speech synthesis" not in message
+
+
+def test_playback_retry_delay_is_capped(controlled_tts, monkeypatch, playback_sleep):
+    monkeypatch.setattr(
+        controlled_tts, '_playback_loop',
+        MagicMock(side_effect=OSError(-9999, "Unanticipated host error")),
+    )
+    delays = []
+
+    def wait(seconds):
+        delays.append(seconds)
+        if len(delays) == 7:
+            raise StopPlayback()
+
+    playback_sleep.side_effect = wait
+
+    with pytest.raises(StopPlayback):
+        controlled_tts._playback_thread()
+
+    assert delays == [1, 2, 4, 8, 16, 30, 30]
+
+
+def test_audio_backend_initialization_failure_is_retried(controlled_tts, monkeypatch, playback_sleep):
+    playback = MagicMock(side_effect=[OSError(-9999, "Host error"), StopPlayback()])
+    monkeypatch.setattr(controlled_tts, '_playback_loop', playback)
+    audio = MagicMock()
+    create_audio = MagicMock(side_effect=[RuntimeError("Initialization failed"), audio])
+    monkeypatch.setattr('src.lib.TTS.pyaudio.PyAudio', create_audio)
+    with pytest.raises(StopPlayback):
+        controlled_tts._playback_thread()
+
+    assert controlled_tts.p is audio
+    assert create_audio.call_count == 2
+    assert playback_sleep.call_args_list == [call(1), call(2)]
+
+
+def test_failed_playback_does_not_requeue_an_aborted_line(controlled_tts, monkeypatch):
+    on_complete = MagicMock()
+    line = controlled_tts.say("Hello world", on_complete=on_complete)
+
+    def abort_and_fail(*args):
+        controlled_tts.abort()
+        raise OSError(-9999, "Unanticipated host error")
+
+    monkeypatch.setattr(controlled_tts, '_playback_one', abort_and_fail)
+
+    with pytest.raises(OSError):
+        controlled_tts._playback_loop()
+
+    assert line.is_completed()
+    assert controlled_tts.get_is_playing() is False
+    on_complete.assert_called_once()
+
+
+def test_synthesis_error_does_not_restart_the_audio_backend(controlled_tts, playback_sleep):
+    controlled_tts.tts_model.synthesize.side_effect = RuntimeError("Provider unavailable")
+    line = controlled_tts.say("Hello world")
+    playback_sleep.side_effect = StopPlayback()
+
+    with pytest.raises(StopPlayback):
+        controlled_tts._playback_thread()
+
+    assert line.is_completed()
+    controlled_tts.p.terminate.assert_not_called()
+    from src.lib.TTS import show_chat_message
+    assert show_chat_message.call_args.args == (
+        "error", "TTS synthesis error:", "Provider unavailable",
+    )
 
 
 def test_postprocess_audio_applies_volume_and_distortion(mock_pyaudio):
