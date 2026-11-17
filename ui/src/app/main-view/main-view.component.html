@@ -1,8 +1,22 @@
-@if (isLoading) {
+@if (isLoading && !showOverlayChat) {
     <mat-progress-bar mode="indeterminate" class="toolbar-progress"></mat-progress-bar>
 }
 
-<main class="app" [class.red]="isInCombat">
+@if (showOverlayChat) {
+    <app-overlay-view [chatOnly]="true"></app-overlay-view>
+}
+
+@if (isOverlayInterface && vrAdjustmentActive) {
+    <div class="vr-adjustment-frame" aria-hidden="true">
+        @if (reducedFramePercent; as percent) {
+            <div class="vr-reduced-frame" [style.width.%]="percent" [style.height.%]="percent">
+                <span>{{ 'vrInterface.reducedFrame' | translate: { factor: config?.overlay_vr_gaze_reduction_factor, opacity: reducedOpacityPercent } }}</span>
+            </div>
+        }
+    </div>
+}
+
+<main class="app" [class.red]="isInCombat" [@.disabled]="isOverlayInterface" [style.display]="showOverlayChat ? 'none' : null">
     @if (!showRuntimeView) {
         <div class="settings-container">
             <app-settings-menu (questEditorVisibilityChange)="onQuestEditorVisibilityChange($event)"></app-settings-menu>
@@ -13,7 +27,7 @@
         </div>
     } @else {
         <div class="runtime-container">
-            <mat-tab-group [selectedIndex]="selectedTabIndex">
+            <mat-tab-group [selectedIndex]="selectedTabIndex" (selectedIndexChange)="onTabSelected($event)">
                 <mat-tab>
                     <ng-template mat-tab-label>
                         <mat-icon class="tab-label-icon">forum</mat-icon>
@@ -154,7 +168,7 @@
         </div>
     }
 
-    <div class="floating-action-container" [style.display]="isQuestEditorOpen ? 'none' : 'flex'">
+    <div class="floating-action-container" *ngIf="!isOverlayInterface" [style.display]="isQuestEditorOpen ? 'none' : 'flex'">
         @if (!showRuntimeView) {
             @if (isLoading) {
                 <button mat-fab color="primary" aria-label="Starting" [disabled]="true">

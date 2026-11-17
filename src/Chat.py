@@ -87,6 +87,8 @@ from lib.QuestCatalogManager import QuestCatalogManager
 from lib.SystemDatabase import SystemDatabase
 from lib.Database import ModelUsageStore, QuestDatabase, VectorStore
 from lib.Assistant import Assistant
+from lib.VrOverlayAdjustment import VrOverlayAdjustment
+from lib.VrRecenter import recenter_game_and_kneeboard
 
 
 def get_model_usage_history_payload(
@@ -398,15 +400,50 @@ class Chat:
         log("debug", "Plugin helper is ready...")
 
         self.previous_states = {}
+        self.vr_adjustment = VrOverlayAdjustment(
+            get_config=lambda: self.config,
+            save=self._save_vr_position,
+            emit=send_message,
+            reply=self._reply_vr_adjustment,
+            recenter=lambda: recenter_game_and_kneeboard(self.ed_keys),
+            busy=lambda: self.assistant.is_replying,
+            assistant_name=self.character.get("first_name", self.character["name"]),
+        )
+
+    def _save_vr_position(self, values: dict[str, Any]) -> None:
+        updated = cast(Config, {**self.config, **values})
+        save_config(updated)
+        self.config = updated
+        emit_message("running_config", config=self.config)
+
+    def _reply_vr_adjustment(self, message: str, error: bool = False) -> None:
+        show_chat_message("error" if error else "covas", message)
+        if self.ttsModel is not None:
+            self.tts.say(
+                message,
+                on_start=self.event_manager.add_assistant_speaking,
+                on_complete=self.event_manager.add_assistant_complete_event,
+            )
+        else:
+            self.event_manager.add_assistant_complete_event()
 
     def emit_runtime_state(self):
         _, projected_states = self.event_manager.get_current_state()
+        ship = projected_states.get("ShipInfo")
+        if ship is not None:
+            self.vr_adjustment.update_ship(ship.model_dump() if hasattr(ship, "model_dump") else ship, force=True)
         emit_message("running_config", config=self.config)
+        if self.vr_adjustment.active:
+            self.vr_adjustment.publish()
         emit_message("system", system=get_system_info())
         emit_message("states", states=projected_states)
+        self.plugin_manager.broadcast_plugin_ui()
         self.previous_states = copy.deepcopy(projected_states)
 
     def on_event(self, event: Event, projected_states: dict[str, Any]):
+        ship = projected_states.get("ShipInfo")
+        if ship is not None:
+            self.vr_adjustment.update_ship(ship.model_dump() if hasattr(ship, "model_dump") else ship)
         for key, value in projected_states.items():
             if self.previous_states.get(key, None) != value:
                 send_message(
@@ -544,6 +581,9 @@ class Chat:
             )
 
     def submit_input(self, input: str):
+        if self.vr_adjustment.handle_input(input):
+            show_chat_message("cmdr", input)
+            return
         self.event_manager.add_conversation_event("user", input)
 
     def query_memories(self, query: str, top_k: int = 5):
@@ -867,6 +907,7 @@ class Chat:
 
         while True:
             try:
+                self.vr_adjustment.tick()
                 status = None
                 # check status file for updates
                 while not self.status_parser.status_queue.empty():
@@ -895,7 +936,7 @@ class Chat:
                 if not self.stt.resultQueue.empty():
                     text = self.stt.resultQueue.get().text
                     self.tts.abort()
-                    self.event_manager.add_conversation_event("user", text)
+                    self.submit_input(text)
 
                 # check EDJournal files for updates
                 while not self.jn.events.empty():
@@ -906,6 +947,7 @@ class Chat:
 
                 if (
                     self.assistant.reply_pending
+                    and not self.vr_adjustment.active
                     and not self.assistant.is_replying
                     and not self.stt.recording
                     and not self.tts.get_is_playing()
@@ -1035,6 +1077,11 @@ def read_stdin(chat: Chat):
         line = sys.stdin.readline().strip()
         if line:
             data = json.loads(line)
+            if data.get("type") == "vr_placement_result":
+                chat.vr_adjustment.handle_result(data)
+            if data.get("type") == "ui_section_result":
+                from lib.actions.actions_ui import handle_ui_section_result
+                handle_ui_section_result(data)
             if data.get("type") == "change_config":
                 partial = data.get("config")
                 if isinstance(partial, dict):
@@ -1248,6 +1295,7 @@ if __name__ == "__main__":
                     emit_message("system", system=get_system_info())
                 if data.get("type") == "init_overlay":
                     update_config(config, {}) # Ensure that the overlay gets a new config on start
+                    plugin_manager.broadcast_plugin_ui()
                 if data.get("type") == "get_quest_catalog":
                     results = quest_catalog_manager.get_catalog()
                     emit_message(

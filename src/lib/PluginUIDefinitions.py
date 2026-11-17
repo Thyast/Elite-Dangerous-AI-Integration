@@ -148,6 +148,7 @@ UIComponent = UINode | TextInput | Filter | TextArea | NumberInput | Toggle | Se
 class UIViewSection(TypedDict):
     key: str
     label: str
+    voice_aliases: NotRequired[list[str]]
     grids: NotRequired[list[str]]
     content: NotRequired[list[UIComponent]]
 
@@ -155,6 +156,7 @@ class UIViewSection(TypedDict):
 class PluginUIView(TypedDict):
     id: str
     label: str
+    voice_aliases: NotRequired[list[str]]
     description: NotRequired[str]
     icon: NotRequired[str]
     order: NotRequired[int]

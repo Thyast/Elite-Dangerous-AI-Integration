@@ -51,6 +51,23 @@ svg {
   font-size: 0.8rem;
 }
 
+.reduced-window {
+  fill: none;
+  stroke: #42a5f5;
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.reduced-key {
+  color: #42a5f5;
+}
+
+.legend .reduced-key::before {
+  border-style: dashed;
+}
+
 .legend span::before {
   display: inline-block;
   width: 0.8rem;
@@ -66,11 +83,4 @@ svg {
 
 .window-key {
   color: #42a5f5;
-}
-
-p {
-  margin: 0.5rem 0 0;
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 0.78rem;
-  line-height: 1.4;
 }

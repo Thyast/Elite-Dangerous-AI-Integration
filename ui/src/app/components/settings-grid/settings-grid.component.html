@@ -1,6 +1,7 @@
 @if (grid.collapsible) {
 <mat-expansion-panel [expanded]="!grid.default_collapsed">
-    <mat-expansion-panel-header>{{ resolve(grid.label) }}</mat-expansion-panel-header>
+    <mat-expansion-panel-header [attr.data-ui-section]="grid.label" [attr.data-ui-section-id]="grid.key"
+                                [attr.data-ui-section-label]="resolve(grid.label)">{{ resolve(grid.label) }}</mat-expansion-panel-header>
     <div [class]="gridClass">
         @for (group of fieldGroups(); track $index) {
             @if (group.kind === "buttons") {

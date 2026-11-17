@@ -26,6 +26,11 @@ ipcRenderer.on('backend-lifecycle', (_event, value) => {
     console.warn('No backend lifecycle callback set, received:', value);
   }
 });
+ipcRenderer.on('vr-overlay-opacity', (_event, value) => {
+  if (Number.isFinite(value) && value >= 0 && value <= 1) {
+    document.documentElement.style.opacity = value === 1 ? '' : String(value);
+  }
+});
 ipcRenderer.on('window-close', (e) => {
   windowCloseCallback.forEach(callback => callback(e));
 });

@@ -20,7 +20,9 @@
     "install:electron": "npm install",
     "install:ui": "cd ui && npm install",
     "start": "cross-env NODE_ENV=development concurrently --kill-others \"cd ui && npx ng serve\" \"cd electron && wait-on http://localhost:1420/ && npx electron ./index.js\"",
-    "build": "npm run build:ui && npm run build:py",
+    "build": "npm run build:vr-gaze && npm run build:ui && npm run build:py",
+    "build:vr-gaze": "node native/openxr-gaze/build.js",
+    "test:vr-openxr": "node native/openxr-gaze/build.js --test && node --test test/electron/openxr-head-pose.test.js",
     "build:ui": "cd ui && npx ng build --configuration production",
     "build:py": "run-script-os",
     "build:py:win32": "powershell ./e2e/build.ps1",
@@ -28,13 +30,13 @@
     "package": "run-script-os",
     "package:win32": "npm run package:dir && npm run package:msi",
     "package:linux": "npm run package:dir && npm run package:flatpak",
-    "package:dir": "electron-builder --dir",
+    "package:dir": "npm run build:vr-gaze && electron-builder --dir",
     "package:msi": "electron-builder --win msi",
     "package:flatpak": "flatpak-builder --force-clean --install-deps-from=flathub --repo=.flatpak-repo --force-clean .flatpak-build  com.covasnext.ui.yml && flatpak build-bundle .flatpak-repo covas-next-ui-development.flatpak com.covasnext.ui --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo",
     "package:run": "run-script-os",
     "package:run:win32": "cd dist/win-unpacked/ && start covas-next-ui.exe",
     "package:run:linux": "cd dist/linux-unpacked/ && ./covas-next",
-    "test:overlay": "node --test test/electron/desktop-overlay-lifecycle.test.js"
+    "test:overlay": "node --test test/electron/desktop-overlay-lifecycle.test.js test/electron/vr-gaze-zoom.test.js test/electron/vr-placement-adjustment.test.js test/electron/openvr-head-pose.test.js test/electron/openxr-head-pose.test.js test/electron/openxr-gaze-integration.test.js test/electron/vr-head-pose.test.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",
@@ -45,10 +47,18 @@
     "productName": "COVAS NEXT",
     "appId": "com.covasnext.ui",
     "asarUnpack": [
-      "node_modules/@covas-labs/electron-vr-prebuilt-win32-x64/**/*"
+      "node_modules/@covas-labs/electron-vr-prebuilt-win32-x64/**/*",
+      "node_modules/@covas-labs/electron-vr-prebuilt-linux-x64/**/*",
+      "node_modules/koffi/**/*",
+      "node_modules/@koromix/koffi-*/**/*"
     ],
     "directories": {
       "buildResources": "electron"
+    },
+    "win": {
+      "extraResources": [
+        { "from": "build/openxr-gaze", "to": "openxr-gaze", "filter": ["covas_openxr_gaze.dll", "OPENXR-SDK-LICENSE"] }
+      ]
     },
     "extraResources": [
       {
@@ -72,6 +82,7 @@
     "@covas-labs/electron-vr": "^0.8.4",
     "cross-env": "^7.0.3",
     "electron-context-menu": "^4.1.0",
+    "koffi": "^3.3.4",
     "pino": "^9.7.0",
     "pino-pretty": "^13.0.0",
     "pino-roll": "^3.1.0",

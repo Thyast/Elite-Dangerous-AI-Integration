@@ -1,4 +1,5 @@
-import { Component, OnDestroy, OnInit, ViewChild } from "@angular/core";
+import { ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild, inject } from "@angular/core";
+import { ActivatedRoute } from "@angular/router";
 import { CommonModule } from "@angular/common";
 import { MatButtonModule } from "@angular/material/button";
 import { MatIconModule } from "@angular/material/icon";
@@ -31,7 +32,9 @@ import { ActionsContainerComponent } from "../components/actions-container/actio
 import { PluginViewComponent } from "../components/plugin-view/plugin-view.component";
 import { PluginUIService } from "../services/plugin-ui.service";
 import { RegisteredUIView } from "../services/plugin-ui";
-import { TranslateModule } from "@ngx-translate/core";
+import { TranslateModule, TranslateService } from "@ngx-translate/core";
+import { OverlayViewComponent } from "../overlay-view/overlay-view.component";
+import { UISectionService } from "../services/ui-section.service";
 
 @Component({
     selector: "app-main-view",
@@ -58,12 +61,19 @@ import { TranslateModule } from "@ngx-translate/core";
         ActionsContainerComponent,
         PluginViewComponent,
         TranslateModule,
+        OverlayViewComponent,
     ],
     templateUrl: "./main-view.component.html",
     styleUrl: "./main-view.component.css",
 })
 export class MainViewComponent implements OnInit, OnDestroy {
     @ViewChild(SettingsMenuComponent) private settingsMenu?: SettingsMenuComponent;
+    readonly isOverlayInterface = inject(ActivatedRoute).snapshot.data["overlayInterface"] === true;
+    private readonly translate = inject(TranslateService);
+    private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+    private readonly changeDetector = inject(ChangeDetectorRef);
+    private readonly sections = inject(UISectionService);
+    private sectionSubscription?: Subscription;
 
     runMode: "starting" | "configuring" | "running" | "error" = "starting";
     isLoading = true;
@@ -80,6 +90,22 @@ export class MainViewComponent implements OnInit, OnDestroy {
     config: Config|undefined;
     hasLogbook = true;
     private uiChangeSubscription?: Subscription;
+    private uiVisibilitySubscription?: Subscription;
+    private vrAdjustmentSubscription?: Subscription;
+    vrAdjustmentActive = false;
+    get reducedFramePercent(): number | null {
+        const factor = this.config?.overlay_vr_gaze_reduction_factor;
+        return (this.config?.overlay_mode === "vr-full" || this.config?.overlay_vr_anchor === "world")
+            && typeof factor === "number" && Number.isFinite(factor) && factor > 1
+            ? 100 / Math.sqrt(factor) : null;
+    }
+    get reducedOpacityPercent(): number {
+        return Math.round((this.config?.overlay_vr_gaze_reduced_opacity ?? 0.25) * 1000) / 10;
+    }
+    overlayInterfaceVisible = true;
+    get showOverlayChat(): boolean {
+        return this.isOverlayInterface && !this.overlayInterfaceVisible;
+    }
     private configSubscription!: Subscription;
     private inCombatSubscription!: Subscription;
     private currentStatusSubscription!: Subscription;
@@ -91,6 +117,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
     private pluginViewsSubscription?: Subscription;
     pluginViews: RegisteredUIView[] = [];
     configPluginViews: RegisteredUIView[] = [];
+    private requestedTab: string | null = null;
 
     constructor(
         private tauri: TauriService,
@@ -125,11 +152,40 @@ export class MainViewComponent implements OnInit, OnDestroy {
     }
 
     ngOnInit(): void {
+        this.sectionSubscription = this.uiService.sectionRequests$.subscribe(request => {
+            let result;
+            try {
+                this.changeDetector.detectChanges();
+                result = { success: true, ...this.sections.apply(this.host.nativeElement, request,
+                    () => this.changeDetector.detectChanges()) };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error("Could not change UI section:", error);
+                this.snackBar.open(message, "OK", { duration: 7000 });
+                result = { success: false, error: message };
+            }
+            if (!this.isOverlayInterface) {
+                void this.tauri.send_command({
+                    type: "ui_section_result", request_id: request.request_id,
+                    timestamp: new Date().toISOString(), ...result,
+                }).catch(error => console.error("Could not acknowledge UI section change:", error));
+            }
+        });
+        if (this.isOverlayInterface) {
+            this.vrAdjustmentSubscription = this.uiService.vrAdjustmentActive$.subscribe(active => {
+                this.vrAdjustmentActive = active;
+            });
+            this.uiVisibilitySubscription = this.uiService.overlayInterfaceVisible$.subscribe(visible => {
+                this.overlayInterfaceVisible = visible;
+                document.documentElement.classList.toggle("overlay-window", !visible);
+            });
+        }
         this.pluginViewsSubscription = this.pluginUI.views$.subscribe(views => {
             this.pluginViews = views.filter(view => (view.modes ?? ['running']).includes('running'));
             this.configPluginViews = views.filter(view => (view.modes ?? ['running']).includes('configuring'));
             const visibleCount = this.builtinRuntimeTabs().length + this.pluginViews.length;
             if (this.selectedTabIndex >= visibleCount) this.selectedTabIndex = 0;
+            this.selectRequestedTab();
         });
         this.applyHudColors(this.configService.systemInfo);
         this.systemSubscription = this.configService.system$.subscribe((system) => {
@@ -140,7 +196,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
             (config) => {
                 this.config = config ?? undefined;
                 if (
-                    this.config && this.config.cn_autostart &&
+                    !this.isOverlayInterface && this.config && this.config.cn_autostart &&
                     !this.isRunning && !this.hasAutoStarted
                 ) {
                     console.log("Started automatically.");
@@ -149,6 +205,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 }
 
                 this.hasLogbook = this.config?.embedding_provider != 'none';
+                this.selectRequestedTab();
             },
         );
 
@@ -175,8 +232,8 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 }
                 const tabName = uiMessage.show;
                 if (!tabName) return;
-                const targetIndex = [...this.builtinRuntimeTabs(), ...this.pluginViews.map(view => view.target)].indexOf(tabName);
-                if (targetIndex >= 0) this.selectedTabIndex = targetIndex;
+                this.requestedTab = tabName;
+                this.selectRequestedTab();
             }
         )
 
@@ -201,6 +258,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 this.isDockedAtStation = Boolean(currentStatusData?.flags?.Docked === true);
                 this.currentGameModeLabel = this.getCurrentGameModeLabel(currentStatusData);
                 this.currentGameModeIcon = this.getCurrentGameModeIcon(currentStatusData);
+                this.selectRequestedTab();
             });
 
         // Subscribe to ShipInfo projection to track unknown ship ident
@@ -211,14 +269,29 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 this.isShipIdentUnknown = shipIdent === 'Unknown';
                 this.currentGameModeLabel = this.getCurrentGameModeLabel(this.currentStatusData);
                 this.currentGameModeIcon = this.getCurrentGameModeIcon(this.currentStatusData);
+                this.selectRequestedTab();
             });
 
         // Initialize the main view
-        this.tauri.runExe();
-        this.tauri.checkForUpdates();
+        if (this.isOverlayInterface) {
+            void this.tauri.send_command({
+                type: "init_overlay",
+                timestamp: new Date().toISOString(),
+            }).catch(error => {
+                console.error("Failed to initialize VR interface:", error);
+                this.snackBar.open(this.translate.instant("vrInterface.initError"), "OK", { duration: 7000 });
+            });
+        } else {
+            this.tauri.runExe();
+            this.tauri.checkForUpdates();
+        }
     }
 
     ngOnDestroy(): void { // Implement ngOnDestroy
+        this.sectionSubscription?.unsubscribe();
+        this.vrAdjustmentSubscription?.unsubscribe();
+        this.uiVisibilitySubscription?.unsubscribe();
+        if (this.isOverlayInterface) document.documentElement.classList.remove("overlay-window");
         this.pluginViewsSubscription?.unsubscribe();
         if (this.systemSubscription) {
             this.systemSubscription.unsubscribe();
@@ -244,6 +317,22 @@ export class MainViewComponent implements OnInit, OnDestroy {
         return ['chat', ...(!this.isShipIdentUnknown ? ['status'] : []), 'navigation',
             ...(!this.isShipIdentUnknown ? ['storage', 'tasks', ...(this.isDockedAtStation ? ['station'] : [])] : []),
             ...(this.hasLogbook ? ['logbook'] : []), 'search', 'actions'];
+    }
+
+    onTabSelected(index: number): void {
+        if (index === this.selectedTabIndex) return;
+        this.selectedTabIndex = index;
+        const target = [...this.builtinRuntimeTabs(), ...this.pluginViews.map(view => view.target)][index];
+        if (target) {
+            this.requestedTab = target;
+            this.uiService.showTab(target);
+        }
+    }
+
+    private selectRequestedTab(): void {
+        if (!this.requestedTab) return;
+        const index = [...this.builtinRuntimeTabs(), ...this.pluginViews.map(view => view.target)].indexOf(this.requestedTab);
+        if (index >= 0) this.selectedTabIndex = index;
     }
 
     private getCurrentGameModeLabel(currentStatusData: any): string {
@@ -321,7 +410,8 @@ export class MainViewComponent implements OnInit, OnDestroy {
             if(
                 this.config
                 && this.config.overlay_mode !== "disabled"
-                && (this.config.overlay_show_avatar || this.config.overlay_show_chat || this.config.overlay_show_hud)
+                && (this.config.overlay_show_avatar || this.config.overlay_show_chat || this.config.overlay_show_hud
+                    || this.config.overlay_mode === "vr-full")
             ) {
                 await this.createOverlay();
             }
@@ -352,22 +442,40 @@ export class MainViewComponent implements OnInit, OnDestroy {
             }
 
             const screenId = this.config?.overlay_screen_id ?? -1; // -1 for primary screen
+            const full = this.config?.overlay_mode === "vr-full";
+            const settings = full ? { ...this.config, ...this.config?.overlay_vr_full_last } : this.config;
 
-            await this.tauri.createOverlay({
+            const result = await this.tauri.createOverlay({
                 alwaysOnTop: true,
                 screenId: screenId,
                 mode: this.config?.overlay_mode ?? "desktop",
+                vrContent: full ? "interface" : "hud",
+                vrGazeZoom: (settings?.overlay_vr_gaze_reduction_factor ?? 1) > 1,
+                vrGazeReductionFactor: settings?.overlay_vr_gaze_reduction_factor ?? 1,
+                vrGazeReducedOpacity: settings?.overlay_vr_gaze_reduced_opacity ?? 0.25,
                 standaloneTransparent: this.config?.overlay_standalone_transparent ?? true,
                 standaloneBackgroundColor: this.config?.overlay_standalone_background_color ?? "#000000",
-                vrSizeMeters: this.config?.overlay_vr_size_meters ?? 0.9,
-                vrAnchor: this.config?.overlay_vr_anchor ?? "head",
-                vrHorizontalOffset: this.config?.overlay_vr_horizontal_offset ?? 0,
-                vrVerticalOffset: this.config?.overlay_vr_vertical_offset ?? 0,
-                vrDistanceOffset: this.config?.overlay_vr_distance_offset ?? 0,
-                vrTiltDegrees: this.config?.overlay_vr_tilt_degrees ?? 0,
-                vrYawDegrees: this.config?.overlay_vr_yaw_degrees ?? 0,
-                vrCurvature: this.config?.overlay_vr_curvature ?? 0,
+                vrSizeMeters: settings?.overlay_vr_size_meters ?? 0.9,
+                vrAnchor: full ? "world" : this.config?.overlay_vr_anchor ?? "head",
+                vrHorizontalOffset: settings?.overlay_vr_horizontal_offset ?? 0,
+                vrVerticalOffset: settings?.overlay_vr_vertical_offset ?? 0,
+                vrDistanceOffset: settings?.overlay_vr_distance_offset ?? 0,
+                vrTiltDegrees: settings?.overlay_vr_tilt_degrees ?? 0,
+                vrYawDegrees: settings?.overlay_vr_yaw_degrees ?? 0,
+                vrCurvature: settings?.overlay_vr_curvature ?? 0,
             });
+            if (result?.gazeZoom.status === "unavailable") {
+                this.snackBar.open(
+                    this.translate.instant("vrInterface.gazeUnavailable", { reason: result.gazeZoom.message }),
+                    "OK", { duration: 10000 },
+                );
+            }
+            if (result?.heightInitialization?.status === "unavailable") {
+                this.snackBar.open(
+                    this.translate.instant("vrInterface.heightUnavailable", { reason: result.heightInitialization.message }),
+                    "OK", { duration: 10000 },
+                );
+            }
         } catch (error) {
             console.error("Failed to create overlay:", error);
             this.snackBar.open(

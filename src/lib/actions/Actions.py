@@ -56,7 +56,6 @@ def checkStatus(projected_states: ProjectedStates, blocked_status_dict: dict[str
                         raise Exception(f"Action not possible due to {'not ' if not expected_value else ''}being in a state of {blocked_status}!")
 
 
-# Define functions for each action
 # General Ship Actions
 def fire_weapons(args, projected_states):
     checkStatus(projected_states, {'Docked': True, 'Landed': True})

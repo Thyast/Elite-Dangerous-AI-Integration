@@ -84,6 +84,7 @@ A `PluginUIView` contains:
 | --- | --- | --- |
 | `id` | Yes | Nonempty local identifier, unique within the plugin, without `:`. |
 | `label` | Yes | User-facing translation key. |
+| `voice_aliases` | No | Business names/synonyms in any supported language, independent of the displayed label. |
 | `sections` | Yes | Ordered section definitions. |
 | `icon` | No | Material icon name. |
 | `description` | No | Assistant-facing description used in the `showUI` tool schema. Explain the view's purpose and any preparation action here. |
@@ -97,9 +98,57 @@ Each section has a stable `key`, a translated `label`, and optionally:
 
 - `grids`: ordered keys referencing grids from this plugin's exported settings.
 - `content`: ordered generic content nodes.
+- `voice_aliases`: business names/synonyms for this subtab, independent of its displayed label or GUI language.
 
 Both may be supplied: the grids render first, followed by content. Missing grid
 references produce no grid. Keep section keys unique and stable for navigation.
+
+The `showUI` schema includes translated view/subtab labels from every registered
+language, their stable keys and `voice_aliases`. For example:
+
+```python
+UIViewSection(
+    key="session",
+    label="@progress.title",
+    voice_aliases=["progression du vaisseau", "suivi des ameliorations", "ship upgrade progress"],
+    grids=["session"],
+)
+```
+
+The GUI may display **Progress** while French voice requests select this same
+subtab. Exact French/English display requests, including `affiche-moi`,
+`montre-moi` and `show me`, are resolved locally from published plugin metadata
+before the action cache or model, even when the action cache is disabled.
+They open the requested view/subtab first; the assistant may then give a spoken
+summary, but a status-reading operation alone does not fulfill a display request.
+No domain-specific plugin names are embedded in this local resolver.
+The same requests are also prefilled against the final tool schema.
+When multiple plugin views are
+available, unqualified plugin navigation requests go through the model rather
+than a direct prefilled shortcut, so semantically similar aliases cannot bypass
+disambiguation. Qualified subtab requests include the view name, for example
+`show progress in ship upgrades`. Exact collisions, including accent variants,
+are never prefilled, even when qualified.
+
+The tool exposes each view's owning plugin name alongside its translated labels
+and aliases. If multiple plugins, views or subtabs plausibly match the request,
+the assistant must ask the player which one they mean, naming the alternatives
+in the player's language, and leave the UI unchanged until clarified. It must
+not choose based on registration order or the currently open tab. Explicitly
+identifying a view/subtab allows navigation; a shared alias alone does not.
+Publishing new labels, aliases or available views refreshes navigation without
+changing plugin data or overriding built-in navigation shortcuts.
+
+`setUISectionExpanded` controls collapsible content in the active subtab by name
+or one-based visible header index. The tool receives available plugin grid,
+category and detail labels. The shared renderer exposes stable identities and
+translations for lookup; generic Material accordion headers and native `details`
+summaries are also supported. Headers hidden in inactive tabs or under a closed
+parent are excluded from indexing. The command carries a correlated request ID;
+the desktop UI acknowledges the actual expanded state through
+`ui_section_result`, while the VR window applies the same command without
+duplicating the acknowledgement. Errors and a five-second timeout are returned
+to the assistant. These are transient presentation changes, not plugin actions.
 
 ## Shared components
 

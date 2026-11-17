@@ -50,6 +50,21 @@ describe("generic plugin UI transport", () => {
     await expectAsync(failure).toBeRejectedWithError("plugin.beta.invalid");
   });
 
+  it("does not confuse desktop and VR plugin requests when results are broadcast to both windows", async () => {
+    const vr = new PluginUIService(tauri, translate);
+    const desktopResult = service.invoke("alpha", "refresh");
+    const desktopRequest = tauri.send_command.calls.mostRecent().args[0]["request_id"];
+    const vrResult = vr.invoke("alpha", "refresh");
+    const vrRequest = tauri.send_command.calls.mostRecent().args[0]["request_id"];
+    expect(vrRequest).not.toBe(desktopRequest);
+    output.next({type: "plugin_ui_result", timestamp: "", index: 0,
+      request_id: desktopRequest, success: true, result: "desktop"});
+    output.next({type: "plugin_ui_result", timestamp: "", index: 1,
+      request_id: vrRequest, success: true, result: "VR"});
+    expect(await desktopResult).toBe("desktop");
+    expect(await vrResult).toBe("VR");
+  });
+
   it("contains every translation dictionary inside its registered owner", () => {
     translate.setTranslation("en", {common: {cancel: "Core cancel"}});
     translate.use("en");

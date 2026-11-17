@@ -1,5 +1,6 @@
 import { Component, Input } from "@angular/core";
 import { Config } from "../../services/config.service";
+import { TranslateModule } from "@ngx-translate/core";
 
 type PreviewConfig = Pick<Config,
     | "overlay_vr_anchor"
@@ -10,6 +11,8 @@ type PreviewConfig = Pick<Config,
     | "overlay_vr_yaw_degrees"
     | "overlay_vr_size_meters"
     | "overlay_vr_curvature"
+    | "overlay_vr_gaze_reduction_factor"
+    | "overlay_vr_gaze_reduced_opacity"
 >;
 
 interface Point3D {
@@ -21,6 +24,7 @@ interface Point3D {
 @Component({
     selector: "app-vr-overlay-preview",
     standalone: true,
+    imports: [TranslateModule],
     templateUrl: "./vr-overlay-preview.component.html",
     styleUrl: "./vr-overlay-preview.component.css",
 })
@@ -28,6 +32,21 @@ export class VrOverlayPreviewComponent {
     @Input({ required: true }) config!: PreviewConfig;
 
     get overlayPoints(): string {
+        return this.projectWindow(1);
+    }
+
+    get reducedOverlayPoints(): string | null {
+        const { overlay_vr_anchor: anchor, overlay_vr_gaze_reduction_factor: factor } = this.config;
+        return anchor === "world" && Number.isFinite(factor) && factor > 1
+            ? this.projectWindow(1 / Math.sqrt(factor)) : null;
+    }
+
+    get reducedOpacityPercent(): number {
+        const opacity = this.config.overlay_vr_gaze_reduced_opacity;
+        return Math.round((Number.isFinite(opacity) ? opacity : 0.25) * 1000) / 10;
+    }
+
+    private projectWindow(scale: number): string {
         const config = this.config;
         const worldLocked = config.overlay_vr_anchor === "world";
         // Match Electron placement, relative to a forward-facing viewer at 1.4 m.
@@ -36,7 +55,7 @@ export class VrOverlayPreviewComponent {
         const distance = Math.max(0.1, (worldLocked ? 2 : 1.1) + config.overlay_vr_distance_offset);
         const pitch = config.overlay_vr_tilt_degrees * Math.PI / 180;
         const yaw = config.overlay_vr_yaw_degrees * Math.PI / 180;
-        const width = config.overlay_vr_size_meters;
+        const width = config.overlay_vr_size_meters * scale;
         const halfHeight = width * 9 / 16 / 2;
         const arc = config.overlay_vr_curvature * 2 * Math.PI;
         const segments = arc > 0 ? 32 : 1;
@@ -63,8 +82,10 @@ export class VrOverlayPreviewComponent {
             outline.push(transform(i / segments - 0.5, -halfHeight));
         }
 
+        // Half-scale projection reduces both the window and its offsets, not the VR placement.
+        const projectionScale = 160;
         return this.clipNearPlane(outline)
-            .map(point => `${(320 + 320 * point.x / -point.z).toFixed(2)},${(180 - 320 * point.y / -point.z).toFixed(2)}`)
+            .map(point => `${(320 + projectionScale * point.x / -point.z).toFixed(2)},${(180 - projectionScale * point.y / -point.z).toFixed(2)}`)
             .join(" ");
     }
 

@@ -72,6 +72,7 @@ export interface ListRow {
 export interface UIViewSection {
   key: string;
   label: string;
+  voice_aliases?: string[];
   grids?: string[];
   content?: UINode[];
 }
@@ -79,6 +80,7 @@ export interface UIViewSection {
 export interface PluginUIView {
   id: string;
   label: string;
+  voice_aliases?: string[];
   description?: string;
   icon?: string;
   order?: number;

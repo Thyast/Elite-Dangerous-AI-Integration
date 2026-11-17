@@ -89,7 +89,7 @@ export class ActionsSettingsComponent {
                 'galaxyMapOpenOrCloseHumanoid', 'systemMapOpenOrCloseHumanoid', 'recallDismissShipHumanoid'
             ],
         },
-        { type: 'global', actions: ['textMessage', 'getVisuals'] },
+        { type: 'global', actions: ['recenterVRView', 'textMessage', 'getVisuals'] },
     ];
 
     readonly groupTypeLabels: Record<string, string> = {
