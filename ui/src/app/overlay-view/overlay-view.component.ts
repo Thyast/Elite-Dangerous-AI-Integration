@@ -1,4 +1,4 @@
-import { Component, OnDestroy, ElementRef, ViewChild, AfterViewInit } from "@angular/core";
+import { Component, Input, OnDestroy, ElementRef, ViewChild, AfterViewInit } from "@angular/core";
 import { DomSanitizer, SafeHtml } from "@angular/platform-browser";
 import { TauriService } from "../services/tauri.service";
 import { Subscription, combineLatest } from "rxjs";
@@ -20,6 +20,7 @@ import { VoiceActivationStatusComponent } from "../components/voice-activation-s
   styleUrl: "./overlay-view.component.css",
 })
 export class OverlayViewComponent implements OnDestroy, AfterViewInit {
+  @Input() chatOnly = false;
   @ViewChild('pngtuberElement', { static: false }) pngtuberElement?: ElementRef<HTMLDivElement>;
   @ViewChild('svgTuberElement', { static: false }) svgTuberElement?: ElementRef<HTMLDivElement>;
   private readonly svgStateClasses = ['listening', 'speaking', 'thinking', 'acting'];
@@ -168,6 +169,7 @@ export class OverlayViewComponent implements OnDestroy, AfterViewInit {
   ngAfterViewInit() {
     this.refreshAvatarDisplay();
     this.applySvgStateClass();
+    if (this.chatOnly) return;
     this.tauriService.send_command({
       type: "init_overlay",
       timestamp: new Date().toISOString(),
@@ -255,7 +257,7 @@ export class OverlayViewComponent implements OnDestroy, AfterViewInit {
 
   private refreshAvatarDisplay(): void {
     setTimeout(() => {
-      if (!this.avatarShow) {
+      if (this.chatOnly || !this.avatarShow) {
         return;
       }
       const url = this.effectiveAvatarUrl();

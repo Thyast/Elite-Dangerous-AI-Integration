@@ -34,6 +34,38 @@ Reactions are configured in the **Reactions** tab of the settings UI, per charac
 
 Enable or disable the whole feature with the **Enable Event Reactions** toggle at the top.
 
+## Showing or hiding events in the chat
+
+The green **EVENTS** checkbox extends down from the right edge of the chat tab bar,
+overlaying the message list without reserving space above the messages.
+It is checked by default. Uncheck it
+to hide event lines, or check it again to restore them, including events received
+while hidden and any grouping counters. Existing chat event filters still apply.
+
+This only filters the display: it does not delete history, interrupt grouping,
+or change the events sent to the AI. Messages, replies, and actions remain visible.
+The checkbox stays accessible even when the chat is empty, and its state is
+remembered locally for this UI.
+
+## Grouping events in the chat
+
+With the assistant stopped, open **Advanced > Chat Settings** to configure the
+optional **Group repeated events** toggle, disabled by default, and the
+**Inactivity delay**. These controls are not shown in the in-game chat.
+When enabled, each event type accumulates independently, even when other event types
+arrive between occurrences. A batch appears after the selected **Inactivity delay**
+(1 to 5 seconds, default 2 seconds) without another occurrence of that event type,
+or after 5 seconds from its first occurrence, whichever comes first.
+
+Repeated events appear as one line, for example `FleetCarrierDiscovered (x13)`.
+The timestamp is that of the first event in the batch. Further occurrences start
+a new batch; a single occurrence has no counter.
+
+This affects **chat display only**: events still reach the AI immediately, and
+messages, replies, and actions are never delayed. Existing chat event filters
+still apply. Settings are remembered locally for this UI. Changing either setting
+immediately displays pending batches and applies the new setting to future events.
+
 ## How it works
 
 When an event occurs in the game, the integration can add it to the conversation context and optionally trigger a reply. Only events set to **React** are treated as “important” and can prompt the AI to respond. Events set to **No react (known)** still appear in context so the AI can refer to them if relevant. Events set to **Hidden** are never sent to the AI.

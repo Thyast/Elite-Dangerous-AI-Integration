@@ -46,6 +46,26 @@ A common workaround is to assign keyboard bindings alongside your controller bin
 
 This is a list of all currently supported actions the AI can perform. Just talk to it naturally and it will understand your intent.
 
+### VR view
+
+**Recenter VR view** (`recenterVRView` permission, local voice command): requests coordinated recentering of **COVAS, Elite Dangerous and, when available, OpenKneeboard** on Windows. Say **"reinitialise la vue"**, **"recentre la vue"**, **"reset the view"** or **"recenter the VR view"**. These explicit commands run locally after voice activation. Recentring is not exposed as an AI tool and cannot be initiated automatically by a game event, game startup or tracking reconnection. **"Focus Elite"** does not request recentering and can still be handled by VoiceAttack. Enable Game Actions and the `recenterVRView` permission and assign Elite's **Reset HMD Orientation** (`HMDReset`) keyboard/mouse binding. OpenKneeboard is optional: an absent/closed application or missing API is skipped with an informational completion message, without failing the game/COVAS recenter. Failures loading or calling an available API remain explicit errors. World-locked COVAS overlays need fresh tracking (and the gaze integration for OpenXR), independently of whether adaptive sizing is enabled.
+
+The headset's current position and heading define COVAS's new session origin, without resetting saved offsets or rotation. After native confirmation, the configured game binding is sent only after verifying focus, and OpenKneeboard receives `RECENTER_VR` through its supported C API. The operation is asynchronous; only the later completion message reports command dispatch, errors or partial completion. OpenKneeboard's API cannot acknowledge delivery, so command dispatch is not a visual success guarantee. This does not reset the Quest's global system origin. Keep your head still and forward-facing until the completion message.
+
+### Interface navigation
+
+With **UI actions** enabled, `showUI` selects built-in or registered plugin tabs
+and subtabs on the desktop and in the full VR GUI. Plugin labels in all registered
+languages and optional `voice_aliases` describe the business meaning independently
+of the GUI language. Opening a panel never calculates a route or modifies a plan.
+
+`setUISectionExpanded` expands (`expanded=true`) or collapses (`expanded=false`)
+a section in the active subtab. Supply exactly one `name` or a one-based `index`.
+For example: **"affiche la progression de l'amelioration du vaisseau"**, then
+**"deploie la deuxieme section"** or **"replie les compartiments essentiels"**.
+Only currently displayed headers count, excluding content hidden by a closed
+parent. Acknowledgement from the UI is required before reporting success.
+
 ### Main Ship Actions
 
 1. **Fire weapons** (primary, secondary, discovery scanner)
@@ -192,6 +212,9 @@ This is a list of all currently supported actions the AI can perform. Just talk 
 
     - `system_name`: String (optional)
     - `start_navigation`: Boolean (optional)
+
+    On Windows, system-name searches send literal Unicode text without physical key combinations or clipboard changes.
+    This avoids Shift-based digit entry on AZERTY keyboards. Game shortcuts still use the game's keyboard layout and their explicitly configured modifiers.
 
     <details>
     <summary>Examples</summary>
@@ -447,6 +470,8 @@ This is a list of all currently supported actions the AI can perform. Just talk 
 
 16. **Toggle night vision**
 
+    With the French language pack enabled, "vision nocturne", "active la vision nocturne", and "désactive la vision nocturne" are aliases for this ship action. All three toggle the current state, like the English command.
+
     <details>
     <summary>Examples</summary>
     
@@ -637,6 +662,8 @@ Language packs are JSON files in `src/lib/actions/languages/`, named with their 
     - next in route
     </details>
 
+    With the French language pack enabled, "continue la route" and "continue la navigation" also target the next system in the route using your configured `TargetNextRouteSystem` binding. These commands do not initiate an FSD jump.
+
     <details>
     <summary>Required Keyboard Binds</summary>
 
@@ -644,6 +671,8 @@ Language packs are JSON files in `src/lib/actions/languages/`, named with their 
     </details>
 
 3. **Toggle cargo scoop**
+
+    With the French language pack enabled, "ouvre la soute" and "ferme la soute" are aliases for this ship action. Both toggle the current state, like "open cargo scoop" and "close cargo scoop".
 
     <details>
     <summary>Examples</summary>

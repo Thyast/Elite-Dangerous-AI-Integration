@@ -25,6 +25,7 @@ import { ConfigBackupService } from "../../services/config-backup.service";
 import { MatIcon } from "@angular/material/icon";
 import {
     OverlayRuntimeInfo,
+    OpenXrGazeIntegrationState,
     TauriService,
     VRCompatibilityState,
     VRIntegrationAction,
@@ -41,7 +42,7 @@ import { ApiKeyDetectionService } from "../../services/api-key-detection.service
 import { SettingsGridComponent } from "../settings-grid/settings-grid.component";
 import { MatDialog } from "@angular/material/dialog";
 import { ConfirmationDialogComponent } from "../confirmation-dialog/confirmation-dialog.component";
-import { ChatService } from "../../services/chat.service";
+import { CHAT_EVENT_GROUPING_DELAYS, ChatEventGroupingOptions, ChatService } from "../../services/chat.service";
 import { MatSliderModule } from "@angular/material/slider";
 import { MatTooltipModule } from "@angular/material/tooltip";
 import { ScreenInfo } from "../../models/screen-info";
@@ -64,6 +65,14 @@ export type AdvancedSettingsFocusTarget =
     | "overlay-mode";
 
 type AdvancedSettingsPanel = "commander" | "llm" | "agent-llm" | "stt" | "tts" | "vision" | "embedding" | "overlay" | "remote-interface";
+
+const VR_RUNTIME_SETTINGS = [
+    ["overlay_vr_anchor", "vrAnchor"],
+    ["overlay_vr_size_meters", "vrSizeMeters"], ["overlay_vr_horizontal_offset", "vrHorizontalOffset"],
+    ["overlay_vr_vertical_offset", "vrVerticalOffset"], ["overlay_vr_distance_offset", "vrDistanceOffset"],
+    ["overlay_vr_tilt_degrees", "vrTiltDegrees"], ["overlay_vr_yaw_degrees", "vrYawDegrees"],
+    ["overlay_vr_curvature", "vrCurvature"],
+] as const;
 
 @Component({
     selector: "app-advanced-settings",
@@ -138,6 +147,11 @@ export class AdvancedSettingsComponent implements OnDestroy {
     screens: ScreenInfo[] = [];
     overlayRuntimeInfo: OverlayRuntimeInfo | null = null;
     isVrIntegrationBusy = false;
+    openXrGazeIntegration: OpenXrGazeIntegrationState | null = null;
+    gazeIntegrationError: string | null = null;
+    isGazeIntegrationBusy = false;
+    private overlayChangesSubscription: Subscription;
+    private readonly gazeTranslate = inject(TranslateService);
     configSubscription: Subscription;
     systemSubscription: Subscription;
     characterSubscription: Subscription;
@@ -162,6 +176,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
         { value: 1.5, label: "Huge (150%)" },
     ];
     fontScale = 1;
+    readonly chatEventGroupingDelays = CHAT_EVENT_GROUPING_DELAYS;
     highlightTarget: AdvancedSettingsFocusTarget | null = null;
     private vrCompatibilityRefreshTimer?: ReturnType<typeof setTimeout>;
     private vrStatusRequest = 0;
@@ -200,8 +215,27 @@ export class AdvancedSettingsComponent implements OnDestroy {
         this.fontScale = this.fontScaleService.scale;
         this.configSubscription = this.configService.config$.subscribe(
             (config) => {
-                this.config = config;
+                const previous = this.config;
+                if (config) {
+                    for (const key of Object.keys(this.unconfirmedVrConfig) as (keyof Config)[]) {
+                        if (!(key in this.queuedVrConfig) && config[key] === this.unconfirmedVrConfig[key]) {
+                            delete this.unconfirmedVrConfig[key];
+                        }
+                    }
+                    // Backend echoes must not move a slider back to an older position.
+                    this.config = { ...config, ...this.unconfirmedVrConfig };
+                } else {
+                    clearTimeout(this.vrConfigSaveTimer);
+                    this.queuedVrConfig = {};
+                    this.unconfirmedVrConfig = {};
+                    this.config = null;
+                }
                 this.assigningPTTIndex = null;
+                const current = this.config;
+                if (current && previous && this.overlayRuntimeInfo?.activeVrSettings &&
+                    VR_RUNTIME_SETTINGS.some(([key]) => current[key] !== previous[key])) {
+                    void this.refreshOverlayRuntimeInfo(false);
+                }
             },
         );
         this.systemSubscription = this.configService.system$.subscribe(
@@ -236,6 +270,14 @@ export class AdvancedSettingsComponent implements OnDestroy {
     onFontScaleChange(scale: number): void {
         this.fontScale = scale;
         this.fontScaleService.setScale(scale);
+    }
+
+    get chatEventGrouping(): Readonly<ChatEventGroupingOptions> {
+        return this.chatService.eventGrouping;
+    }
+
+    setChatEventGrouping(enabled: boolean, delaySeconds: number): void {
+        this.chatService.setEventGrouping(enabled, delaySeconds);
     }
 
     resetFontScale(): void {
@@ -495,7 +537,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
 
     get overlayRuntimeInstalled(): boolean {
         const info = this.overlayRuntimeInfo;
-        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "both" || Boolean(info?.packageInstalled && (
+        return this.vrOverlaySelected || Boolean(info?.packageInstalled && (
             info.openxrAvailable ||
             Boolean(info.openxrRuntimeManifestPath) ||
             info.openvrRuntimeInstalled ||
@@ -509,7 +551,7 @@ export class AdvancedSettingsComponent implements OnDestroy {
     }
 
     get vrOverlaySelected(): boolean {
-        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "both";
+        return this.config?.overlay_mode === "vr" || this.config?.overlay_mode === "vr-full" || this.config?.overlay_mode === "both";
     }
 
     get desktopOverlayBackendLabel(): string {
@@ -635,6 +677,46 @@ export class AdvancedSettingsComponent implements OnDestroy {
             });
         } finally {
             this.isVrIntegrationBusy = false;
+            await this.refreshOverlayRuntimeInfo();
+        }
+    }
+
+    get vrSettingsRestartRequired(): boolean {
+        const active = this.overlayRuntimeInfo?.activeVrSettings;
+        const config = this.config;
+        if (config?.overlay_mode === "vr-full") return false;
+        return !!active && !!config && VR_RUNTIME_SETTINGS.some(([key, runtimeKey]) => active[runtimeKey] !== config[key]);
+    }
+
+    requestOpenXrGazeIntegration(action: "install" | "uninstall"): void {
+        const dialogRef = this.dialog.open(ConfirmationDialogComponent, {
+            data: {
+                title: this.gazeTranslate.instant("vrInterface.gazeSetupTitle"),
+                message: this.gazeTranslate.instant(action === "install" ? "vrInterface.gazeInstallConfirm" : "vrInterface.gazeRemoveConfirm"),
+                confirmButtonText: this.gazeTranslate.instant(action === "install" ? "vrInterface.gazeInstall" : "vrInterface.gazeRemove"),
+                cancelButtonText: this.gazeTranslate.instant("common.cancel"),
+            },
+        });
+        dialogRef.afterClosed().subscribe(confirmed => {
+            if (confirmed) void this.runOpenXrGazeIntegrationAction(action);
+        });
+    }
+
+    async runOpenXrGazeIntegrationAction(action: "install" | "uninstall"): Promise<void> {
+        this.isGazeIntegrationBusy = true;
+        try {
+            this.openXrGazeIntegration = await this.tauriService.runOpenXrGazeIntegrationAction(action);
+            this.snackBar.open(this.gazeTranslate.instant(
+                this.openXrGazeIntegration.restartRequired ? "vrInterface.gazeGameRestart" : "vrInterface.gazeSetupDone",
+            ), "OK", { duration: 10000 });
+        } catch (error) {
+            console.error("OpenXR gaze integration action failed:", error);
+            this.snackBar.open(
+                this.gazeTranslate.instant("vrInterface.gazeSetupFailed", { reason: error instanceof Error ? error.message : String(error) }),
+                "OK", { duration: 10000 },
+            );
+        } finally {
+            this.isGazeIntegrationBusy = false;
             await this.refreshOverlayRuntimeInfo();
         }
     }
@@ -891,10 +973,42 @@ export class AdvancedSettingsComponent implements OnDestroy {
         this.onConfigChange(update);
     }
 
+    onVrConfigChange(partialConfig: Partial<Config>): void {
+        if (this.config) {
+            this.config = { ...this.config, ...partialConfig };
+            this.queuedVrConfig = { ...this.queuedVrConfig, ...partialConfig };
+            this.unconfirmedVrConfig = { ...this.unconfirmedVrConfig, ...partialConfig };
+            clearTimeout(this.vrConfigSaveTimer);
+            this.vrConfigSaveTimer = setTimeout(() => void this.flushVrConfigChanges(), 200);
+        }
+    }
+
+    async flushVrConfigChanges(): Promise<void> {
+        clearTimeout(this.vrConfigSaveTimer);
+        const changes = this.queuedVrConfig;
+        this.queuedVrConfig = {};
+        if (Object.keys(changes).length === 0) {
+            return;
+        }
+        try {
+            await this.configService.changeConfig(changes);
+        } catch (error) {
+            console.error("Error updating VR configuration:", error);
+            for (const key of Object.keys(changes) as (keyof Config)[]) {
+                if (!(key in this.queuedVrConfig) && this.unconfirmedVrConfig[key] === changes[key]) {
+                    delete this.unconfirmedVrConfig[key];
+                }
+            }
+            const confirmedConfig = this.configService.getCurrentConfig();
+            this.config = confirmedConfig ? { ...confirmedConfig, ...this.unconfirmedVrConfig } : null;
+            this.snackBar.open("Error updating configuration", "OK", { duration: 5000 });
+        }
+    }
+
     async onConfigChange(partialConfig: Partial<Config>) {
         if (partialConfig.overlay_mode !== undefined) {
             clearTimeout(this.vrCompatibilityRefreshTimer);
-            if (partialConfig.overlay_mode === "vr" || partialConfig.overlay_mode === "both") {
+            if (partialConfig.overlay_mode === "vr" || partialConfig.overlay_mode === "vr-full" || partialConfig.overlay_mode === "both") {
                 void this.refreshOverlayRuntimeInfo();
             }
         }

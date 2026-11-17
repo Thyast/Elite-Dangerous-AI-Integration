@@ -248,6 +248,21 @@ export class SettingsFieldComponent implements OnChanges {
     }
 
     onListAction(action: ListAction, row: ListRow): void {
+        if (action.confirmation) {
+            this.confirmation.openConfirmationDialog({
+                title: this.resolve(action.label),
+                message: this.resolve(action.confirmation, {...row.params, title: row.title}),
+                confirmButtonText: this.resolve(action.label),
+                cancelButtonText: this.resolve("common.cancel"),
+            }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(confirmed => {
+                if (confirmed) this.performListAction(action, row);
+            });
+            return;
+        }
+        this.performListAction(action, row);
+    }
+
+    private performListAction(action: ListAction, row: ListRow): void {
         if (action.inline_edit) {
             this.editingAction = action;
             this.editingRowKey = row.key;
@@ -271,6 +286,10 @@ export class SettingsFieldComponent implements OnChanges {
         this.editingRowKey = null;
         this.editingAction = null;
         this.editValue = "";
+    }
+
+    hasSecondaryActions(): boolean {
+        return this.field.row_actions?.some(action => action.secondary) ?? false;
     }
 
     rowsWithGroups(
@@ -314,18 +333,9 @@ export class SettingsFieldComponent implements OnChanges {
         }
     }
 
-    moduleName(row: ListRow): string {
+    rowTitle(row: ListRow): string {
         const base = resolveModuleName(this.translate, row.title_key, row.title);
-        return row.grade ? `${base} ${row.grade}` : base;
-    }
-
-    nextModuleName(progress: {
-        next_key?: string;
-        next_label?: string;
-        next_class?: string;
-    }): string {
-        const base = resolveModuleName(this.translate, progress.next_key, progress.next_label ?? "");
-        return progress.next_class ? `${base} ${progress.next_class}` : base;
+        return row.suffix ? `${base} ${row.suffix}` : base;
     }
 
     isGroupCollapsed(group: string | undefined): boolean {
@@ -336,8 +346,7 @@ export class SettingsFieldComponent implements OnChanges {
         if (entry.header === undefined || entry.count === undefined) {
             return "";
         }
-        const unit = this.field?.unit === "module" ? "module" : "plan";
-        const key = entry.count === 1 ? `plugin.sum.${unit}One` : `plugin.sum.${unit}Many`;
+        const key = entry.count === 1 ? this.field.count_labels?.one ?? 'common.itemsOne' : this.field.count_labels?.many ?? 'common.itemsMany';
         return this.resolve(key, { count: entry.count });
     }
 }

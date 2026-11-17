@@ -114,6 +114,12 @@ def binds_file(tmp_path):
             <Primary Device="Keyboard" Key="Key_Q"/>
             <Secondary Device="Keyboard" Key="Key_E"/>
         </CycleNextTarget>
+        <HMDReset>
+            <Primary Device="Keyboard" Key="Key_F10">
+                <Modifier Device="Keyboard" Key="Key_LeftShift"/>
+            </Primary>
+            <Secondary Device="{NoDevice}" Key="" />
+        </HMDReset>
         <HumanoidPrimaryFireButton>
             <Primary Device="Mouse" Key="Mouse_1" />
             <Secondary Device="{NoDevice}" Key="" />
@@ -511,6 +517,14 @@ def test_send_invalid_key(mock_directinput, binds_file):
     with pytest.raises(Exception) as exc_info:
         keys.send('NonExistentKey')
     assert "Unable to retrieve keybinding" in str(exc_info.value)
+
+
+def test_send_hmd_reset_uses_configured_binding_and_modifier(mock_directinput, binds_file):
+    keys = EDKeys(binds_file)
+    keys.send("HMDReset")
+    assert [call.args[0] for call in mock_directinput["PressKey"].call_args_list] == [42, 68]
+    assert [call.args[0] for call in mock_directinput["ReleaseKey"].call_args_list] == [68, 42]
+
 
 def test_empty_bindings_directory(tmp_path, monkeypatch):
     """Test handling of empty bindings directory"""

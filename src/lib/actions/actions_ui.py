@@ -345,6 +345,15 @@ def show_ui(obj, projected_states):
     return f"{tab.capitalize()}{f' ({submenu})' if submenu else ''} is now being displayed"
 
 
+def set_ui_visibility(obj, projected_states):
+    """Switch the full VR interface between its GUI and transient chat."""
+    visible = (obj or {}).get('visible')
+    if not isinstance(visible, bool):
+        raise ValueError("visible must be a boolean.")
+    send_message({"type": "ui", "visible": visible})
+    return "VR interface is now displayed" if visible else "VR interface hidden; transient chat remains available"
+
+
 def scroll_ui(obj, projected_states):
     """Scroll the currently displayed UI tab."""
     direction: str = (obj or {}).get('direction', 'down')

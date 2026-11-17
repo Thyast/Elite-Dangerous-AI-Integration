@@ -4,6 +4,19 @@ from lib.Logger import ModelUsageStats
 from lib.Models import OpenAILLMModel
 
 
+def iter_sse_data(lines: Iterable[str]) -> Iterable[str]:
+    data_lines: list[str] = []
+    for line in lines:
+        if not line:
+            if data_lines:
+                yield "\n".join(data_lines)
+                data_lines.clear()
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].removeprefix(" "))
+    if data_lines:
+        yield "\n".join(data_lines)
+
+
 def text_field(
     key: str,
     label: str,

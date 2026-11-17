@@ -440,6 +440,7 @@ default_allowed_actions: dict[str, bool] = {
     'systemMapOpenOrCloseHumanoid': True,
     'recallDismissShipHumanoid': True,
     # Global
+    'recenterVRView': True,
     'textMessage': True,
     'getVisuals': True,
 }
@@ -910,6 +911,8 @@ class Config(TypedDict):
     web_search_actions_var: bool
     ui_actions_var: bool
     use_action_cache_var: bool
+    selected_action_languages: list[str]
+    available_action_languages: list[dict[str, str]]
     allowed_actions: dict[str, bool]
     discovery_primary_var: bool
     discovery_firegroup_var: int  # 0 keeps the current firegroup; 1-8 select one
@@ -939,13 +942,17 @@ class Config(TypedDict):
     overlay_show_avatar: bool
     overlay_show_hud: bool
     overlay_show_chat: bool
-    overlay_mode: Literal['disabled', 'desktop', 'standalone', 'vr', 'both']
+    overlay_mode: Literal['disabled', 'desktop', 'standalone', 'vr', 'vr-full', 'both']
     overlay_position: Literal['left', 'right', 'left-medium', 'left-small', 'right-medium', 'right-small']
     overlay_screen_id: int
     overlay_standalone_transparent: bool
     overlay_standalone_background_color: str
     overlay_vr_size_meters: float
     overlay_vr_anchor: Literal['head', 'world']
+    overlay_vr_full_profiles: dict[str, dict[str, float]]
+    overlay_vr_full_last: dict[str, float]
+    overlay_vr_gaze_reduction_factor: float
+    overlay_vr_gaze_reduced_opacity: float
     overlay_vr_horizontal_offset: float
     overlay_vr_vertical_offset: float
     overlay_vr_distance_offset: float
@@ -1655,9 +1662,8 @@ def merge_config_data(defaults: dict, user: dict):
                 print(f"Warning: Config type mismatch for '{key}', using default")
                 continue
 
-            # Plugin settings
-            if key in {"plugin_settings", "tts_voice_settings"}:
-                # Copy plugin settings directly, since we don't know what settings are supposed to be there.
+            # Dictionaries whose keys are defined at runtime.
+            if key in {"plugin_settings", "tts_voice_settings", "overlay_vr_full_profiles", "overlay_vr_full_last"}:
                 merge[key] = user.get(key) or {}
                 continue
                 
@@ -1726,6 +1732,10 @@ def getDefaultCharacter(config: Config) -> Character:
     })
 
 def load_config() -> Config:
+    available_action_languages = [
+        {"code": code, "name": pack["name"]}
+        for code, pack in load_action_language_packs().items()
+    ]
     defaults: Config = {
         'config_version': 26,
         'commander_name': "",
@@ -1743,6 +1753,8 @@ def load_config() -> Config:
         'web_search_actions_var': True,
         'ui_actions_var': True,
         'use_action_cache_var': True,
+        'selected_action_languages': [],
+        'available_action_languages': available_action_languages,
         'allowed_actions': default_allowed_actions.copy(),
         'discovery_primary_var': True,
         'discovery_firegroup_var': 1,
@@ -1788,6 +1800,10 @@ def load_config() -> Config:
         "overlay_standalone_background_color": "#000000",
         "overlay_vr_size_meters": 0.9,
         "overlay_vr_anchor": "head",
+        "overlay_vr_full_profiles": {},
+        "overlay_vr_full_last": {},
+        "overlay_vr_gaze_reduction_factor": 1.0,
+        "overlay_vr_gaze_reduced_opacity": 0.25,
         "overlay_vr_horizontal_offset": 0.0,
         "overlay_vr_vertical_offset": 0.0,
         "overlay_vr_distance_offset": 0.0,

@@ -3264,7 +3264,7 @@ class PromptGenerator:
 
                         # Format module information
                         module_info = {
-                            # "Slot": slot,
+                            "Slot": slot,
                             "Item": item
                         }
 
@@ -3279,6 +3279,10 @@ class PromptGenerator:
                                 "Blueprint": eng_info.get('BlueprintName', 'Unknown'),
                                 "Level": eng_info.get('Level', 0),
                             }
+                            if eng_info.get('Quality') is not None:
+                                engineering["Quality"] = eng_info['Quality']
+                            if eng_info.get('ExperimentalEffect'):
+                                engineering["ExperimentalEffect"] = eng_info['ExperimentalEffect']
 
                             # Add experimental effect if present
                             if eng_info.get('ExperimentalEffect_Localised'):
@@ -3715,7 +3719,15 @@ class PromptGenerator:
         # Initialize usage stats
         usage_stats = PromptUsageStats()
 
-        for event in events[::-1]:
+        # A user can speak while an earlier reply is being generated.
+        # Keep those unanswered requests after that reply in the next prompt.
+        pending_user_events = [
+            event for event in events
+            if isinstance(event, ConversationEvent) and event.kind == "user" and event in pending_events
+        ]
+        prompt_events = [event for event in events if event not in pending_user_events] + pending_user_events
+
+        for event in prompt_events[::-1]:
             if len(conversational_pieces) >= 50:
                 break
 

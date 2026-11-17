@@ -1,4 +1,4 @@
-import { Component, EventEmitter, OnDestroy, OnInit, Output, ViewChild } from "@angular/core";
+import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from "@angular/core";
 import { MatCardModule } from "@angular/material/card";
 import { MatTabsModule } from "@angular/material/tabs";
 import {
@@ -41,6 +41,9 @@ import { MatInputModule } from "@angular/material/input";
 import { MatButtonModule } from "@angular/material/button";
 import { ModelUsageAnalyticsComponent } from "../model-usage-analytics/model-usage-analytics.component";
 import { QuestsSettingsComponent } from "../quests-settings/quests-settings.component";
+import { PluginViewComponent } from "../plugin-view/plugin-view.component";
+import { RegisteredUIView } from "../../services/plugin-ui";
+import { TranslateModule } from "@ngx-translate/core";
 
 @Component({
     selector: "app-settings-menu",
@@ -70,11 +73,14 @@ import { QuestsSettingsComponent } from "../quests-settings/quests-settings.comp
         ModelUsageAnalyticsComponent,
         QuestsSettingsComponent,
         MatButtonModule,
+        PluginViewComponent,
+        TranslateModule,
     ],
     templateUrl: "./settings-menu.component.html",
     styleUrls: ["./settings-menu.component.scss"],
 })
 export class SettingsMenuComponent implements OnInit, OnDestroy {
+    @Input() pluginViews: RegisteredUIView[] = [];
     @ViewChild(AdvancedSettingsComponent) private advancedSettings?: AdvancedSettingsComponent;
 
     config: Config | null = null;

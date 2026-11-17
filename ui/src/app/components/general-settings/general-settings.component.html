@@ -529,7 +529,11 @@
                                     </div>
 
                                     @if (actionsReady) {
-                                        <p class="preflight-helper-text">Ready. All required game action keybinds are available, supported, and conflict-free.</p>
+                                        @if (keybindsData.mapping_warnings?.length) {
+                                            <p class="preflight-helper-text">Bindings are available, but some keyboard mappings need verification.</p>
+                                        } @else {
+                                            <p class="preflight-helper-text">Ready. All required game action keybinds are available, supported, and conflict-free.</p>
+                                        }
                                     }
                                     @if (keybindsData.missing.length > 0) {
                                         <p class="preflight-helper-text"><strong>Missing:</strong> {{ keybindsData.missing.join(', ') }}</p>

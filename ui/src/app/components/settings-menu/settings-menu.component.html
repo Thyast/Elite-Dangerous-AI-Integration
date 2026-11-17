@@ -123,6 +123,17 @@
             </div>
         </mat-tab>
     }
+    @for (view of pluginViews; track view.target) {
+        <mat-tab>
+            <ng-template mat-tab-label>
+                <mat-icon class="tab-icon">{{ view.icon || 'extension' }}</mat-icon>
+                {{ view.label | translate }}
+            </ng-template>
+            <div class="tab-content">
+                <app-plugin-view [view]="view" />
+            </div>
+        </mat-tab>
+    }
 </mat-tab-group>
 
 @if (showQuestEditor && config) {

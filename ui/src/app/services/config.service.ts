@@ -13,6 +13,11 @@ export interface RunningConfigMessage extends BaseMessage {
     type: 'running_config';
     config: Config;
 }
+export interface VrPlacementStateMessage extends BaseMessage {
+    type: "vr_placement_state";
+    active: boolean;
+    config: Partial<Config>;
+}
 export interface ChangeConfigMessage extends BaseCommand {
     type: "change_config";
     config: Partial<Config>;
@@ -116,6 +121,8 @@ export interface Config {
     web_search_actions_var: boolean;
     ui_actions_var: boolean;
     use_action_cache_var: boolean;
+    selected_action_languages: string[];
+    available_action_languages: { code: string; name: string }[];
     allowed_actions: Record<string, boolean>;
     discovery_primary_var: boolean;
     discovery_firegroup_var: number;
@@ -145,13 +152,17 @@ export interface Config {
     overlay_show_avatar: boolean;
     overlay_show_hud: boolean;
     overlay_show_chat: boolean;
-    overlay_mode: "disabled" | "desktop" | "standalone" | "vr" | "both";
+    overlay_mode: "disabled" | "desktop" | "standalone" | "vr" | "vr-full" | "both";
     overlay_position: "left" | "right" | "left-medium" | "left-small" | "right-medium" | "right-small";
     overlay_screen_id: number;
     overlay_standalone_transparent: boolean;
     overlay_standalone_background_color: string;
     overlay_vr_size_meters: number;
     overlay_vr_anchor: "head" | "world";
+    overlay_vr_full_profiles?: Record<string, Record<string, number>>;
+    overlay_vr_full_last?: Record<string, number>;
+    overlay_vr_gaze_reduction_factor: number;
+    overlay_vr_gaze_reduced_opacity: number;
     overlay_vr_horizontal_offset: number;
     overlay_vr_vertical_offset: number;
     overlay_vr_distance_offset: number;
@@ -205,22 +216,28 @@ export class ConfigService {
             ): message is
                 | ConfigMessage
                 | RunningConfigMessage
+                | VrPlacementStateMessage
                 | SystemInfoMessage
                 | PluginSettingsMessage
                 | PluginModelProvidersMessage
                 | KeybindsMessages =>
                 message.type === "config" ||
                 message.type === "running_config" ||
+                message.type === "vr_placement_state" ||
                 message.type === "system" ||
                 message.type === "plugin_settings_configs" ||
                 message.type === "plugin_model_providers" ||
                 message.type === "keybinds"
             ),
-        ).subscribe((message: ConfigMessage | RunningConfigMessage | SystemInfoMessage | PluginSettingsMessage | PluginModelProvidersMessage | KeybindsMessages) => {
+        ).subscribe((message: ConfigMessage | RunningConfigMessage | VrPlacementStateMessage | SystemInfoMessage | PluginSettingsMessage | PluginModelProvidersMessage | KeybindsMessages) => {
             if (message.type === "config") {
                 this.configSubject.next(message.config);
             } else if (message.type === "running_config") {
                 this.configSubject.next(message.config);
+            } else if (message.type === "vr_placement_state") {
+                if (this.configSubject.value) {
+                    this.configSubject.next({ ...this.configSubject.value, ...message.config });
+                }
             } else if (message.type === "system") {
                 // Do not mutate SystemInfo with screen data
                 this.systemSubject.next(message.system);

@@ -543,12 +543,13 @@
                             <mat-option value="disabled">Disabled</mat-option>
                             <mat-option value="desktop">Desktop Overlay</mat-option>
                             <mat-option value="standalone">Standalone Window</mat-option>
-                            <mat-option value="vr">VR Overlay</mat-option>
+                            <mat-option value="vr">{{ 'vrInterface.modeHud' | translate }}</mat-option>
+                            <mat-option value="vr-full">{{ 'vrInterface.modeFull' | translate }}</mat-option>
                             <!--<mat-option value="both">Both</mat-option>-->
                         </mat-select>
                     </mat-form-field>
 
-                    @if (config.overlay_mode !== 'disabled') {
+                    @if (config.overlay_mode !== 'disabled' && config.overlay_mode !== 'vr-full') {
                         <div class="overlay-toggle-column">
                             <mat-slide-toggle
                                 [(ngModel)]="config.overlay_show_avatar"
@@ -651,14 +652,22 @@
                             </div>
                         </div>
 
+                        @if (config.overlay_mode === 'vr-full') {
+                            <p class="vr-control-group">
+                                {{ 'vrInterface.inGameSettings' | translate }}
+                            </p>
+                        }
+                        @if (config.overlay_mode !== 'vr-full') {
                         <mat-form-field class="vr-anchor-field">
                             <mat-label>VR Anchor</mat-label>
                             <mat-select [(ngModel)]="config.overlay_vr_anchor"
-                                        (ngModelChange)="onConfigChange({overlay_vr_anchor: $event})">
+                                        (ngModelChange)="onVrConfigChange({overlay_vr_anchor: $event})">
                                 <mat-option value="head">Head Locked</mat-option>
                                 <mat-option value="world">World Locked</mat-option>
                             </mat-select>
                         </mat-form-field>
+
+                        <app-vr-overlay-preview [config]="config" />
 
                         <section class="vr-control-group">
                             <h4>Placement</h4>
@@ -666,13 +675,13 @@
                                 <div class="overlay-slider-field">
                                     <label>Horizontal: {{ config.overlay_vr_horizontal_offset }} m</label>
                                     <mat-slider min="-2" max="2" step="0.05" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_horizontal_offset" (ngModelChange)="onConfigChange({overlay_vr_horizontal_offset: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_horizontal_offset" (ngModelChange)="onVrConfigChange({overlay_vr_horizontal_offset: $event})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Vertical: {{ config.overlay_vr_vertical_offset }} m</label>
                                     <mat-slider min="-1.5" max="1.5" step="0.05" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_vertical_offset" (ngModelChange)="onConfigChange({overlay_vr_vertical_offset: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_vertical_offset" (ngModelChange)="onVrConfigChange({overlay_vr_vertical_offset: $event})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
@@ -690,13 +699,13 @@
                                 <div class="overlay-slider-field">
                                     <label>Pitch: {{ config.overlay_vr_tilt_degrees }}&deg;</label>
                                     <mat-slider min="-90" max="90" step="1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_tilt_degrees" (ngModelChange)="onConfigChange({overlay_vr_tilt_degrees: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_tilt_degrees" (ngModelChange)="onVrConfigChange({overlay_vr_tilt_degrees: $event})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Yaw: {{ config.overlay_vr_yaw_degrees }}&deg;</label>
                                     <mat-slider min="-90" max="90" step="1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_yaw_degrees" (ngModelChange)="onConfigChange({overlay_vr_yaw_degrees: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_yaw_degrees" (ngModelChange)="onVrConfigChange({overlay_vr_yaw_degrees: $event})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                             </div>
@@ -708,17 +717,63 @@
                                 <div class="overlay-slider-field">
                                     <label>Size: {{ config.overlay_vr_size_meters }} m</label>
                                     <mat-slider min="0.1" max="3" step="0.1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_size_meters" (ngModelChange)="onConfigChange({overlay_vr_size_meters: $event})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_size_meters" (ngModelChange)="onVrConfigChange({overlay_vr_size_meters: $event})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                                 <div class="overlay-slider-field">
                                     <label>Curvature: {{ config.overlay_vr_curvature * 360 }}&deg;</label>
                                     <mat-slider min="0" max="180" step="1" discrete>
-                                        <input matSliderThumb [ngModel]="config.overlay_vr_curvature * 360" (ngModelChange)="onConfigChange({overlay_vr_curvature: $event / 360})">
+                                        <input matSliderThumb [ngModel]="config.overlay_vr_curvature * 360" (ngModelChange)="onVrConfigChange({overlay_vr_curvature: $event / 360})" (dragEnd)="flushVrConfigChanges()">
                                     </mat-slider>
                                 </div>
                             </div>
                         </section>
+                        } @else {
+                        <section class="vr-control-group vr-tracking-setup">
+                                    @if (overlayRuntimeInfo?.heightInitialization; as height) {
+                                        @if (height.status === 'unavailable') {
+                                            <p role="alert" class="vr-height-status">{{ 'vrInterface.heightUnavailable' | translate: { reason: height.message } }}</p>
+                                        } @else if (height.status === 'waiting') {
+                                            <p role="status" class="vr-height-status">{{ 'vrInterface.heightWaiting' | translate: { reason: height.message } }}</p>
+                                        }
+                                    }
+                                    @if (overlayRuntimeInfo?.gazeZoom; as gaze) {
+                                        @if (gaze.status === 'unavailable') {
+                                            <p role="alert">{{ 'vrInterface.gazeUnavailable' | translate: { reason: gaze.message } }}</p>
+                                        } @else if (gaze.status === 'waiting') {
+                                            <p role="status" class="vr-tracking-waiting">{{ 'vrInterface.gazeWaiting' | translate: { reason: gaze.message } }}</p>
+                                        }
+                                    }
+                                @if (overlayRuntimeInfo?.platform === 'win32' && overlayRuntimeInfo?.selectedBackend !== 'openvr') {
+                                    @if (openXrGazeIntegration; as integration) {
+                                        <p>{{ (integration.enabled ? 'vrInterface.gazeInstalled' : 'vrInterface.gazeNotInstalled') | translate }}</p>
+                                        @if (integration.restartRequired) {
+                                            <p role="status" class="vr-game-restart">{{ 'vrInterface.gazeGameRestart' | translate }}</p>
+                                        }
+                                        @if (!integration.available) {
+                                            <p>{{ 'vrInterface.gazeComponentMissing' | translate }}</p>
+                                        }
+                                        <button mat-stroked-button type="button"
+                                                [disabled]="isGazeIntegrationBusy || !integration.available"
+                                                (click)="requestOpenXrGazeIntegration('install')">
+                                            {{ 'vrInterface.gazeInstall' | translate }}
+                                        </button>
+                                        @if (integration.installed) {
+                                            <button mat-stroked-button type="button" [disabled]="isGazeIntegrationBusy"
+                                                    (click)="requestOpenXrGazeIntegration('uninstall')">
+                                                {{ 'vrInterface.gazeRemove' | translate }}
+                                            </button>
+                                        }
+                                    }
+                                    @if (gazeIntegrationError) {
+                                        <p role="alert">{{ gazeIntegrationError }}</p>
+                                    }
+                                }
+                        </section>
+                        }
+                        @if (vrSettingsRestartRequired) {
+                            <p role="status" class="vr-assistant-restart">{{ 'vrInterface.settingsRestart' | translate }}</p>
+                        }
                     }
                 </div>
             </div>
@@ -830,6 +885,33 @@
                 </mat-form-field>
                 <button mat-stroked-button type="button" (click)="resetFontScale()">Reset</button>
             </div>
+        </mat-expansion-panel>
+
+        <mat-expansion-panel class="chat-settings-panel">
+            <mat-expansion-panel-header>
+                <mat-panel-title>
+                    <mat-icon>forum</mat-icon>
+                    {{ 'chatDisplay.settingsTitle' | translate }}
+                </mat-panel-title>
+            </mat-expansion-panel-header>
+            <p>{{ 'chatDisplay.displayOnly' | translate }}</p>
+            <mat-slide-toggle
+                [ngModel]="chatEventGrouping.enabled"
+                (ngModelChange)="setChatEventGrouping($event, chatEventGrouping.delaySeconds)">
+                {{ 'chatDisplay.groupEvents' | translate }}
+            </mat-slide-toggle>
+            <mat-form-field>
+                <mat-label>{{ 'chatDisplay.inactivityDelay' | translate }}</mat-label>
+                <mat-select
+                    [ngModel]="chatEventGrouping.delaySeconds"
+                    [disabled]="!chatEventGrouping.enabled"
+                    (ngModelChange)="setChatEventGrouping(chatEventGrouping.enabled, $event)">
+                    @for (delay of chatEventGroupingDelays; track delay) {
+                        <mat-option [value]="delay">{{ delay }} s</mat-option>
+                    }
+                </mat-select>
+            </mat-form-field>
+            <p>{{ 'chatDisplay.groupingHelp' | translate }}</p>
         </mat-expansion-panel>
 
         @if (config && (config.commander_name || config.api_key)) {

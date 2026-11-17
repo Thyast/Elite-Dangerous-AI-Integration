@@ -14,6 +14,10 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 
+import httpx
+import pytest
+from openai import OpenAI
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
@@ -21,6 +25,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from lib.Models import (
+    LLMError,
     OpenAIEmbeddingModel,
     OpenAILLMModel,
     OpenAIMultiModalSTTModel,
@@ -279,6 +284,42 @@ def test_google_tts_streams_pcm_and_voice_settings() -> None:
     ))
 
     assert chunks == [first_chunk, second_chunk]
+
+
+@pytest.mark.parametrize("override_key", ["", "embedding-test-key"])
+def test_google_embeddings_use_google_endpoint_and_configured_key(override_key: str) -> None:
+    plugin = GoogleAIStudioPlugin(manifest(GOOGLE_AI_STUDIO_PLUGIN_GUID, "Google"))
+    model = plugin.create_model("embedding", {
+        "api_key": "shared-google-test-key",
+        "embedding_api_key": override_key,
+    })
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={
+            "object": "list",
+            "model": "gemini-embedding-001",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.25, 0.75]}],
+            "usage": {"prompt_tokens": 2, "total_tokens": 2},
+        })
+
+    base_url = model.client.base_url
+    key = model.client.api_key
+    model.client.close()
+    with OpenAI(
+        base_url=base_url,
+        api_key=key,
+        http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    ) as client:
+        model.client = client
+        assert model.create_embedding("Synthetic memory") == ("gemini-embedding-001", [0.25, 0.75])
+
+    assert len(requests) == 1
+    assert requests[0].url.host == "generativelanguage.googleapis.com"
+    assert requests[0].url.path.endswith("/embeddings")
+    assert requests[0].headers["Authorization"] == f"Bearer {override_key or 'shared-google-test-key'}"
+    assert json.loads(requests[0].content)["model"] == "gemini-embedding-001"
 
 
 def test_openrouter_slots_and_models_are_independent() -> None:

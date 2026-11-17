@@ -18,6 +18,7 @@ from .directinput import (
     ReleaseKey,
     ReleaseMouseButton,
     ScrollMouseWheel,
+    SendUnicodeText,
     resolve_layout_key_name,
     get_layout_key_character,
     load_keyboard_layout,
@@ -268,6 +269,7 @@ class EDKeys:
                 continue
 
             binding: None | dict[str, Any] = None
+            binding_warnings = []
             try:
                 binding = self._prepare_binding(selected_binding)
             except KeyError as exc:

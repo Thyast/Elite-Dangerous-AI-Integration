@@ -552,6 +552,8 @@ class TTS:
                     metrics["response_ms"] = (time() - started_at) * 1000
             except Exception as e:
                 log('error', 'TTS synthesis error', e, traceback.format_exc())
+                if raise_errors:
+                    raise
                 show_chat_message('error', 'TTS synthesis error:', str(e))
 
     @observe()
@@ -594,6 +596,29 @@ class TTS:
                 break
             stream.write(
                 self._apply_output_gain_pcm16(audio[offset:offset + chunk_size]),
+            )
+
+    def _playback_listening_end_tone(self, stream: pyaudio.Stream) -> None:
+        sample_rate = 24_000
+        tone_samples = int(0.09 * sample_rate)
+        fade_samples = int(0.01 * sample_rate)
+        envelope = np.ones(tone_samples)
+        envelope[:fade_samples] = np.linspace(0, 1, fade_samples)
+        envelope[-fade_samples:] = np.linspace(1, 0, fade_samples)
+        time_axis = np.arange(tone_samples) / sample_rate
+        tones = [
+            (np.sin(2 * np.pi * frequency * time_axis) * envelope * 0.06 * 32767).astype(np.int16)
+            for frequency in (660, 440)
+        ]
+        silence = np.zeros(int(0.03 * sample_rate), dtype=np.int16)
+        audio = np.concatenate((tones[0], silence, tones[1])).tobytes()
+        chunk_size = self.frames_per_buffer * self.sample_size
+        for offset in range(0, len(audio), chunk_size):
+            if self.is_aborted:
+                break
+            stream.write(
+                self._apply_output_gain_pcm16(audio[offset:offset + chunk_size]),
+                exception_on_underflow=False,
             )
 
     def _number_to_text(self, match: re.Match[str]):
@@ -1404,6 +1429,15 @@ class TTS:
                 "retry_on_error": False,
                 "line": line,
             })
+        return line
+
+    def play_listening_end_tone(self) -> TTSLine:
+        line = TTSLine()
+        self.read_queue.put({
+            "type": "listening_end_tone",
+            "retry_on_error": False,
+            "line": line,
+        })
         return line
 
     def play_audio_file(

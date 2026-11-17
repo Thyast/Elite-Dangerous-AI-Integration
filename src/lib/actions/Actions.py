@@ -56,7 +56,6 @@ def checkStatus(projected_states: ProjectedStates, blocked_status_dict: dict[str
                         raise Exception(f"Action not possible due to {'not ' if not expected_value else ''}being in a state of {blocked_status}!")
 
 
-# Define functions for each action
 # General Ship Actions
 def fire_weapons(args, projected_states):
     checkStatus(projected_states, {'Docked': True, 'Landed': True})
@@ -762,7 +761,7 @@ def fsd_jump(args, projected_states):
 
 def next_system_in_route(args, projected_states):
     nav_info = get_state_dict(projected_states, 'NavInfo')
-    if not nav_info.get('NextJumpTarget'):
+    if not nav_info.get('NavRoute'):
         return "cannot target next system in route as no navigation route is currently set"
 
     setGameWindowActive()

@@ -2,7 +2,7 @@ from pydantic.main import BaseModel
 from copy import copy, deepcopy
 from dataclasses import replace
 import os
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Literal, TypedDict, TypeVar
 
 from .Models import LLMModel, STTModel, TTSModel, EmbeddingModel
 from .Logger import log
@@ -18,6 +18,14 @@ from .PluginNamespace import PluginNamespace
 
 # Type alias for projected states dictionary
 ProjectedStates = dict[str, BaseModel]
+
+
+class NavigationPreparation(TypedDict):
+    status: Literal["ready", "arrived", "blocked", "failed"]
+    system: str
+    active_destination: str | None
+    next_jump: str | None
+    message: str
 
 # reexport Projection and PluginEvent for plugins
 Projection = _Projection

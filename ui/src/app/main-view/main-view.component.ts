@@ -15,6 +15,8 @@ import {Config, ConfigService} from "../services/config.service";
 import { Subscription } from "rxjs";
 import { ChatService } from "../services/chat.service";
 import { MatTabsModule } from "@angular/material/tabs";
+import { MatTooltipModule } from "@angular/material/tooltip";
+import { MatCheckboxModule } from "@angular/material/checkbox";
 import { ChatContainerComponent } from "../components/chat-container/chat-container.component";
 import { StatusContainerComponent } from "../components/status-container/status-container.component";
 import { StorageContainerComponent } from "../components/storage-container/storage-container.component";
@@ -49,6 +51,8 @@ import { VoiceActivationStatusComponent } from "../components/voice-activation-s
         SettingsMenuComponent,
         InputContainerComponent,
         MatTabsModule,
+        MatTooltipModule,
+        MatCheckboxModule,
         ChatContainerComponent,
         StatusContainerComponent,
         StorageContainerComponent,
@@ -67,6 +71,12 @@ import { VoiceActivationStatusComponent } from "../components/voice-activation-s
 })
 export class MainViewComponent implements OnInit, OnDestroy {
     @ViewChild(SettingsMenuComponent) private settingsMenu?: SettingsMenuComponent;
+    readonly isOverlayInterface = inject(ActivatedRoute).snapshot.data["overlayInterface"] === true;
+    private readonly translate = inject(TranslateService);
+    private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+    private readonly changeDetector = inject(ChangeDetectorRef);
+    private readonly sections = inject(UISectionService);
+    private sectionSubscription?: Subscription;
 
     runMode: "starting" | "configuring" | "running" | "error" = "starting";
     isLoading = true;
@@ -83,6 +93,22 @@ export class MainViewComponent implements OnInit, OnDestroy {
     config: Config|undefined;
     hasLogbook = true;
     private uiChangeSubscription?: Subscription;
+    private uiVisibilitySubscription?: Subscription;
+    private vrAdjustmentSubscription?: Subscription;
+    vrAdjustmentActive = false;
+    get reducedFramePercent(): number | null {
+        const factor = this.config?.overlay_vr_gaze_reduction_factor;
+        return this.config?.overlay_mode === "vr-full"
+            && typeof factor === "number" && Number.isFinite(factor) && factor > 1
+            ? 100 / Math.sqrt(factor) : null;
+    }
+    get reducedOpacityPercent(): number {
+        return Math.round((this.config?.overlay_vr_gaze_reduced_opacity ?? 0.25) * 1000) / 10;
+    }
+    overlayInterfaceVisible = true;
+    get showOverlayChat(): boolean {
+        return this.isOverlayInterface && !this.overlayInterfaceVisible;
+    }
     private configSubscription!: Subscription;
     private inCombatSubscription!: Subscription;
     private currentStatusSubscription!: Subscription;
@@ -164,7 +190,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
             (config) => {
                 this.config = config ?? undefined;
                 if (
-                    this.config && this.config.cn_autostart &&
+                    !this.isOverlayInterface && this.config && this.config.cn_autostart &&
                     !this.isRunning && !this.hasAutoStarted
                 ) {
                     console.log("Started automatically.");
@@ -173,6 +199,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 }
 
                 this.hasLogbook = this.config?.embedding_provider != 'none';
+                this.selectRequestedTab();
             },
         );
 
@@ -225,6 +252,7 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 this.isDockedAtStation = Boolean(currentStatusData?.flags?.Docked === true);
                 this.currentGameModeLabel = this.getCurrentGameModeLabel(currentStatusData);
                 this.currentGameModeIcon = this.getCurrentGameModeIcon(currentStatusData);
+                this.selectRequestedTab();
             });
 
         // Subscribe to ShipInfo projection to track unknown ship ident
@@ -235,11 +263,22 @@ export class MainViewComponent implements OnInit, OnDestroy {
                 this.isShipIdentUnknown = shipIdent === 'Unknown';
                 this.currentGameModeLabel = this.getCurrentGameModeLabel(this.currentStatusData);
                 this.currentGameModeIcon = this.getCurrentGameModeIcon(this.currentStatusData);
+                this.selectRequestedTab();
             });
 
         // Initialize the main view
-        this.tauri.runExe();
-        this.tauri.checkForUpdates();
+        if (this.isOverlayInterface) {
+            void this.tauri.send_command({
+                type: "init_overlay",
+                timestamp: new Date().toISOString(),
+            }).catch(error => {
+                console.error("Failed to initialize VR interface:", error);
+                this.snackBar.open(this.translate.instant("vrInterface.initError"), "OK", { duration: 7000 });
+            });
+        } else {
+            this.tauri.runExe();
+            this.tauri.checkForUpdates();
+        }
     }
 
     ngOnDestroy(): void { // Implement ngOnDestroy
@@ -353,7 +392,8 @@ export class MainViewComponent implements OnInit, OnDestroy {
             if(
                 this.config
                 && this.config.overlay_mode !== "disabled"
-                && (this.config.overlay_show_avatar || this.config.overlay_show_chat || this.config.overlay_show_hud)
+                && (this.config.overlay_show_avatar || this.config.overlay_show_chat || this.config.overlay_show_hud
+                    || this.config.overlay_mode === "vr-full")
             ) {
                 await this.createOverlay();
             }
@@ -384,22 +424,40 @@ export class MainViewComponent implements OnInit, OnDestroy {
             }
 
             const screenId = this.config?.overlay_screen_id ?? -1; // -1 for primary screen
+            const full = this.config?.overlay_mode === "vr-full";
+            const settings = full ? { ...this.config, ...this.config?.overlay_vr_full_last } : this.config;
 
-            await this.tauri.createOverlay({
+            const result = await this.tauri.createOverlay({
                 alwaysOnTop: true,
                 screenId: screenId,
                 mode: this.config?.overlay_mode ?? "desktop",
+                vrContent: full ? "interface" : "hud",
+                vrGazeZoom: full && (settings?.overlay_vr_gaze_reduction_factor ?? 1) > 1,
+                vrGazeReductionFactor: settings?.overlay_vr_gaze_reduction_factor ?? 1,
+                vrGazeReducedOpacity: settings?.overlay_vr_gaze_reduced_opacity ?? 0.25,
                 standaloneTransparent: this.config?.overlay_standalone_transparent ?? true,
                 standaloneBackgroundColor: this.config?.overlay_standalone_background_color ?? "#000000",
-                vrSizeMeters: this.config?.overlay_vr_size_meters ?? 0.9,
-                vrAnchor: this.config?.overlay_vr_anchor ?? "head",
-                vrHorizontalOffset: this.config?.overlay_vr_horizontal_offset ?? 0,
-                vrVerticalOffset: this.config?.overlay_vr_vertical_offset ?? 0,
-                vrDistanceOffset: this.config?.overlay_vr_distance_offset ?? 0,
-                vrTiltDegrees: this.config?.overlay_vr_tilt_degrees ?? 0,
-                vrYawDegrees: this.config?.overlay_vr_yaw_degrees ?? 0,
-                vrCurvature: this.config?.overlay_vr_curvature ?? 0,
+                vrSizeMeters: settings?.overlay_vr_size_meters ?? 0.9,
+                vrAnchor: full ? "world" : this.config?.overlay_vr_anchor ?? "head",
+                vrHorizontalOffset: settings?.overlay_vr_horizontal_offset ?? 0,
+                vrVerticalOffset: settings?.overlay_vr_vertical_offset ?? 0,
+                vrDistanceOffset: settings?.overlay_vr_distance_offset ?? 0,
+                vrTiltDegrees: settings?.overlay_vr_tilt_degrees ?? 0,
+                vrYawDegrees: settings?.overlay_vr_yaw_degrees ?? 0,
+                vrCurvature: settings?.overlay_vr_curvature ?? 0,
             });
+            if (result?.gazeZoom.status === "unavailable") {
+                this.snackBar.open(
+                    this.translate.instant("vrInterface.gazeUnavailable", { reason: result.gazeZoom.message }),
+                    "OK", { duration: 10000 },
+                );
+            }
+            if (result?.heightInitialization?.status === "unavailable") {
+                this.snackBar.open(
+                    this.translate.instant("vrInterface.heightUnavailable", { reason: result.heightInitialization.message }),
+                    "OK", { duration: 10000 },
+                );
+            }
         } catch (error) {
             console.error("Failed to create overlay:", error);
             this.snackBar.open(

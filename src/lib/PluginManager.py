@@ -608,7 +608,37 @@ class PluginManager:
                              "two-letter language code or None.")
         return language
 
-    def create_plugin_model(self, plugin_guid: str, provider_id: str, expected_kind: str) -> LLMModel | STTModel | TTSModel | EmbeddingModel | None:
+    def register_language_detector(
+        self, plugin_guid: str, detector: Callable[[str], str | None],
+    ) -> None:
+        if plugin_guid not in self._owners:
+            raise ValueError("Language detectors must belong to a registered plugin.")
+        if not callable(detector):
+            raise ValueError("A language detector must be callable.")
+        if self._language_detector is not None and self._language_detector[0] != plugin_guid:
+            raise ValueError("Only one language detector plugin can be active.")
+        self._language_detector = (plugin_guid, detector)
+
+    @property
+    def has_language_detector(self) -> bool:
+        return self._language_detector is not None
+
+    def detect_language(self, text: str) -> str | None:
+        registered = self._language_detector
+        if registered is None:
+            return None
+        language = registered[1](text)
+        if language is not None and (
+            not isinstance(language, str) or not re.fullmatch(r"[a-z]{2}", language)
+        ):
+            raise ValueError(f"Language detector '{registered[0]}' must return a lowercase "
+                             "two-letter language code or None.")
+        return language
+
+    def create_plugin_model(
+        self, plugin_guid: str, provider_id: str, expected_kind: str,
+        *, settings_override: dict[str, Any] | None = None,
+    ) -> LLMModel | STTModel | TTSModel | EmbeddingModel | None:
         """
         Create a model instance from a plugin provider.
         
@@ -636,7 +666,7 @@ class PluginManager:
             return None
         
         # Get plugin settings
-        settings = self.config.get('plugin_settings', {}).get(plugin_guid, {})
+        settings = settings_override if settings_override is not None else self.config.get('plugin_settings', {}).get(plugin_guid, {})
         
         # Call the plugin's create_model method
         try:

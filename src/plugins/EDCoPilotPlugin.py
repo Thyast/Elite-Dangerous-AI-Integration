@@ -685,7 +685,7 @@ class EDCoPilotPlugin(PluginBase):
             description=(
                 "Navigate to a visual panel in EDCoPilot. This does not retrieve or answer "
                 "questions about game state; use the relevant data action for those instead. "
-                "For modules installed on the current ship, use ship_upgrade_current_loadout, "
+                "For modules installed on the current ship, use an available loadout data action, "
                 "not shiplist or storedmodules."
             ),
             parameters=EDCoPilotOpenPanelParams,

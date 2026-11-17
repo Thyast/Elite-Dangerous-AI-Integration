@@ -737,7 +737,14 @@ class Plotter:
         except TimeoutError:
             if clear_nav_route:
                 return "Failed to clear navigation route"
-            return f"Failed to plot a route to {system_name}"
+            _events, latest = self.event_manager.get_current_state()
+            route = get_state_dict(latest, 'NavInfo').get('NavRoute') or []
+            destination = self._nav_route_item_system(route[-1]) if route else None
+            warning = (f"A route to {destination} is active instead; do not follow it toward {system_name}."
+                       if destination else "No navigation route is confirmed.")
+            log('warn', f"Route to {system_name} was not confirmed. {warning}")
+            return (f"Failed to confirm a route to {system_name}. {warning} "
+                    "This does not establish that the destination is unreachable.")
 
     @staticmethod
     def calculate_navigation_distance_and_timing(current_system: str, target_system: str) -> tuple[float, int]:

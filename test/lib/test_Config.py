@@ -135,6 +135,15 @@ def test_action_defaults_match_registered_permissions() -> None:
     assert set(default_allowed_actions) == registered_permissions
 
 
+def test_recenter_permission_is_added_to_existing_configs_without_reenabling_disabled_actions() -> None:
+    defaults = {"allowed_actions": default_allowed_actions}
+    merged = ConfigModule.merge_config_data(defaults, {"allowed_actions": {"fireWeapons": False}})
+    assert merged["allowed_actions"]["recenterVRView"] is True
+    assert merged["allowed_actions"]["fireWeapons"] is False
+    merged = ConfigModule.merge_config_data(defaults, {"allowed_actions": {"recenterVRView": False}})
+    assert merged["allowed_actions"]["recenterVRView"] is False
+
+
 def test_migrate_removes_tools_var_and_migrates_providers() -> None:
     migrated = migrate({
         "config_version": 20,
@@ -352,6 +361,12 @@ def test_default_config_uses_plugins_and_has_no_legacy_provider_settings(monkeyp
     assert config["llm_provider"].startswith("plugin:")
     assert config["agent_llm_provider"].startswith("plugin:")
     assert config["embedding_provider"].startswith("plugin:")
+    assert "overlay_vr_content" not in config
+    assert "overlay_vr_gaze_zoom" not in config
+    assert config["overlay_vr_full_profiles"] == {}
+    assert config["overlay_vr_full_last"] == {}
+    assert config["overlay_vr_gaze_reduction_factor"] == 1.0
+    assert config["overlay_vr_gaze_reduced_opacity"] == 0.25
     assert "tools_var" not in config
     assert not set(ConfigModule.LEGACY_PROVIDER_SETTING_KEYS).intersection(config)
 
