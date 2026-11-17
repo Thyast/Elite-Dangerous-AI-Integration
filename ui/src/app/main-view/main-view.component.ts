@@ -37,6 +37,8 @@ import { TranslateModule } from "@ngx-translate/core";
 import { UISectionService } from "../services/ui-section.service";
 import { VoiceActivationStatusComponent } from "../components/voice-activation-status/voice-activation-status.component";
 
+const CHAT_SHOW_EVENTS_KEY = "covas.ui.chat-show-events";
+
 @Component({
     selector: "app-main-view",
     standalone: true,
