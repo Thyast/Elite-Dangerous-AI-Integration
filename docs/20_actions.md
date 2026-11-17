@@ -4,6 +4,28 @@ Actions (also called Tools, Commands, or Functions) are the actions that COVAS:N
 Primarily, these actions can be used to control various ship/srv/suit operations, such as firing weapons, adjusting speed, deploying heat sinks, and more.
 Additionally, the AI can fetch internet data if it deems it relevant for the conversation, by either your inquiry or game events happening.
 
+## Guardian module unlocks
+
+Guardian Technology Broker unlocks are read from the game journal. If older
+journal entries are missing, tell the assistant by voice (including in VR)
+that a specific Guardian module is unlocked, or say it is locked to correct a
+previous manual indication. Internal modules cover all sizes of their family;
+for weapons, specify the size then mount, for example "Guardian Gauss Cannon
+Medium Fixed" or "Guardian Plasma Charger Medium Turret". Names are matched
+case-insensitively but otherwise exactly against variants in the committed
+FDevIDs outfitting catalog. A recorded journal unlock always takes
+precedence over a manual "locked" indication.
+
+Standard unlocks are grouped by their `entitlement` in that catalog: internal
+variants of different sizes and ratings share one entitlement, while standard
+Guardian weapons have separate entitlements by size and mount. This is an
+inference from the catalog's access rights, not a verification of the game's
+unlock rules. The projection retains the original journal symbol. Symbols
+absent from the catalog or without a standard Guardian entitlement are shown
+separately as unrecognized, never silently counted as unlocked. In particular,
+this matching does not establish whether an Azimuth-modified weapon has been
+unlocked: its acquisition cannot always be identified by the base symbol.
+
 ## Keyboard and Mouse Bindings
 
 COVAS:NEXT uses your Elite: Dangerous control bindings to emulate button presses, allowing the AI to control various ship/SRV/suit operations.

@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+
+import pytest
 import sys
 
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
@@ -9,6 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.lib.actions import actions_web
+from src.lib.actions import Actions as actions
 
 
 class FakePromptGenerator:
@@ -39,6 +42,40 @@ class FailingLLMModel:
         raise RuntimeError("model unavailable")
 
 
+class BrokerPromptGenerator:
+    def generate_status_message(self, projected_states: dict) -> str:
+        return "CargoContents: 2 X Reinforced Mounting Plate"
+
+
+class BrokerLLMModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, messages: list, tools: list, tool_choice: str):
+        self.calls += 1
+        if self.calls == 1:
+            system_prompt = messages[0]["content"]
+            assert "Technology Broker module unlock requirements" in system_prompt
+            assert "CargoContents" in system_prompt
+            assert "Do not send commodities to material_finder" in system_prompt
+            assert "CargoContents: 2 X Reinforced Mounting Plate" in messages[1]["content"]
+            return "", [ChatCompletionMessageFunctionToolCall(
+                type="function",
+                id="station_call_1",
+                function={
+                    "name": "station_finder",
+                    "arguments": json.dumps({
+                        "commodities": [{
+                            "name": "Reinforced Mounting Plate",
+                            "amount": 3,
+                            "transaction": "Buy",
+                        }],
+                    }),
+                },
+            )], {}
+        return "Need 5; you have 2. Buy 3 more.", None, {}
+
+
 def consume_generator(generator):
     values = []
     while True:
@@ -46,6 +83,34 @@ def consume_generator(generator):
             values.append(next(generator))
         except StopIteration as stop:
             return values, stop.value
+
+
+def test_get_visuals_answers_armor_query_from_technical_loadout_id(monkeypatch) -> None:
+    monkeypatch.setattr(actions, "screenshot", lambda: pytest.fail("visual query should use loadout"))
+    monkeypatch.setattr(actions, "vision_model", None)
+
+    result = actions.get_visuals(
+        {"query": "Quel est le module d'armure que j'ai déjà ?"},
+        {
+            "Loadout": {
+                "Ship": "smallcombat01_nx",
+                "Modules": [
+                    {
+                        "Slot": "Armour",
+                        "Item": "smallcombat01_nx_armour_reactive",
+                        "Engineering": {
+                            "BlueprintName": "Armour_Thermic",
+                            "Level": 5,
+                        },
+                    }
+                ],
+            }
+        },
+    )
+
+    assert "smallcombat01_nx_armour_reactive" in result
+    assert "Armour_Thermic" in result
+    assert "grade 5" in result
 
 
 def test_web_search_agent_yields_internal_tool_processing_events(monkeypatch) -> None:
@@ -82,6 +147,34 @@ def test_web_search_agent_yields_internal_tool_processing_events(monkeypatch) ->
         },
     ]
     assert final_result == "Final report"
+
+
+def test_web_search_agent_routes_broker_commodity_and_checks_cargo(monkeypatch) -> None:
+    station_calls = []
+
+    def fake_station_finder(args, projected_states):
+        station_calls.append(args)
+        return "Market results"
+
+    monkeypatch.setattr(actions_web, "station_finder", fake_station_finder)
+
+    updates, final_result = consume_generator(actions_web.web_search_agent(
+        {"query": "I need 5 Reinforced Mounting Plates to unlock a Guardian module at a Technology Broker"},
+        {"Cargo": {"Inventory": [{"Name": "Reinforced Mounting Plate", "Count": 2}]}},
+        prompt_generator=BrokerPromptGenerator(),
+        llm_model=BrokerLLMModel(),
+        max_loops=3,
+    ))
+
+    assert station_calls == [{
+        "commodities": [{
+            "name": "Reinforced Mounting Plate",
+            "amount": 3,
+            "transaction": "Buy",
+        }],
+    }]
+    assert updates[2]["result"] == "Market results"
+    assert final_result == "Need 5; you have 2. Buy 3 more."
 
 
 def test_web_search_agent_returns_actionable_loop_error() -> None:
@@ -439,6 +532,81 @@ def test_station_request_rejects_invalid_commodity_market_data_age() -> None:
         raise AssertionError("Expected an invalid market data age to be rejected")
 
 
+def test_structured_station_search_handles_multiple_module_filters(monkeypatch) -> None:
+    captured = []
+
+    def fake_prepare(obj, states):
+        captured.append(obj)
+        return {"filters": {"modules": obj["modules"]}, "size": obj["size"]}
+
+    monkeypatch.setattr(actions_web, "prepare_station_request", fake_prepare)
+    monkeypatch.setattr(
+        actions_web,
+        "_execute_station_search",
+        lambda request: {
+            "amount_total": 1,
+            "results": [{
+                "name": "Jameson Memorial",
+                "system": "Shinrarta Dezhra",
+                "distance": 12.0,
+                "distance_to_arrival": 100.0,
+                "is_planetary": False,
+                "services": ["outfitting"],
+                "modules": [
+                    {"name": "Beam Laser", "class": "3", "rating": "A", "price": 100},
+                    {"name": "Power Plant", "class": "5", "rating": "A", "price": 200},
+                ],
+                "matched_filters": request["filters"]["modules"],
+            }],
+        },
+    )
+
+    result = actions_web.search_stations_for_modules(
+        [
+            {"name": "Beam Laser", "class": ["3"], "rating": ["A"]},
+            {"name": "Power Plant", "class": ["5"], "rating": ["A"]},
+        ],
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert len(result["stations"]) == 1
+    station = result["stations"][0]
+    assert station["name"] == "Jameson Memorial"
+    assert len(station["modules"]) == 2
+    assert len(station["matched_filters"]) == 2
+    assert station["stock_status"] == "unknown"
+    assert len(captured[0]["modules"]) == 2
+
+
+def test_structured_station_search_returns_errors_as_data(monkeypatch) -> None:
+    def fail(_request):
+        raise RuntimeError("Spansh unavailable")
+
+    monkeypatch.setattr(actions_web, "prepare_station_request", lambda obj, states: {"filters": {}, "size": 1})
+    monkeypatch.setattr(actions_web, "_execute_station_search", fail)
+
+    result = actions_web.search_stations_for_modules([{"name": "Beam Laser"}], {})
+
+    assert result["status"] == "error"
+    assert result["stations"] == []
+    assert "Spansh unavailable" in result["error"]
+
+
+def test_structured_station_search_returns_errors_as_data(monkeypatch) -> None:
+    def fail(_request, **_kwargs):
+        raise RuntimeError("Spansh unavailable")
+
+    monkeypatch.setattr(actions_web, "prepare_station_request", lambda obj, states: {"filters": {}, "size": 1})
+    monkeypatch.setattr(actions_web, "_execute_station_search", fail)
+
+    result = actions_web.search_stations_for_modules([{"name": "Beam Laser"}], {})
+
+    assert result["status"] == "error"
+    assert result["stations"] == []
+    assert "Spansh unavailable" in result["error"]
+
+
 def test_station_response_reports_effective_commodity_market_data_age() -> None:
     response = actions_web.filter_station_response({
         "filters": {
@@ -460,6 +628,78 @@ def test_station_response_reports_effective_commodity_market_data_age() -> None:
     })
 
     assert response["market_data_max_age_days"] == 7
+
+
+def _spansh_station(**extra) -> dict:
+    return {
+        "name": "Broglie Terminal",
+        "system_name": "61 Cygni",
+        "system_x": -11.2,
+        "system_y": -1.2,
+        "system_z": 1.4,
+        "distance": 11.4,
+        "distance_to_arrival": 10,
+        "is_planetary": False,
+        "services": [],
+        **extra,
+    }
+
+
+def test_structured_station_rows_expose_system_coordinates() -> None:
+    request = {"filters": {}}
+    response = {"count": 1, "size": 1, "results": [_spansh_station(material_trader="Raw")]}
+
+    structured = actions_web.filter_station_response(request, response, include_match_metadata=True)
+    llm_facing = actions_web.filter_station_response(request, response)
+
+    assert structured["results"][0]["coords"] == {"x": -11.2, "y": -1.2, "z": 1.4}
+    assert structured["results"][0]["material_trader"] == "Raw"
+    assert "coords" not in llm_facing["results"][0]
+    assert "material_trader" not in llm_facing["results"][0]
+
+
+def test_material_trader_search_filters_type_and_large_pad(monkeypatch) -> None:
+    posted: list[dict] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"count": 1, "size": 5, "results": [_spansh_station(material_trader="Encoded")]}
+
+    monkeypatch.setattr(
+        actions_web.requests, "post",
+        lambda url, json, timeout: posted.append(json) or FakeResponse(),
+    )
+
+    result = actions_web.search_material_traders(
+        "Encoded",
+        {"ShipInfo": {"LandingPadSize": "L"}, "Location": {"StarSystem": "Sol", "StarPos": [0, 0, 0]}},
+    )
+
+    filters = posted[0]["filters"]
+    assert filters["material_trader"] == {"value": ["Encoded"]}
+    assert filters["has_large_pad"] == {"value": True}
+    assert posted[0]["sort"] == [{"distance": {"direction": "asc"}}]
+    assert result["status"] == "ok"
+    station = result["stations"][0]
+    assert station["system"] == "61 Cygni"
+    assert station["coords"] == {"x": -11.2, "y": -1.2, "z": 1.4}
+    assert station["material_trader"] == "Encoded"
+
+
+def test_material_trader_search_returns_errors_as_data(monkeypatch) -> None:
+    def fail(_request):
+        raise RuntimeError("Spansh unavailable")
+
+    monkeypatch.setattr(actions_web, "_execute_station_search", fail)
+
+    result = actions_web.search_material_traders("Raw", {})
+
+    assert result["status"] == "error"
+    assert result["stations"] == []
+    assert "Spansh unavailable" in result["error"]
 
 
 def test_resolve_plot_target_queries_all_spansh_endpoints(monkeypatch) -> None:

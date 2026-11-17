@@ -21,6 +21,7 @@ from .projections.exobiology_scan import ExobiologyScan
 from .projections.fleet_carriers import FleetCarriers
 from .projections.friends import Friends
 from .projections.fss_signals import FSSSignals
+from .projections.guardian_unlocks import GuardianUnlocks
 from .projections.idle import Idle
 from .projections.in_combat import InCombat
 from .projections.in_docking_range import InDockingRange
@@ -52,6 +53,7 @@ def registerProjections(
     event_manager.register_projection(Location())
     event_manager.register_projection(Missions())
     event_manager.register_projection(EngineerProgress())
+    event_manager.register_projection(GuardianUnlocks())
     event_manager.register_projection(RankProgress())
     event_manager.register_projection(CommunityGoal())
     event_manager.register_projection(Squadron())

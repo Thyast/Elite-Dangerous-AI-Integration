@@ -1,0 +1,9 @@
+{
+  "guid": "f1d78e6b-3e3b-4dc6-a61c-bff3e2b2f11e",
+  "name": "Ship Upgrade Manager",
+  "author": "COVAS:NEXT",
+  "version": "1.0.0",
+  "repository": "",
+  "description": "Manage ship upgrade plans and track progression by ship session.",
+  "entrypoint": "ship_upgrade_manager.py"
+}

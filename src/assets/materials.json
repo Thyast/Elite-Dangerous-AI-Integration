@@ -627,8 +627,18 @@
       "Count": 0
     },
     {
+      "Name": "guardian_moduleblueprint",
+      "Name_Localised": "Guardian Module Blueprint Fragment",
+      "Count": 0
+    },
+    {
       "Name": "guardian_vesselblueprint",
       "Name_Localised": "Guardian Vessel Blueprint Fragment",
+      "Count": 0
+    },
+    {
+      "Name": "guardian_weaponblueprint",
+      "Name_Localised": "Guardian Weapon Blueprint Fragment",
       "Count": 0
     },
     {

@@ -39,6 +39,29 @@ def test_dock_srv_resets_matching_fighter_only() -> None:
     )
 
 
+def test_loadout_maps_kestrel_internal_id_to_display_name() -> None:
+    projection = ShipInfo()
+
+    projection.process(game_event({
+        "timestamp": "2026-09-25T18:00:00Z",
+        "event": "Loadout",
+        "Ship": "smallcombat01_nx",
+        "ShipName": "Test ship",
+        "Modules": [
+            {
+                "Slot": "Armour",
+                "Item": "smallcombat01_nx_armour_reactive",
+                "Health": 1.0,
+                "On": True,
+                "Priority": 1,
+            }
+        ],
+    }))
+
+    assert projection.state.Type == "smallcombat01_nx"
+    assert projection.state.DisplayType == "Kestrel Mk II"
+
+
 def test_fighter_loadout_tracks_launch_and_is_cleared_on_reset() -> None:
     projection = ShipInfo()
     projection.state.Fighters = [FighterState(Status="Ready")]

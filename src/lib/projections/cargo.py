@@ -24,6 +24,7 @@ class CargoState(BaseModel):
     Inventory: list[CargoItem] = Field(default_factory=list, description="List of cargo items")
     TotalItems: int = Field(default=0, description="Total cargo items count")
     Capacity: int = Field(default=0, description="Maximum cargo capacity")
+    CapacityKnown: bool = Field(default=False, description="Whether a loadout has reported the ship's cargo capacity")
     Vessel: str | None = Field(default=None, description="Cargo vessel (Ship/SRV)")
 
 
@@ -32,6 +33,9 @@ class Cargo(Projection[CargoState]):
 
     @override
     def process(self, event: Event) -> None:
+        if isinstance(event, GameEvent) and event.content.get("event") in {"LoadGame", "ShipyardSwap", "ShipyardNew"}:
+            self.state = CargoState()
+            return
         # Process Cargo event
         if isinstance(event, GameEvent) and event.content.get("event") == "Cargo":
             payload = cast(CargoEvent, event.content)
@@ -44,7 +48,8 @@ class Cargo(Projection[CargoState]):
                 for item in inventory:
                     self.state.Inventory.append(
                         CargoItem(
-                            Name=item.get("Name_Localised", item.get("Name", "Unknown")),
+                            Name=item.get("Name", "Unknown"),
+                            Name_Localised=item.get("Name_Localised"),
                             Count=item.get("Count", 0),
                             Stolen=item.get("Stolen", 0) > 0,
                         )
@@ -57,6 +62,7 @@ class Cargo(Projection[CargoState]):
         if isinstance(event, GameEvent) and event.content.get("event") == "Loadout":
             payload = cast(LoadoutEvent, event.content)
             self.state.Capacity = int(payload["CargoCapacity"])
+            self.state.CapacityKnown = True
 
         # Update from Status event
         if isinstance(event, StatusEvent) and event.status.get("event") == "Status":

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-10T09:51:48.649775+00:00",
+  "sources": [
+    {
+      "id": "coriolis-data",
+      "revision": "master",
+      "license": "MIT"
+    },
+    {
+      "id": "FDevIDs/outfitting.csv",
+      "revision": "sha256:ba1fe474737ea00fae7f55ffd335c444eb05fadd3699ddd91df54041e4d2a0ca",
+      "url": "https://raw.githubusercontent.com/EDCD/FDevIDs/master/outfitting.csv",
+      "license": "not specified"
+    }
+  ],
+  "counts": {
+    "catalog_blueprints": 81,
+    "outfitting_modules": 1236,
+    "local_blueprint_names": 119,
+    "local_module_families": 54,
+    "materials_known": 138,
+    "unknown_material_names": 0,
+    "engineers_added_from_local_asset": 4167
+  },
+  "coverage": {
+    "local_families_with_catalog_bp": [
+      "armour",
+      "bulkheads",
+      "chafflauncher",
+      "collectorlimpetcontroller",
+      "detailedsurfacescanner",
+      "frameshiftdrive",
+      "frameshiftdriveinterdictor",
+      "frameshiftwakescanner",
+      "fuelscoop",
+      "fueltransferlimpetcontroller",
+      "hatchbreakerlimpetcontroller",
+      "heatsinklauncher",
+      "hullreinforcementpackage",
+      "killwarrantscanner",
+      "lifesupport",
+      "manifestscanner",
+      "pointdefence",
+      "powerdistributor",
+      "powerplant",
+      "prospectorlimpetcontroller",
+      "refinery",
+      "sensors",
+      "shieldbooster",
+      "shieldcellbank",
+      "shieldgenerator",
+      "thrusters"
+    ],
+    "local_families_without_catalog_bp": [
+      "autofieldmaintenanceunit",
+      "beamlaser",
+      "burstlaser",
+      "cannon",
+      "containmentmissile",
+      "electroniccountermeasure",
+      "fragmentcannon",
+      "guardianframeshiftdrivebooster",
+      "guardiangausscannon",
+      "guardianhybridpowerdistributor",
+      "guardianhybridpowerplant",
+      "guardianmodulereinforcementpackage",
+      "guardianplasmacharger",
+      "guardianshardcannon",
+      "guardianshieldreinforcementpackage",
+      "kinematicarmamentsweapons",
+      "manticoreweapons",
+      "minelauncher",
+      "missilerack",
+      "multicannon",
+      "packhoundmissilerack",
+      "plasmaaccelerator",
+      "pulselaser",
+      "railgun",
+      "seekermissilerack",
+      "suit",
+      "takadaweapons",
+      "torpedopylon"
+    ]
+  },
+  "unknown_materials": []
+}

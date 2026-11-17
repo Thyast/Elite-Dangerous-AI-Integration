@@ -43,6 +43,22 @@ Thank you for your interest in contributing! Here's how to set up your developme
 
 ## Backend Setup (Python)
 
+### Updating the module catalogs
+
+From the repository root, run `python tools/import_catalog.py --outfitting-only`
+to refresh the separate [outfitting catalog](src/assets/outfitting_catalog.json)
+and its [coverage report](src/assets/catalog_report.json) without changing the
+[engineering blueprint catalog](src/assets/module_catalog.json). Omit the flag
+to regenerate both catalogs (including EDCD/coriolis-data blueprints). The
+outfitting update downloads the latest
+[EDCD/FDevIDs outfitting.csv](https://raw.githubusercontent.com/EDCD/FDevIDs/master/outfitting.csv),
+validates the CSV headers, required values and unique IDs, and records the
+CSV's SHA-256 digest in the outfitting catalog's provenance. Check the generated
+diff and run `python -m pytest -q test/tools/ test/lib/projections/test_guardian_unlocks.py`
+before committing. Runtime uses only committed assets, not the network;
+restart the application to pick up an updated catalog. FDevIDs notes its list
+is incomplete (notably some PowerPlay modules).
+
 1. **Install Python 3.12**:
 
    Ensure you have at least Python 3.12 installed and available in your PATH. You can check this by running:
@@ -74,9 +90,11 @@ Thank you for your interest in contributing! Here's how to set up your developme
      .venv\Scripts\activate.bat
      ```
    - On **Windows (PowerShell)**:
-     `powershell
-.venv\Scripts\Activate.ps1
-`
+     ```powershell
+     . .\.venv312\Scripts\Activate.ps1
+     ```
+     This activates the existing Python 3.12 virtual environment in the
+     current PowerShell session.
      You should see `(.venv)` at the beginning of your terminal prompt.
 
 4. **Install Dependencies:**

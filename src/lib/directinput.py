@@ -7,6 +7,7 @@ import ctypes
 import json
 import time
 import platform
+from dataclasses import dataclass
 from typing import final
 
 from pynput.keyboard import Controller, Key, KeyCode  # pyright: ignore[reportMissingModuleSource]

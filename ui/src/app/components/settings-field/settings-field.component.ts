@@ -246,4 +246,98 @@ export class SettingsFieldComponent implements OnChanges {
         const key = entry.count === 1 ? this.field.count_labels?.one ?? 'common.itemsOne' : this.field.count_labels?.many ?? 'common.itemsMany';
         return this.resolve(key, { count: entry.count });
     }
+
+    onListAction(action: ListAction, row: ListRow): void {
+        if (action.inline_edit) {
+            this.editingAction = action;
+            this.editingRowKey = row.key;
+            this.editValue = row.title;
+            return;
+        }
+        this.listAction.emit({ action: action.action, rowKey: row.key });
+    }
+
+    confirmRowEdit(row: ListRow): void {
+        const action = this.editingAction;
+        this.editingRowKey = null;
+        this.editingAction = null;
+        if (!action) {
+            return;
+        }
+        this.listAction.emit({ action: action.action, rowKey: row.key, value: this.editValue });
+    }
+
+    cancelRowEdit(): void {
+        this.editingRowKey = null;
+        this.editingAction = null;
+        this.editValue = "";
+    }
+
+    rowsWithGroups(
+        items: ListRow[] | null | undefined,
+    ): { row: ListRow; header?: string; count?: number; groupPending?: boolean }[] {
+        const counts = new Map<string, number>();
+        const pending = new Map<string, boolean>();
+        for (const row of items ?? []) {
+            if (row.group) {
+                counts.set(row.group, (counts.get(row.group) ?? 0) + 1);
+                if (row.pending) {
+                    pending.set(row.group, true);
+                }
+            }
+        }
+        const entries: {
+            row: ListRow;
+            header?: string;
+            count?: number;
+            groupPending?: boolean;
+        }[] = [];
+        let lastGroup: string | undefined = undefined;
+        for (const row of items ?? []) {
+            const header = row.group && row.group !== lastGroup ? row.group : undefined;
+            lastGroup = row.group ?? lastGroup;
+            entries.push({
+                row,
+                header,
+                count: header !== undefined ? counts.get(row.group as string) : undefined,
+                groupPending: header !== undefined ? pending.get(row.group as string) : undefined,
+            });
+        }
+        return entries;
+    }
+
+    toggleGroup(group: string): void {
+        if (this.collapsedGroups.has(group)) {
+            this.collapsedGroups.delete(group);
+        } else {
+            this.collapsedGroups.add(group);
+        }
+    }
+
+    moduleName(row: ListRow): string {
+        const base = resolveModuleName(this.translate, row.title_key, row.title);
+        return row.grade ? `${base} ${row.grade}` : base;
+    }
+
+    nextModuleName(progress: {
+        next_key?: string;
+        next_label?: string;
+        next_class?: string;
+    }): string {
+        const base = resolveModuleName(this.translate, progress.next_key, progress.next_label ?? "");
+        return progress.next_class ? `${base} ${progress.next_class}` : base;
+    }
+
+    isGroupCollapsed(group: string | undefined): boolean {
+        return group !== undefined && this.collapsedGroups.has(group);
+    }
+
+    groupCountLabel(entry: { header?: string; count?: number }): string {
+        if (entry.header === undefined || entry.count === undefined) {
+            return "";
+        }
+        const unit = this.field?.unit === "module" ? "module" : "plan";
+        const key = entry.count === 1 ? `plugin.sum.${unit}One` : `plugin.sum.${unit}Many`;
+        return this.resolve(key, { count: entry.count });
+    }
 }
