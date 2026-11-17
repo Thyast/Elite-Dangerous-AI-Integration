@@ -12,11 +12,11 @@ import { EMPTY, of } from "rxjs";
 import { TestBed } from "@angular/core/testing";
 import { SettingsGridComponent } from "../components/settings-grid/settings-grid.component";
 import { SettingsGrid } from "./plugin-settings";
+import { PluginUIService } from "./plugin-ui.service";
+import { TranslateModule } from "@ngx-translate/core";
 import { CharacterSettingsComponent } from "../components/character-settings/character-settings.component";
 import { GeneralSettingsComponent } from "../components/general-settings/general-settings.component";
 import { AdvancedSettingsComponent } from "../components/advanced-settings/advanced-settings.component";
-import { PluginUIService } from "./plugin-ui.service";
-import { TranslateModule } from "@ngx-translate/core";
 
 describe("provider UI compatibility", () => {
     const provider = (

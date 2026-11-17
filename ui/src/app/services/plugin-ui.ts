@@ -1,5 +1,3 @@
-import type { SettingCondition } from "./plugin-settings";
-
 export interface UIText {
   text?: string;
   key?: string;
@@ -28,12 +26,11 @@ interface UIElementProperties {
   items?: ListRow[];
   row_actions?: ListAction[];
   count_labels?: {one: string; many: string};
+  details_collapsible?: boolean;
   text?: UIText;
   tone?: "default" | "info" | "warning" | "success" | "muted" | "danger";
   outlined?: boolean;
   level?: number | "info" | "warning" | "error";
-  condition?: SettingCondition;
-  fields?: UIComponent[];
   children?: UIComponent[];
   value?: number;
   maximum?: number;
@@ -135,6 +132,8 @@ export interface ListAction {
   label?: string;
   danger?: boolean;
   inline_edit?: boolean;
+  secondary?: boolean;
+  confirmation?: string;
 }
 
 export interface ListRow {
@@ -148,11 +147,14 @@ export interface ListRow {
   pending?: boolean;
   tone?: string;
   details?: UIComponent[];
+  summary?: UIComponent[];
+  highlighted?: boolean;
 }
 
 export interface UIViewSection {
   key: string;
   label: string;
+  voice_aliases?: string[];
   grids?: string[];
   content?: UINode[];
 }
@@ -160,6 +162,7 @@ export interface UIViewSection {
 export interface PluginUIView {
   id: string;
   label: string;
+  voice_aliases?: string[];
   description?: string;
   icon?: string;
   order?: number;

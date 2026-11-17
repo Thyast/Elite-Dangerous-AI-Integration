@@ -46,20 +46,6 @@ export function voiceSettingsContext(
     return { ...setValues(pluginSettings), ...setValues(characterSettings) };
 }
 
-// Deprecated names retained for existing consumers.
-export type SettingBase = UIComponent;
-export type TextSetting = UIComponent;
-export type FilterSetting = UIComponent;
-export type TextAreaSetting = UIComponent;
-export type NumericalSetting = UIComponent;
-export type ToggleSetting = UIComponent;
-export type ButtonSetting = UIComponent;
-export type ParagraphSetting = UIComponent;
-export type ErrorSetting = UIComponent;
-export type ListSetting = UIComponent;
-export type SelectSetting = UIComponent;
-export type NotificationSetting = UIComponent;
-
 export interface PluginSettingsMap {
     [plugin_guid: string]: PluginSettings;
 }

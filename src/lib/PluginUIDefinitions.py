@@ -8,7 +8,7 @@ class UIText(TypedDict, total=False):
     localized: dict[str, str]
 
 
-ComponentType = Literal['paragraph', 'notification', 'condition', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'filter', 'error', 'heading', 'section', 'inline', 'progress', 'action']
+ComponentType = Literal['paragraph', 'notification', 'text', 'textarea', 'toggle', 'number', 'select', 'button', 'list', 'filter', 'error', 'heading', 'section', 'inline', 'progress', 'action']
 
 
 class _ComponentProperties(TypedDict, total=False):
@@ -20,22 +20,12 @@ class _ComponentProperties(TypedDict, total=False):
     tone: Literal['default', 'info', 'warning', 'success', 'muted', 'danger']
     outlined: bool
     level: int | Literal['info', 'warning', 'error']
-    condition: 'SettingCondition'
-    fields: list['UIComponent']
     children: list['UIComponent']
     value: float
     maximum: float
     action: str
     payload: dict[str, Any]
     icon: str
-
-
-class SettingCondition(TypedDict):
-    """Compare a key in the current namespace, or use default_show when unset."""
-    key: str
-    operator: Literal['eq', 'neq', 'gt', 'geq', 'lt', 'leq', 'in', 'not_in', 'contains', 'not_contains', 'is_set', 'is_unset']
-    value: NotRequired[object]
-    default_show: NotRequired[bool]
 
 
 class UINode(_ComponentProperties, total=False):
@@ -98,7 +88,7 @@ class Paragraph(InputBase):
 
 
 class Notification(Paragraph):
-    level: Literal['info', 'warning', 'error']
+    pass
 
 
 class Error(Paragraph):
@@ -135,6 +125,8 @@ class ListAction(TypedDict):
     label: NotRequired[str]
     danger: NotRequired[bool]
     inline_edit: NotRequired[bool]
+    secondary: NotRequired[bool]
+    confirmation: NotRequired[str]
 
 
 class ListRow(TypedDict):
@@ -148,12 +140,15 @@ class ListRow(TypedDict):
     pending: NotRequired[bool]
     tone: NotRequired[str]
     details: NotRequired[list['UIComponent']]
+    summary: NotRequired[list['UIComponent']]
+    highlighted: NotRequired[bool]
 
 
 class List(UINode):
     items: NotRequired[list[ListRow]]
     row_actions: NotRequired[list[ListAction]]
     count_labels: NotRequired[dict[str, str]]
+    details_collapsible: NotRequired[bool]
 
 
 class UICondition(TypedDict):
@@ -208,6 +203,7 @@ def ui_fields(elements: list[UIComponent]) -> Iterator[UIComponent]:
 class UIViewSection(TypedDict):
     key: str
     label: str
+    voice_aliases: NotRequired[list[str]]
     grids: NotRequired[list[str]]
     content: NotRequired[list[UIComponent]]
 
@@ -215,6 +211,7 @@ class UIViewSection(TypedDict):
 class PluginUIView(TypedDict):
     id: str
     label: str
+    voice_aliases: NotRequired[list[str]]
     description: NotRequired[str]
     icon: NotRequired[str]
     order: NotRequired[int]

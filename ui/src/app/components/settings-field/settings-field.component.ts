@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject, forwardRef } from "@angular/core";
+import { Component, Input, Output, EventEmitter, inject, forwardRef, DestroyRef, OnChanges } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { MatFormFieldModule } from "@angular/material/form-field";
@@ -37,13 +37,18 @@ import { ConfirmationDialogService } from "../../services/confirmation-dialog.se
         MatButtonModule,
         MatIconModule,
         MatProgressBarModule,
+        MatMenuModule,
+        MatDialogModule,
+        MatTooltipModule,
         forwardRef(() => PluginContentComponent),
     ],
     templateUrl: "./settings-field.component.html",
     styleUrl: "./settings-field.component.css",
 })
-export class SettingsFieldComponent {
+export class SettingsFieldComponent implements OnChanges {
     private readonly translate = inject(TranslateService);
+    private readonly confirmation = inject(ConfirmationDialogService);
+    private readonly destroyRef = inject(DestroyRef);
 
     /**
      * The field definition containing type, label, and other metadata.
@@ -63,6 +68,17 @@ export class SettingsFieldComponent {
     @Input() onButtonClick?: (key: string, value?: string) => void;
 
     private readonly collapsedGroups = new Set<string>();
+    private highlightedRows = new Set<string>();
+
+    ngOnChanges(): void {
+        const highlighted = this.field?.items?.filter(row => row.highlighted) ?? [];
+        for (const row of highlighted) {
+            if (row.group !== undefined && !this.highlightedRows.has(row.key)) {
+                this.collapsedGroups.delete(row.group);
+            }
+        }
+        this.highlightedRows = new Set(highlighted.map(row => row.key));
+    }
 
     /**
      * Emitted when the field value changes.
@@ -129,6 +145,21 @@ export class SettingsFieldComponent {
     }
 
     onListAction(action: ListAction, row: ListRow): void {
+        if (action.confirmation) {
+            this.confirmation.openConfirmationDialog({
+                title: this.resolve(action.label),
+                message: this.resolve(action.confirmation, {...row.params, title: row.title}),
+                confirmButtonText: this.resolve(action.label),
+                cancelButtonText: this.resolve("common.cancel"),
+            }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(confirmed => {
+                if (confirmed) this.performListAction(action, row);
+            });
+            return;
+        }
+        this.performListAction(action, row);
+    }
+
+    private performListAction(action: ListAction, row: ListRow): void {
         if (action.inline_edit) {
             this.editingAction = action;
             this.editingRowKey = row.key;
@@ -152,6 +183,10 @@ export class SettingsFieldComponent {
         this.editingRowKey = null;
         this.editingAction = null;
         this.editValue = "";
+    }
+
+    hasSecondaryActions(): boolean {
+        return this.field.row_actions?.some(action => action.secondary) ?? false;
     }
 
     rowsWithGroups(
