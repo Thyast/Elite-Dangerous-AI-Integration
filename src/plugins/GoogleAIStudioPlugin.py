@@ -23,6 +23,13 @@ GOOGLE_TRANSCRIBE_MODEL = "gemini-3.5-transcribe"
 GOOGLE_TTS_MODEL = "gemini-3.8-flash-lite-tts"
 GOOGLE_TTS_MODELS = [GOOGLE_TTS_MODEL, "gemini-3.8-flash-tts"]
 GOOGLE_TTS_VOICE = "Kore"
+GOOGLE_TTS_VOICES = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+]
 GOOGLE_EMBEDDING_MODEL = "gemini-embedding-001"
 
 @dataclass(frozen=True)

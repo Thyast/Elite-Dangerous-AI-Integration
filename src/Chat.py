@@ -82,6 +82,7 @@ from lib.Projections import registerProjections
 from lib.PromptGenerator import PromptGenerator
 from lib.STT import STT, STTResult
 from lib.TTS import TTS, TTSLine
+from lib.TTSPreview import TTSPreview
 from lib.VoiceActivation import (
     PARAKEET_GUID,
     PARAKEET_MODEL,
@@ -99,9 +100,6 @@ from lib.Database import ModelUsageStore, QuestDatabase, VectorStore
 from lib.Assistant import Assistant
 from lib.VrOverlayAdjustment import VrOverlayAdjustment
 from lib.VrRecenter import recenter_game_and_kneeboard
-
-
-tts_preview = TTSPreview()
 
 
 tts_preview = TTSPreview()
@@ -507,6 +505,7 @@ class Chat:
             session.tick(
                 busy=(
                     self.assistant.reply_pending
+                    or self.vr_adjustment.active
                     or self.assistant.is_replying
                     or self.stt.recording
                     or self.stt.processing
@@ -519,6 +518,19 @@ class Chat:
             if session.consume_timeout():
                 self._voice_timeout_line = self.tts.play_listening_end_tone()
         self._emit_voice_activation()
+
+    def _update_stt_recording(self) -> None:
+        if not self.stt.recording:
+            self.listening = False
+            return
+        if not self.listening:
+            self.listening = True
+            self.event_manager.add_user_speaking()
+        # A wake-word recording may be ambient sound or unrelated speech.
+        # Accepted commands and controls interrupt in _handle_stt_result.
+        if self.stt.voice_activation is None and self.tts.get_is_playing():
+            log("debug", "interrupting TTS")
+            self.tts.abort()
 
     def _handle_stt_result(self, result: STTResult) -> None:
         session = self.stt.voice_activation
@@ -1026,6 +1038,7 @@ class Chat:
 
         while True:
             try:
+                self.vr_adjustment.tick()
                 self._update_voice_activation()
                 status = None
                 # check status file for updates
@@ -1187,6 +1200,8 @@ def read_stdin(chat: Chat):
         line = sys.stdin.readline().strip()
         if line:
             data = json.loads(line)
+            if data.get("type") == "vr_placement_result":
+                chat.vr_adjustment.handle_result(data)
             if data.get("type") == "ui_section_result":
                 from lib.actions.actions_ui import handle_ui_section_result
                 handle_ui_section_result(data)

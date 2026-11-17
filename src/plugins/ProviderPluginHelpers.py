@@ -1,4 +1,4 @@
-from typing import Any, List, Literal, Optional
+from typing import Any, Iterable, List, Literal, Optional
 
 from lib.Logger import ModelUsageStats
 from lib.Models import OpenAILLMModel
