@@ -22,6 +22,16 @@ If you are using Voice Activation, the AI gets interrupted when Voice is detecte
 - Use Push-to-Talk instead of Voice Activation, which will interrupt the AI only when you press the Push-to-Talk key.
 - Use closed headphones, which will prevent the microphone from picking up the AI's voice.
 
+## Speech playback fails with `[Errno -9999] Unanticipated host error`. What should I do?
+
+This is a local audio output error reported by PortAudio, not an error from the TTS provider. It can occur when an output device becomes unavailable or its driver cannot open or write to the audio stream.
+
+- Check that your selected output device is connected and enabled, then select it again in the audio settings.
+- On Windows, close applications that may be using the device in exclusive mode, or disable exclusive mode in the device's advanced sound properties.
+- If the problem persists, try a different output device and restart the assistant. Updating the audio device driver may also help.
+
+The assistant closes failed audio streams and reinitializes PortAudio before retrying playback. Retry delays increase up to 30 seconds. An interrupted line may restart from the beginning after recovery.
+
 ## Do you support other languages than English?
 
 Generally yes, but there are a few places that are currently english-only. The AI can understand and speak multiple languages, but due to some additionally process for numbers they might not be read correctly. Additionally, the AI tends to fall back to english sometimes, due to most of the game-events being in english. This can usually be fixed by reminding the AI of the language you want to use.

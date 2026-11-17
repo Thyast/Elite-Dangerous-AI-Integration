@@ -209,13 +209,17 @@ class TTS:
         backoff = 1
         while not self._shutdown.is_set():
             try:
+                if restart_audio:
+                    self.p.terminate()
+                    self.p = pyaudio.PyAudio()
+                    restart_audio = False
                 self._playback_loop()
             except Exception as e:
                 log('error', 'An error occurred during speech synthesis', e, traceback.format_exc())
                 show_chat_message('error', 'An error occurred during speech synthesis:', e)
                 self._shutdown.wait(min(backoff, 30))
                 log('info', 'Attempting to restart audio playback after failure')
-                backoff *= 2
+                backoff = min(backoff * 2, 30)
 
     def _playback_loop(self):
         stream = PCMOutput(
