@@ -52,13 +52,16 @@ class GoogleAIStudioLLMModel(OpenAILLMModel):
 
 
 class GoogleAIStudioTTSModel(TTSModel):
-    def __init__(self, api_key: str, model_name: str = GOOGLE_TTS_MODEL):
+    def __init__(self, api_key: str, model_name: str = GOOGLE_TTS_MODEL) -> None:
         super().__init__(model_name, provider_name="google-ai-studio")
         self.client = httpx.Client(
             base_url=f"{GOOGLE_AI_STUDIO_API_URL}/",
             headers={"x-goog-api-key": api_key},
             timeout=60.0,
         )
+
+    def close(self) -> None:
+        self.client.close()
 
     def _iter_audio_deltas(self, response: httpx.Response) -> Iterable[bytes]:
         for data in iter_sse_data(response.iter_lines()):
@@ -132,6 +135,8 @@ class GoogleAIStudioTTSModel(TTSModel):
                 headers={"Accept": "text/event-stream"},
                 json=payload,
             ) as response:
+                if not response.is_success:
+                    response.read()
                 response.raise_for_status()
                 if response.headers.get("content-type", "").split(";")[0].strip() != "text/event-stream":
                     raise LLMError("TTS Google AI Studio did not return an SSE audio stream")
@@ -150,7 +155,6 @@ class GoogleAIStudioTTSModel(TTSModel):
                 if buffer:
                     yield bytes(buffer)
         except httpx.HTTPStatusError as e:
-            e.response.read()
             try:
                 detail = e.response.json()
             except ValueError:

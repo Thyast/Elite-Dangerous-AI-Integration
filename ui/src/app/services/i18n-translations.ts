@@ -1,5 +1,16 @@
 export const TRANSLATIONS: Record<string, object> = {
   "en": {
+    "voicePreview": {
+      "message": "Voice test message",
+      "sample": "Hello Commander. All systems are operational. We are ready for departure.",
+      "play": "Play voice preview",
+      "playing": "Playing preview...",
+      "help": "Each click generates fresh speech with this character's current voice, instructions and audio effects, using the selected output device. Keep the same text to compare repeated tests. Remote providers receive this text and may charge for each test. Automatic in-game environment effects are not applied.",
+      "completed": "Previews completed: {{count}}",
+      "failed": "Voice preview failed.",
+      "disconnected": "The backend stopped. Restart it before trying again.",
+      "timeout": "The preview did not finish within three minutes. Check the backend and audio output before retrying."
+    },
     "common": { "cancel": "Cancel", "confirm": "Confirm", "actionError": "Could not complete the action.", "invalidAction": "Invalid plugin action or parameters.", "pluginUnavailable": "This plugin is unavailable.", "itemsOne": "{{count}} item", "itemsMany": "{{count}} items" },
     "module": {
       "powerplant": "Power Plant", "engine": "Thrusters", "enginefast": "Enhanced Performance Thrusters", "hyperdrive": "Frame Shift Drive (FSD)", "hyperdriveovercharge": "Frame Shift Drive (Supercruise Overcharge)", "lifesupport": "Life Support", "powerdistributor": "Power Distributor", "sensors": "Sensors", "fueltank": "Fuel Tank",
@@ -12,6 +23,17 @@ export const TRANSLATIONS: Record<string, object> = {
     }
   },
   "fr": {
+    "voicePreview": {
+      "message": "Message de test de la voix",
+      "sample": "Bonjour Commandant. Tous les systèmes sont opérationnels. Nous sommes prêts pour le départ.",
+      "play": "Écouter la voix",
+      "playing": "Lecture en cours...",
+      "help": "Chaque clic génère une nouvelle synthèse avec la voix, les consignes et les effets audio actuels du personnage, sur la sortie audio sélectionnée. Gardez le même texte pour comparer les essais. Les fournisseurs distants reçoivent ce texte et peuvent facturer chaque test. Les effets automatiques liés à l'environnement du jeu ne sont pas appliqués.",
+      "completed": "Essais terminés : {{count}}",
+      "failed": "Échec de l'aperçu vocal.",
+      "disconnected": "Le backend s'est arrêté. Redémarrez-le avant de réessayer.",
+      "timeout": "L'aperçu ne s'est pas terminé sous trois minutes. Vérifiez le backend et la sortie audio avant de réessayer."
+    },
     "common": { "cancel": "Annuler", "confirm": "Confirmer", "actionError": "Impossible d’effectuer cette action.", "invalidAction": "Action ou paramètres du plugin invalides.", "pluginUnavailable": "Ce plugin est indisponible.", "itemsOne": "{{count}} élément", "itemsMany": "{{count}} éléments" },
     "module": {
       "powerplant": "Générateur", "engine": "Propulseurs", "enginefast": "Propulseurs à performances améliorées", "hyperdrive": "Réacteur FSD", "hyperdriveovercharge": "Réacteur FSD (Surcharge Supercruise)", "lifesupport": "Système de survie", "powerdistributor": "Répartiteur de puissance", "sensors": "Capteurs", "fueltank": "Réservoir de carburant",

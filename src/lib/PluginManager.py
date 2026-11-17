@@ -564,7 +564,10 @@ class PluginManager:
             except Exception as e:
                 log('error', f"Failed to execute on_chat_stop hook for {module.plugin_manifest.name}: {e}")
 
-    def create_plugin_model(self, plugin_guid: str, provider_id: str, expected_kind: str) -> LLMModel | STTModel | TTSModel | EmbeddingModel | None:
+    def create_plugin_model(
+        self, plugin_guid: str, provider_id: str, expected_kind: str,
+        *, settings_override: dict[str, Any] | None = None,
+    ) -> LLMModel | STTModel | TTSModel | EmbeddingModel | None:
         """
         Create a model instance from a plugin provider.
         
@@ -592,7 +595,7 @@ class PluginManager:
             return None
         
         # Get plugin settings
-        settings = self.config.get('plugin_settings', {}).get(plugin_guid, {})
+        settings = settings_override if settings_override is not None else self.config.get('plugin_settings', {}).get(plugin_guid, {})
         
         # Call the plugin's create_model method
         try:

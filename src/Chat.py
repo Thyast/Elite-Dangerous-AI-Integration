@@ -79,6 +79,7 @@ from lib.Projections import registerProjections
 from lib.PromptGenerator import PromptGenerator
 from lib.STT import STT
 from lib.TTS import TTS
+from lib.TTSPreview import TTSPreview, resolve_tts_voice_settings
 from lib.StatusParser import StatusParser
 from lib.EDJournal import *
 from lib.EventManager import EventManager
@@ -87,6 +88,9 @@ from lib.QuestCatalogManager import QuestCatalogManager
 from lib.SystemDatabase import SystemDatabase
 from lib.Database import ModelUsageStore, QuestDatabase, VectorStore
 from lib.Assistant import Assistant
+
+
+tts_preview = TTSPreview()
 
 
 def get_model_usage_history_payload(
@@ -279,31 +283,9 @@ class Chat:
                 else:
                     self.ttsModel = cast(TTSModel, model)
                     provider = self.plugin_manager.get_plugin_provider(tts_plugin[0], tts_plugin[1])
-                    grids = provider.get("voice_settings_config") if provider else None
-                    if grids is not None:
-                        fields = [field for grid in grids for field in grid["fields"]]
-                        defaults = {
-                            field["key"]: field.get("default_value")
-                            for field in fields
-                            if "default_value" in field
-                        }
-                        stored = self.character.get("tts_voice_settings", {}).get(
-                            self.config["tts_provider"], {}
-                        )
-                        declared_keys = {field["key"] for field in fields}
-                        stored = {
-                            key: value
-                            for key, value in stored.items()
-                            if key in declared_keys
-                        } if isinstance(stored, dict) else {}
-                        tts_voice_settings = {
-                            **defaults,
-                            **stored,
-                        }
-                        if any(field["key"] == "voice" for field in fields):
-                            tts_voice_settings.setdefault("voice", self.character["tts_voice"])
-                        if any(field["key"] == "instructions" for field in fields):
-                            tts_voice_settings.setdefault("instructions", self.character["tts_prompt"])
+                    tts_voice_settings = resolve_tts_voice_settings(
+                        provider, self.character, self.config["tts_provider"],
+                    )
             else:
                 show_chat_message("warning", f"TTS provider is not a registered plugin: {self.config['tts_provider']}")
 
@@ -1035,6 +1017,8 @@ def read_stdin(chat: Chat):
         line = sys.stdin.readline().strip()
         if line:
             data = json.loads(line)
+            if data.get("type") == "preview_tts":
+                tts_preview.start(chat.config, chat.plugin_manager, data)
             if data.get("type") == "change_config":
                 partial = data.get("config")
                 if isinstance(partial, dict):
@@ -1205,6 +1189,8 @@ if __name__ == "__main__":
 
             try:
                 data = json.loads(line)
+                if data.get("type") == "preview_tts":
+                    tts_preview.start(config, plugin_manager, data)
                 if data.get("type") == "start":
                     if data.get("oldUi"):
                         config = load_config()

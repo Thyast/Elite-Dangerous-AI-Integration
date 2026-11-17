@@ -1,7 +1,7 @@
 import base64
 import json
 from math import ceil
-from httpx import Client, MockTransport, Response
+from httpx import ByteStream, Client, HTTPStatusError, MockTransport, Response
 import pytest
 from unittest.mock import MagicMock
 from time import sleep
@@ -9,7 +9,7 @@ from src.lib.Config import map_character_tts_postprocessing
 from src.lib.TTS import TTS
 from src.lib.Models import OpenAITTSModel
 from src.plugins.EdgeTTSPlugin import EdgeTTSModel
-from src.plugins.GoogleAIStudioPlugin import GoogleAIStudioTTSModel
+from src.plugins.GoogleAIStudioPlugin import GoogleAIStudioTTSModel, LLMError
 from src.plugins.MistralPlugin import MistralTTSModel
 import numpy as np
 
@@ -134,6 +134,30 @@ def test_tts_passes_character_voice_settings_and_applies_voice_override(mock_pya
     mock_model.synthesize.assert_not_called()
 
 
+@pytest.mark.parametrize("failure", [None, "synthesis", "device", "empty"])
+def test_voice_preview_playback_cleans_up_and_propagates_errors(mock_pyaudio, failure):
+    model = MagicMock(spec=OpenAITTSModel)
+    model.synthesize.return_value = [] if failure == "empty" else [b"\x01\x00" * 512]
+    if failure == "synthesis":
+        model.synthesize.side_effect = RuntimeError("Provider unavailable")
+    if failure == "device":
+        mock_pyaudio["audio"].open.side_effect = RuntimeError("Device unavailable")
+    tts = TTS(model, start_playback_thread=False)
+
+    if failure:
+        with pytest.raises(RuntimeError):
+            tts.play_once("Hello Commander.")
+    else:
+        tts.play_once("Hello Commander.")
+        mock_pyaudio["stream"].write.assert_called_once_with(
+            b"\x01\x00" * 512, exception_on_underflow=False,
+        )
+    mock_pyaudio["audio"].terminate.assert_called_once()
+    if failure != "device":
+        mock_pyaudio["stream"].stop_stream.assert_called_once()
+        mock_pyaudio["stream"].close.assert_called_once()
+
+
 def test_tts_does_not_inject_legacy_voice_into_provider_settings(mock_pyaudio):
     mock_model = MagicMock(spec=OpenAITTSModel)
     mock_model.synthesize_with_settings.return_value = [b'pcm']
@@ -182,6 +206,31 @@ def test_google_tts_integrates_character_settings_voice_override_and_audio_effec
     assert requests[0]["input"][0]["content"][0]["annotations"] == [
         {"type": "speech_metadata", "style": "Speak warmly in French."},
     ]
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 429, 503])
+@pytest.mark.parametrize("json_error", [False, True], ids=["text", "json"])
+def test_google_tts_preserves_streamed_http_errors(status, json_error):
+    detail = "Synthetic provider rejection"
+    body = json.dumps({"error": {"message": detail}}) if json_error else detail
+    response = Response(
+        status,
+        headers={"Content-Type": "application/json" if json_error else "text/plain"},
+        stream=ByteStream(body.encode()),
+    )
+    model = GoogleAIStudioTTSModel("test-google-key")
+    model.client.close()
+    with Client(
+        base_url="https://example.invalid/",
+        transport=MockTransport(lambda _request: response),
+    ) as client:
+        model.client = client
+        with pytest.raises(LLMError, match=f"HTTP {status}:.*{detail}") as caught:
+            list(model.synthesize("Bonjour", "Kore"))
+
+    assert response.is_closed
+    assert isinstance(caught.value.original_error, HTTPStatusError)
+    assert caught.value.original_error.response.status_code == status
 
 
 def test_openai_tts_playback_with_voice_instructions(mock_pyaudio, mock_openai):

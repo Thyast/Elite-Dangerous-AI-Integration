@@ -773,7 +773,7 @@ class TTSModel(ABC):
     model_name: str
     provider_name: str | None
 
-    def __init__(self, model_name: str, provider_name: str | None = None):
+    def __init__(self, model_name: str, provider_name: str | None = None) -> None:
         self.model_name = model_name
         self.provider_name = provider_name
 
@@ -785,12 +785,19 @@ class TTSModel(ABC):
         """Synthesize with character-scoped provider settings while preserving legacy models."""
         return self.synthesize(text, str(settings.get("voice") or ""))
 
+    def close(self) -> None:
+        """Release resources owned by this model; legacy providers need not override this."""
+        pass
+
 class OpenAITTSModel(TTSModel):
-    def __init__(self, base_url: str, api_key: str, model_name: str, speed: float = 1.0, voice_instructions: str | None = None, provider_name: str | None = None):
+    def __init__(self, base_url: str, api_key: str, model_name: str, speed: float = 1.0, voice_instructions: str | None = None, provider_name: str | None = None) -> None:
         super().__init__(model_name, provider_name=provider_name)
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.speed = speed
         self.voice_instructions = voice_instructions
+
+    def close(self) -> None:
+        self.client.close()
 
     def synthesize(self, text: str, voice: str) -> Iterable[bytes]:
         try:

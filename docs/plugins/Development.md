@@ -203,6 +203,8 @@ self.model_providers = [ModelProviderDefinition(
 
 Existing implementations only need `synthesize(text, voice)`. Providers that require additional character voice fields may override `synthesize_with_settings(text, settings)`; its default implementation forwards `settings["voice"]` to `synthesize`.
 
+The character voice preview creates a temporary TTS model and calls `close()` after playback, including on failure. Override this optional method to close HTTP clients or other resources owned by that model instance. The base implementation is a no-op for existing plugins. Do not return an externally owned shared model instance from `create_model` if closing it would disrupt an active session.
+
 ## PluginHelper Methods
 
 The `PluginHelper` class provides several methods for interacting with the COVAS:NEXT system:

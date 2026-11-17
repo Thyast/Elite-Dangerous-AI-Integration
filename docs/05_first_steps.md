@@ -17,6 +17,10 @@ The integration uses your microphone for speech recognition. We support voice ac
 
 ### Google AI Studio text-to-speech
 
+To audition a voice, open **Characters**, select an editable character (duplicate **Default** first if needed), click **Edit**, then expand **Voice & processing**. The **Play voice preview** button speaks the displayed test message using the selected TTS provider, current character voice/instructions/speed, manual audio effects, output device and output level. The message is editable and stays unchanged between clicks: each click performs a new synthesis, so repeated tests can reveal voice or intonation variations. The button waits for playback to finish before allowing another test, and errors appear beside it.
+
+Previews work before starting the assistant, without enabling the microphone, invoking the LLM, or adding a conversation entry. Automatic effects from in-game damage, helmets or SRVs are excluded. For remote TTS providers, the test text is sent to that provider and normal API charges/quotas apply. No generated audio is cached between tests. Changing the test message does not change the character prompt or persist the message in configuration.
+
 Select **Google AI Studio** as the TTS / Speaker provider and enter your Google AI Studio API key. The default speech model is **`gemini-3.8-flash-lite-tts`**. You can set a separate TTS API key or change the model in the provider settings. This integration uses the native Gemini Interactions API, not Google's OpenAI-compatible endpoint.
 
 In the character settings, choose a voice (default: **Kore**) and optionally enter **Voice Instructions**, for example, "Speak French with a calm, warm tone and a measured pace." These directions are sent as structured speech metadata, separately from the words to speak. Use these instructions to control pacing; the legacy numeric speech-speed setting is not sent to this API.

@@ -237,6 +237,10 @@
                                     }
                                 </div>
                                 <div class="voice-more-settings">
+                        <app-voice-preview
+                            [characterIndex]="selectedCharacterIndex"
+                            [disabled]="!selectedTtsProvider">
+                        </app-voice-preview>
                         <div class="trait-container">
                             <div class="trait-select">
                                 <mat-form-field appearance="outline">

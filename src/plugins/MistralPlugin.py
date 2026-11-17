@@ -162,7 +162,7 @@ class MistralTTSModel(TTSModel):
         api_key: str,
         model_name: str,
         default_voice: str,
-    ):
+    ) -> None:
         super().__init__(model_name, provider_name="mistral")
         self.default_voice = default_voice
         self.client = httpx.Client(
@@ -170,6 +170,9 @@ class MistralTTSModel(TTSModel):
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=60.0,
         )
+
+    def close(self) -> None:
+        self.client.close()
 
     def _iter_audio_deltas(self, response: httpx.Response) -> Iterable[bytes]:
         for data in iter_sse_data(response.iter_lines()):

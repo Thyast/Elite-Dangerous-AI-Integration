@@ -1,12 +1,13 @@
 import asyncio
 import threading
 import traceback
-from contextlib import aclosing
-from time import monotonic
+from contextlib import aclosing, closing
+from time import monotonic, sleep
 from typing import Any, AsyncGenerator, Generator, override
 
 import edge_tts
 import miniaudio
+from edge_tts.exceptions import NoAudioReceived
 from edge_tts.typing import TTSChunk
 
 from lib.Logger import log
@@ -113,7 +114,7 @@ EDGE_TTS_VOICES = [
 
 
 class Mp3Stream(miniaudio.StreamableSource):
-    def __init__(self, gen: AsyncGenerator[TTSChunk, None], prebuffer_size=4, initial_timeout: float = 10.0, chunk_timeout: float = 5.0) -> None:
+    def __init__(self, gen: AsyncGenerator[TTSChunk, None], prebuffer_size=4, initial_timeout: float = 20.0, chunk_timeout: float = 15.0) -> None:
         super().__init__()
         self.gen = gen
         self.prebuffer_size = prebuffer_size
@@ -126,6 +127,8 @@ class Mp3Stream(miniaudio.StreamableSource):
         self._started = False
         self._error: Exception | None = None
         self._condition = threading.Condition()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task[Any] | None = None
         self._last_chunk_time = monotonic()
         threading.Thread(target=self._produce, daemon=True).start()
 
@@ -133,6 +136,9 @@ class Mp3Stream(miniaudio.StreamableSource):
         try:
             # stream_sync() can leave its queue blocked when the async request fails.
             asyncio.run(self._produce_async())
+        except asyncio.CancelledError:
+            if not self._closed:
+                raise
         except Exception as e:
             with self._condition:
                 self._error = e
@@ -144,16 +150,26 @@ class Mp3Stream(miniaudio.StreamableSource):
 
     async def _produce_async(self) -> None:
         async with aclosing(self.gen):
-            async for ev in self.gen:
+            with self._condition:
+                if self._closed:
+                    return
+                self._loop = asyncio.get_running_loop()
+                self._task = asyncio.current_task()
+            try:
+                async for ev in self.gen:
+                    with self._condition:
+                        if self._closed:
+                            break
+                        data = ev.get('data')
+                        if ev.get('type') == 'audio' and data:
+                            self.buffer.extend(data)
+                            self._first_chunk = True
+                            self._last_chunk_time = monotonic()
+                            self._condition.notify_all()
+            finally:
                 with self._condition:
-                    if self._closed:
-                        break
-                    data = ev.get('data')
-                    if ev.get('type') == 'audio' and data:
-                        self.buffer.extend(data)
-                        self._first_chunk = True
-                        self._last_chunk_time = monotonic()
-                        self._condition.notify_all()
+                    self._loop = None
+                    self._task = None
 
     def raise_if_error(self) -> None:
         error = self._error or self.error_in_readcallback
@@ -162,6 +178,8 @@ class Mp3Stream(miniaudio.StreamableSource):
 
     def close(self) -> None:
         with self._condition:
+            if not self._closed and self._loop is not None and self._task is not None:
+                self._loop.call_soon_threadsafe(self._task.cancel)
             self._closed = True
             self._condition.notify_all()
         return super().close()
@@ -204,6 +222,22 @@ class EdgeTTSModel(TTSModel):
         self.prebuffer_size = 4
 
     def synthesize(self, text: str, voice: str) -> Generator[bytes, None, None]:
+        emitted_audio = False
+        for attempt in range(2):
+            try:
+                with closing(self._synthesize_once(text, voice)) as audio:
+                    for chunk in audio:
+                        emitted_audio = emitted_audio or bool(chunk)
+                        yield chunk
+                return
+            except (NoAudioReceived, TimeoutError) as error:
+                # Never replay a phrase that has already started playing.
+                if emitted_audio or attempt == 1:
+                    raise
+                log('warn', f'Edge TTS failed before playback; retrying once in 1s: {error}')
+                sleep(1)
+
+    def _synthesize_once(self, text: str, voice: str) -> Generator[bytes, None, None]:
         rate = f"+{int((float(self.speed) - 1) * 100)}%" if float(self.speed) > 1 else f"-{int((1 - float(self.speed)) * 100)}%"
         response = edge_tts.Communicate(text, voice=voice, rate=rate)
 

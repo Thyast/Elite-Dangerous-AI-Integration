@@ -29,6 +29,7 @@ def communicate(monkeypatch):
     response = MagicMock()
     factory = MagicMock(return_value=response)
     monkeypatch.setattr("src.plugins.EdgeTTSPlugin.edge_tts.Communicate", factory)
+    monkeypatch.setattr("src.plugins.EdgeTTSPlugin.sleep", MagicMock())
     return factory, response
 
 
@@ -160,8 +161,8 @@ def test_edge_tts_decodes_fragmented_mp3(communicate, mp3_audio, speed, rate):
     assert abs(frequencies[np.argmax(np.abs(np.fft.rfft(samples)))] - 1000) < 10
 
 
-@pytest.mark.parametrize("error", [NoAudioReceived("No audio was received"), ConnectionError("Edge connection refused")])
-def test_edge_tts_propagates_request_failure_instead_of_decoder_error(communicate, error):
+def test_edge_tts_propagates_request_failure_instead_of_decoder_error(communicate):
+    error = ConnectionError("Edge connection refused")
     _, response = communicate
 
     async def events():
@@ -174,6 +175,119 @@ def test_edge_tts_propagates_request_failure_instead_of_decoder_error(communicat
         list(EdgeTTSModel("edge-tts").synthesize("Test", "fr-FR-DeniseNeural"))
     assert caught.value is error
     assert monotonic() - started < 2
+
+
+@pytest.mark.parametrize("error_type", [NoAudioReceived, TimeoutError])
+def test_edge_tts_retries_transient_failure_before_audio(communicate, mp3_audio, error_type):
+    factory, response = communicate
+
+    async def failed_events():
+        raise error_type("Temporary Edge failure")
+        yield
+
+    response.stream.side_effect = [failed_events(), audio_events(mp3_audio)]
+    chunks = list(EdgeTTSModel("edge-tts").synthesize("Test", "fr-FR-DeniseNeural"))
+    assert chunks
+    assert factory.call_count == 2
+    assert factory.call_args_list[0] == factory.call_args_list[1]
+
+
+@pytest.mark.parametrize("error_type", [NoAudioReceived, TimeoutError])
+def test_edge_tts_retry_is_bounded_and_preserves_final_error(communicate, error_type):
+    factory, response = communicate
+    error = error_type("Persistent Edge failure")
+
+    async def failed_events():
+        raise error
+        yield
+
+    response.stream.side_effect = lambda: failed_events()
+    with pytest.raises(error_type) as caught:
+        list(EdgeTTSModel("edge-tts").synthesize("Test", "fr-FR-DeniseNeural"))
+    assert caught.value is error
+    assert factory.call_count == 2
+
+
+@pytest.mark.parametrize("error_type", [NoAudioReceived, TimeoutError])
+def test_edge_tts_never_retries_after_emitting_audio(communicate, monkeypatch, error_type):
+    factory, response = communicate
+    response.stream.return_value = audio_events(b"")
+    error = error_type("Failure after audio started")
+
+    def decode(**kwargs):
+        yield np.zeros(8, dtype=np.int16)
+        raise error
+
+    monkeypatch.setattr("src.plugins.EdgeTTSPlugin.miniaudio.stream_any", decode)
+    synthesis = EdgeTTSModel("edge-tts").synthesize("Test", "fr-FR-DeniseNeural")
+    assert next(synthesis) == b"\x00" * 16
+    with pytest.raises(error_type) as caught:
+        next(synthesis)
+    assert caught.value is error
+    assert factory.call_count == 1
+
+
+@pytest.mark.parametrize("close_with_timeout", [False, True])
+def test_mp3_stream_cancels_pending_request_on_close(close_with_timeout):
+    waiting = threading.Event()
+    finished = threading.Event()
+
+    async def events():
+        try:
+            waiting.set()
+            await asyncio.Event().wait()
+            yield {"type": "audio", "data": b"late audio"}
+        finally:
+            finished.set()
+
+    source = Mp3Stream(events(), initial_timeout=0.05)
+    try:
+        assert waiting.wait(1)
+        if close_with_timeout:
+            with pytest.raises(TimeoutError):
+                source.read(16)
+        else:
+            source.close()
+        assert finished.wait(1)
+    finally:
+        source.close()
+
+
+def test_mp3_stream_tolerates_gap_longer_than_five_seconds(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("src.plugins.EdgeTTSPlugin.monotonic", lambda: clock[0])
+    release = threading.Event()
+
+    async def events():
+        yield {"type": "audio", "data": b"a"}
+        await asyncio.to_thread(release.wait, 2)
+        yield {"type": "audio", "data": b"b"}
+
+    result = []
+    errors = []
+    with Mp3Stream(events(), prebuffer_size=0) as source:
+        assert source.initial_timeout == 20
+        assert source.chunk_timeout == 15
+        assert source.read(1) == b"a"
+        clock[0] = 6.0
+
+        def read():
+            try:
+                result.append(source.read(1))
+            except Exception as error:
+                errors.append(error)
+
+        reader = threading.Thread(target=read)
+        reader.start()
+        try:
+            reader.join(0.05)
+            assert reader.is_alive()
+        finally:
+            release.set()
+            reader.join(2)
+        assert not reader.is_alive()
+        assert not errors
+        assert result == [b"b"]
 
 
 def test_edge_tts_reports_empty_response(communicate):

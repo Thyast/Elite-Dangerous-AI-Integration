@@ -42,6 +42,7 @@ import {MatSlideToggle} from "@angular/material/slide-toggle";
 import { MatExpansionModule } from "@angular/material/expansion";
 import { ChatService } from "../../services/chat.service";
 import { SettingsGridComponent } from "../settings-grid/settings-grid.component";
+import { VoicePreviewComponent } from "../voice-preview/voice-preview.component";
 
 import { ModelProviderDefinition, providerVoiceDisplayValue, SettingsGrid } from "../../services/plugin-settings";
 
@@ -108,6 +109,7 @@ interface LowHighPassPresetOption {
         MatSlideToggle,
         MatExpansionModule,
         SettingsGridComponent,
+        VoicePreviewComponent,
     ],
     templateUrl: "./character-settings.component.html",
     styleUrl: "./character-settings.component.scss",
