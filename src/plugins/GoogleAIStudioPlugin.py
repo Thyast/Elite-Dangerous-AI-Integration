@@ -385,6 +385,17 @@ class GoogleAIStudioPlugin(PluginBase):
                 ]}],
             },
             {
+                "kind": "tts", "id": "tts", "label": "Google AI Studio", "slots": ["tts"],
+                "settings_config": [{"key": "tts", "label": "Google AI Studio Text-to-Speech", "fields": [
+                    *_fields("tts"), text_field("tts_model", "Model", GOOGLE_TTS_MODEL),
+                    paragraph("Gemini 3.8 TTS streams 24 kHz mono PCM through the native Interactions API. Requires model access. Set character Voice Instructions for tone, accent and pace; instructions are not read aloud."),
+                ]}],
+                "voice_settings_config": [{"key": "voice", "label": "Google AI Studio Voice", "fields": [
+                    select_field("voice", "Voice", GOOGLE_TTS_VOICE, GOOGLE_TTS_VOICES),
+                    textarea_field("instructions", "Voice Instructions", ""),
+                ]}],
+            },
+            {
                 "kind": "embedding", "id": "embedding", "label": "Google AI Studio", "slots": ["embedding"],
                 "settings_config": [{"key": "embedding", "label": "Google AI Studio Embeddings", "fields": [
                     *_fields(), select_field("embedding_model", "Model", GOOGLE_EMBEDDING_MODEL, [GOOGLE_EMBEDDING_MODEL]),

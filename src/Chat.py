@@ -104,6 +104,9 @@ from lib.VrRecenter import recenter_game_and_kneeboard
 tts_preview = TTSPreview()
 
 
+tts_preview = TTSPreview()
+
+
 def get_model_usage_history_payload(
     model_usage_store: ModelUsageStore,
     usage_kind: str | None = None,
