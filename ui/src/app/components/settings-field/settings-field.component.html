@@ -182,7 +182,13 @@
                             </div>
                         </div>
                     } @else {
-                        <div class="list-row" [class.highlighted]="entry.row.highlighted" [class.pending]="entry.row.pending" [class.tone-warning]="entry.row.tone === 'warning'" [class.tone-info]="entry.row.tone === 'info'" [class.tone-muted]="entry.row.tone === 'muted'" [class.tone-default]="entry.row.tone === 'default'">
+                        <div class="list-row" [class.row-suspended]="entry.row.checked === false" [class.highlighted]="entry.row.highlighted" [class.pending]="entry.row.pending" [class.tone-warning]="entry.row.tone === 'warning'" [class.tone-info]="entry.row.tone === 'info'" [class.tone-muted]="entry.row.tone === 'muted'" [class.tone-default]="entry.row.tone === 'default'">
+                            @if (entry.row.checkbox_action) {
+                                <input type="checkbox" class="row-checkbox"
+                                    [checked]="entry.row.checked !== false"
+                                    [attr.aria-label]="resolve(entry.row.checkbox_label) + ' ' + rowTitle(entry.row)"
+                                    (change)="toggleRow(entry.row, $event)">
+                            }
                             <div class="list-row-text">
                         <span class="list-row-title">{{ rowTitle(entry.row) }}</span>
                         @if (entry.row.meta) {

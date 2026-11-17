@@ -109,6 +109,15 @@ export class SettingsFieldComponent implements OnChanges {
         return this.field.maximum ? Math.max(0, Math.min(100, (this.field.value ?? 0) / this.field.maximum * 100)) : 0;
     }
 
+    toggleRow(row: ListRow, event: Event): void {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement) || !row.checkbox_action) return;
+        this.uiAction.emit({action: row.checkbox_action, payload: {
+            ...row.checkbox_payload, enabled: input.checked,
+        }});
+        input.checked = row.checked !== false;
+    }
+
     resolve(
         value: string | null | undefined,
         params?: { [name: string]: string | number },

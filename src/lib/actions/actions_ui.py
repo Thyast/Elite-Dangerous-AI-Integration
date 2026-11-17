@@ -391,6 +391,42 @@ def register_ui_actions(actionManager: ActionManager, eventManager: EventManager
         cache_prefill=_section_prefills(),
     )
     actionManager.registerAction(
+        'setUIVisibility',
+        "Show or hide the full COVAS:NEXT VR window/GUI without closing it or stopping the assistant. "
+        "Use visible=false for 'hide the window', 'hide the GUI', 'cache la fenetre' or 'cache la GUI': "
+        "only transient chat remains, without avatar or generated HUD. "
+        "Use visible=true for 'show the window', 'show the GUI', 'montre la fenetre', 'montre la GUI', "
+        "'affiche la fenetre' or 'affiche la GUI': restore the GUI with its previous tab and content. "
+        "French window/GUI commands may optionally end with 'de COVAS:NEXT' or 'COVAS:NEXT', "
+        "for example 'affiche la fenetre de COVAS:NEXT'; this still controls visibility, not a tab. "
+        "This does not hide the desktop window, "
+        "select a tab or change the saved overlay configuration.",
+        {
+            "type": "object",
+            "properties": {
+                "visible": {
+                    "type": "boolean",
+                    "description": "True to restore the VR GUI; false to hide it and keep only transient chat.",
+                },
+            },
+            "required": ["visible"],
+        },
+        set_ui_visibility,
+        'ui',
+        cache_prefill={
+            "hide the window": {"visible": False},
+            "hide the gui": {"visible": False},
+            "show the window": {"visible": True},
+            "show the gui": {"visible": True},
+            **{
+                f"{verb} la {target}{suffix}": {"visible": visible}
+                for verb, visible in (("cache", False), ("montre", True), ("affiche", True))
+                for target in ("fen\u00eatre", "fenetre", "gui")
+                for suffix in ("", " de covas:next", " covas:next")
+            },
+        },
+    )
+    actionManager.registerAction(
         'showUI',
         "Show a COVAS interface tab or submenu, such as ship status, navigation, cargo, materials, missions, station information, or the logbook. "
         "This only changes the visible panel; "

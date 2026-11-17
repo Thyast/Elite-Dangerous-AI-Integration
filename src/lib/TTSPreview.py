@@ -8,6 +8,7 @@ from .Config import Config
 from .Logger import log
 from .Models import TTSModel
 from .PluginManager import PluginManager
+from .PluginSettingDefinitions import resolve_voice_settings
 from .TTS import TTS
 from .UI import emit_message
 
@@ -16,28 +17,13 @@ def resolve_tts_voice_settings(
     provider: Mapping[str, Any] | None,
     character: Mapping[str, Any],
     provider_ref: str,
-) -> dict[str, Any] | None:
-    grids = provider.get("voice_settings_config") if provider else None
-    if grids is None:
-        return None
-    fields = [field for grid in grids for field in grid["fields"]]
-    defaults = {
-        field["key"]: field["default_value"]
-        for field in fields
-        if "default_value" in field
-    }
+    plugin_settings: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    grids = provider.get("voice_settings_config", []) if provider else []
     stored = character.get("tts_voice_settings", {}).get(provider_ref, {})
-    declared_keys = {field["key"] for field in fields}
-    settings = {
-        **defaults,
-        **({key: value for key, value in stored.items() if key in declared_keys}
-           if isinstance(stored, dict) else {}),
-    }
-    if "voice" in declared_keys:
-        settings.setdefault("voice", character["tts_voice"])
-    if "instructions" in declared_keys:
-        settings.setdefault("instructions", character["tts_prompt"])
-    return settings
+    return resolve_voice_settings(
+        grids, dict(plugin_settings or {}), stored if isinstance(stored, dict) else {},
+    )
 
 
 class TTSPreview:
@@ -84,15 +70,15 @@ class TTSPreview:
                 raise RuntimeError("Could not initialize the selected TTS provider. Check its settings and logs.")
             with closing(model):
                 character: dict[str, Any] = dict(config["characters"][index])
-                settings = resolve_tts_voice_settings(provider, character, provider_ref)
+                settings = resolve_tts_voice_settings(
+                    provider, character, provider_ref, config.get("plugin_settings", {}).get(guid, {}),
+                )
                 if hasattr(model, "speed"):
                     setattr(model, "speed", float(character["tts_speed"]))
-                if settings is None and hasattr(model, "voice_instructions"):
-                    setattr(model, "voice_instructions", character["tts_prompt"] or None)
                 emit_message("tts_preview", request_id=request_id, status="playing")
                 player = TTS(
                     tts_model=model,
-                    voice=str((settings or {}).get("voice") or character["tts_voice"]),
+                    voice=str(settings.get("voice") or ""),
                     voice_settings=settings,
                     speed=float(character["tts_speed"]),
                     postprocessing_config=character.get("tts_postprocessing"),

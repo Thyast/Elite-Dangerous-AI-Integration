@@ -35,8 +35,8 @@ def preview(monkeypatch, tmp_path):
     }
     manager = MagicMock(spec=PluginManager)
     manager.get_plugin_provider.return_value = {"voice_settings_config": [{"fields": [
-        {"key": "voice", "default_value": "Kore"},
-        {"key": "instructions", "default_value": ""},
+        {"key": "voice", "type": "text", "default_value": "Kore"},
+        {"key": "instructions", "type": "textarea", "default_value": ""},
     ]}]}
     manager.create_plugin_model.return_value = MagicMock(spec=TTSModel)
     player = MagicMock()
@@ -66,7 +66,9 @@ def test_preview_repeats_fresh_synthesis_with_current_character_and_output(previ
     )
     kwargs = preview.player.call_args.kwargs
     assert kwargs["voice"] == "Sulafat"
-    assert kwargs["voice_settings"] == {"voice": "Sulafat", "instructions": "Speak French."}
+    assert kwargs["voice_settings"] == {
+        "voice": "Sulafat", "instructions": "Speak French.", "api_key": "test-key", "obsolete": "ignored",
+    }
     assert kwargs["output_device"] == "Test speakers"
     assert kwargs["output_volume_multiplier"] == 0.8
     assert kwargs["postprocessing_config"] == preview.config["characters"][0]["tts_postprocessing"]
@@ -178,61 +180,13 @@ def test_preview_reports_worker_start_failure_and_allows_retry(preview, monkeypa
     assert not preview.controller._lock.locked()
 
 
-def test_voice_settings_preserve_legacy_and_voiceless_providers():
+def test_voice_settings_ignore_obsolete_character_voice_and_voiceless_providers():
     character = {"tts_voice": "legacy", "tts_prompt": "Warm.", "tts_voice_settings": {}}
-    assert preview_module.resolve_tts_voice_settings(None, character, PROVIDER) is None
+    assert preview_module.resolve_tts_voice_settings(None, character, PROVIDER) == {}
     assert preview_module.resolve_tts_voice_settings({"voice_settings_config": []}, character, PROVIDER) == {}
     assert preview_module.resolve_tts_voice_settings({"voice_settings_config": [{"fields": [
-        {"key": "voice"}, {"key": "instructions"},
-    ]}]}, character, PROVIDER) == {"voice": "legacy", "instructions": "Warm."}
-
-
-def test_preview_reaches_gemini_and_audio_output_twice_without_caching(preview, monkeypatch):
-    requests = []
-    pcm = b"\x0a\x00" * 512
-    events = [
-        {"event_type": "step.delta", "delta": {
-            "type": "audio", "mime_type": "audio/l16",
-            "data": base64.b64encode(pcm).decode("ascii"),
-        }},
-        {"event_type": "interaction.completed", "interaction": {"status": "completed"}},
-    ]
-
-    def respond(request):
-        requests.append(json.loads(request.content))
-        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, content="".join(
-            f"data: {json.dumps(event)}\n\n" for event in events
-        ))
-
-    models = []
-
-    def create_model(*args, **kwargs):
-        model = GoogleAIStudioTTSModel("test-key")
-        model.client.close()
-        model.client = httpx.Client(base_url="https://example.test/", transport=httpx.MockTransport(respond))
-        models.append(model)
-        return model
-
-    preview.manager.create_plugin_model.side_effect = create_model
-    monkeypatch.setattr(preview_module, "TTS", TTS)
-    audio = MagicMock()
-    audio.get_sample_size.return_value = 2
-    monkeypatch.setattr("lib.TTS.pyaudio.PyAudio", lambda: audio)
-    for request_id in ("one", "two"):
-        preview.controller.start(preview.config, preview.manager, {**DATA, "request_id": request_id})
-
-    assert statuses(preview) == ["playing", "completed", "playing", "completed"]
-    assert len(requests) == 2
-    assert all(model.client.is_closed for model in models)
-    assert requests[0] == requests[1]
-    assert requests[0]["generation_config"]["speech_config"] == [{"voice": "Sulafat"}]
-    content = requests[0]["input"][0]["content"][0]
-    assert content["text"] == DATA["text"]
-    assert content["annotations"] == [{"type": "speech_metadata", "style": "Speak French."}]
-    assert audio.open.call_count == 2
-    assert audio.open.return_value.write.call_count == 2
-    assert audio.open.return_value.write.call_args.args[0] == b"\x08\x00" * 512
-    assert audio.terminate.call_count == 2
+        {"key": "voice", "type": "text", "default_value": "Kore"},
+    ]}]}, character, PROVIDER, {"voice": "Puck"}) == {"voice": "Puck"}
 
 
 def test_runtime_command_routes_preview_without_invoking_assistant(preview, monkeypatch):

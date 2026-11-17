@@ -1205,6 +1205,8 @@ def read_stdin(chat: Chat):
             if data.get("type") == "ui_section_result":
                 from lib.actions.actions_ui import handle_ui_section_result
                 handle_ui_section_result(data)
+            if data.get("type") == "preview_tts":
+                tts_preview.start(chat.config, chat.plugin_manager, data)
             if data.get("type") == "change_config":
                 partial = data.get("config")
                 if isinstance(partial, dict):

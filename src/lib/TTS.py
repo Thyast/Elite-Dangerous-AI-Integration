@@ -115,6 +115,7 @@ class TTS:
         postprocessing_config: CharacterTTSPostprocessingConfig | None = None,
         output_device: Optional[str] = None,
         output_volume_multiplier: float = 1.0,
+        start_playback_thread: bool = True,
     ) -> None:
         self.tts_model = tts_model
         self.voice = voice
@@ -146,7 +147,16 @@ class TTS:
         thread = threading.Thread(target=self._playback_thread)
         thread.daemon = True
         self._thread = thread
-        thread.start()
+        if start_playback_thread:
+            thread.start()
+
+    def play_once(self, text: str) -> None:
+        stream = PCMOutput(self.output_device, interrupted=lambda: self.is_aborted)
+        try:
+            self._playback_one(text, stream, context="voice_preview", raise_synthesis_errors=True)
+            stream.finish()
+        finally:
+            stream.close()
 
     def _normalize_queue_item(self, item: Any) -> dict[str, Any]:
         if isinstance(item, str):
@@ -311,6 +321,7 @@ class TTS:
         postprocessing_override: CharacterTTSPostprocessingConfig | None = None,
         postprocessing_layers: list[CharacterTTSPostprocessingConfig | None] | None = None,
         voice_settings_override: dict[str, Any] | None = None,
+        raise_synthesis_errors: bool = False,
     ):
         # Fix numberformatting for different providers
         text = re.sub(r"\d+(,\d{3})*(\.\d+)?", self._number_to_text, text)
@@ -328,7 +339,9 @@ class TTS:
             "response_ms": None,
             "time_to_first_byte_ms": None,
         }
-        audio_stream = self._stream_audio(text, voice_override, stream_metrics, voice_settings_override)
+        audio_stream = self._stream_audio(
+            text, voice_override, stream_metrics, voice_settings_override, raise_errors=raise_synthesis_errors,
+        )
         if postprocessing:
             audio_stream = self._postprocess_audio(audio_stream, postprocessing)
 
@@ -340,6 +353,9 @@ class TTS:
             if self.is_aborted:
                 break
             stream.write(self._apply_output_gain_pcm16(chunk))
+
+        if raise_synthesis_errors and total_audio_bytes == 0:
+            raise RuntimeError("The TTS provider returned no audio.")
 
         output_audio_duration_ms = 0.0
         if total_audio_bytes > 0:
@@ -520,6 +536,7 @@ class TTS:
         voice_override: str | None = None,
         metrics: dict[str, float | None] | None = None,
         voice_settings_override: dict[str, Any] | None = None,
+        raise_errors: bool = False,
     ):
         started_at = time()
         if self.tts_model is None:
@@ -552,6 +569,8 @@ class TTS:
                     metrics["response_ms"] = (time() - started_at) * 1000
             except Exception as e:
                 log('error', 'TTS synthesis error', e, traceback.format_exc())
+                if raise_errors:
+                    raise
                 show_chat_message('error', 'TTS synthesis error:', str(e))
 
     @observe()

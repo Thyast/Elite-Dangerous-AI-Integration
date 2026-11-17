@@ -66,7 +66,7 @@ class PluginNamespace:
                 self._scope_presentation(item)
         elif isinstance(value, dict):
             for key, item in value.items():
-                if key in {'payload', 'default_value', 'value', 'select_options'}:
+                if key in {'payload', 'checkbox_payload', 'default_value', 'value', 'select_options'}:
                     if key == 'select_options' and isinstance(item, list):
                         for option in item:
                             if isinstance(option.get('label'), str):
@@ -76,7 +76,7 @@ class PluginNamespace:
                     for field in ('text', 'label'):
                         if isinstance(item.get(field), str):
                             item[field] = self.translation_key(item[field])
-                elif key in {'label', 'placeholder', 'content', 'title_key', 'meta', 'group', 'confirmation', 'notification'} and isinstance(item, str):
+                elif key in {'label', 'placeholder', 'content', 'title_key', 'meta', 'group', 'confirmation', 'notification', 'checkbox_label'} and isinstance(item, str):
                     value[key] = self.translation_key(item)
                 elif key == 'text' and isinstance(item, dict):
                     self._scope_text(item)
