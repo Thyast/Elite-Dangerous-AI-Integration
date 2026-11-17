@@ -17,7 +17,7 @@ from lib.projections.current_status import CurrentStatusState
 
 @pytest.fixture
 def navigation(monkeypatch):
-    monkeypatch.setattr(ActionManager, "actions", {})
+    monkeypatch.setattr(ActionManager, "actions", {}, raising=False)
     monkeypatch.setattr("lib.ActionManager.KeyValueStore", lambda _name: Mock())
     manager = ActionManager()
     permissions = {key: True for key in (

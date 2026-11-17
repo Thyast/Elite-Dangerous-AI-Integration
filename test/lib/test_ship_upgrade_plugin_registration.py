@@ -63,7 +63,7 @@ def test_real_upgrade_view_routes_french_business_names_independently_of_gui_lan
     store.get.side_effect = cache.get
     store.set.side_effect = cache.__setitem__
     monkeypatch.setattr("lib.ActionManager.KeyValueStore", lambda _name: store)
-    monkeypatch.setattr(ActionManager, "actions", {})
+    monkeypatch.setattr(ActionManager, "actions", {}, raising=False)
     monkeypatch.setattr(PluginHelper, "PLUGIN_DATA_PATH", str(tmp_path / "plugin-data"))
     monkeypatch.setattr(actions_ui, "plugin_manager", None)
     monkeypatch.setattr(actions_ui, "event_manager", None)
@@ -354,7 +354,7 @@ def test_jump_request_prediction_calculates_then_prepares_and_resumes_without_re
     store.get.side_effect = cache.get
     store.set.side_effect = cache.__setitem__
     monkeypatch.setattr("lib.ActionManager.KeyValueStore", lambda _name: store)
-    monkeypatch.setattr(ActionManager, "actions", {})
+    monkeypatch.setattr(ActionManager, "actions", {}, raising=False)
     action_manager = ActionManager()
     permissions = {name: True for name in (
         "plotToTarget", "galaxyMapOpenOrClose", "target_next_system_in_route",
@@ -452,7 +452,7 @@ def test_route_request_is_available_predicted_executed_and_published_in_every_mo
     store.get.side_effect = cache.get
     store.set.side_effect = cache.__setitem__
     monkeypatch.setattr("lib.ActionManager.KeyValueStore", lambda _name: store)
-    monkeypatch.setattr(ActionManager, "actions", {})
+    monkeypatch.setattr(ActionManager, "actions", {}, raising=False)
     action_manager = ActionManager()
     manager = PluginManager({"plugin_settings": {}})
     helper = _PluginDataHelper(

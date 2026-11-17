@@ -13,6 +13,7 @@ from .HudColorMatrix import HudColorMatrix
 from .Logger import log, show_chat_message
 from .UI import emit_message
 from .VoiceActivation import voice_config_error
+from .actions.action_language_packs import load_action_language_packs
 
 # List of game events categorized (legacy boolean defaults)
 game_events = {
