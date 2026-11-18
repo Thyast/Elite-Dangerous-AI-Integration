@@ -3,6 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { createOpenXrGazeIntegration } from '../../electron/openxr-gaze-integration.js';
 
 function harness(t, overrides = {}) {
@@ -26,6 +27,29 @@ function harness(t, overrides = {}) {
   });
   return { directory, binary, integration, calls, manifest: path.join(directory, 'openxr-gaze', 'covas_openxr_gaze.json') };
 }
+
+test('Electron registers gaze status and install/uninstall IPC handlers', async t => {
+  const h = harness(t);
+  const handlers = new Map();
+  const source = fs.readFileSync(new URL('../../electron/index.js', import.meta.url), 'utf8');
+  const registrations = source.match(
+    /^  ipcMain\.handle\('(?:get_openxr_gaze_integration_status|openxr_gaze_integration_action)'[\s\S]*?(?=^  ipcMain\.handle\(|^}\);)/gm,
+  ) ?? [];
+  vm.runInNewContext(registrations.join('\n'), {
+    ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+    gazeIntegration: h.integration,
+  });
+  const status = handlers.get('get_openxr_gaze_integration_status');
+  const action = handlers.get('openxr_gaze_integration_action');
+  assert.equal(typeof status, 'function');
+  assert.equal(typeof action, 'function');
+  assert.equal((await status({})).installed, false);
+  assert.equal(h.calls.some(([command]) => command === 'reg.exe'), false);
+  assert.equal((await action({}, 'install')).enabled, true);
+  assert.equal((await status({})).installed, true);
+  assert.equal((await action({}, 'uninstall')).enabled, false);
+  await assert.rejects(action({}, 'enable'), /Invalid OpenXR gaze integration action/);
+});
 
 test('installs only a per-user API layer and preserves the selected OpenXR runtime', t => {
   const h = harness(t);

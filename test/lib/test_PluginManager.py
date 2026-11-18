@@ -22,6 +22,11 @@ from plugins.GoogleAIStudioPlugin import GOOGLE_AI_STUDIO_PLUGIN_GUID, GOOGLE_LL
 from plugins.OpenRouterPlugin import OPENROUTER_PLUGIN_GUID, OpenRouterPlugin
 
 
+@pytest.fixture(autouse=True)
+def _isolated_working_directory(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+
 class MigratingPlugin(PluginBase):
     settings_schema_version = 2
 

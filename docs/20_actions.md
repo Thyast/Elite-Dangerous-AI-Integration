@@ -645,7 +645,7 @@ parent. Acknowledgement from the UI is required before reporting success.
 
 ### Adding an action language pack
 
-Language packs are JSON files in `src/lib/actions/languages/`, named with their language code. The backend discovers and loads every pack automatically; adding a pack does not require a configuration change. Each pack has a display `name` and an `aliases` array; every alias groups spoken `phrases` in a non-empty array sharing the same registered `action` and `arguments`. Packs add aliases only—English commands remain available. Aliases that conflict with an English command or map the same phrase to different actions are skipped with a warning, so a collision cannot override English or prevent startup.
+Language packs are JSON files in `src/lib/actions/languages/`, named with their language code. The backend discovers and loads every pack automatically; adding a pack does not require a configuration change or language selection in the Actions tab. Each pack has a display `name` and an `aliases` array; every alias groups spoken `phrases` in a non-empty array sharing the same registered `action` and `arguments`. Packs add aliases only—English commands remain available. Aliases that conflict with an English command or map the same phrase to different actions are skipped with a warning, so a collision cannot override English or prevent startup.
 
 2. **Target next system in route**
 

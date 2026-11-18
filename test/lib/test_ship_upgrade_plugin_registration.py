@@ -25,6 +25,7 @@ from plugins.ship_upgrade_manager.ship_upgrade_manager import (
 def _isolated_journal_directory(tmp_path, monkeypatch):
     import plugins.ship_upgrade_manager.ship_upgrade_manager as sum_module
 
+    monkeypatch.chdir(tmp_path)
     journals = tmp_path / "empty-journals"
     journals.mkdir()
     monkeypatch.setattr(sum_module, "get_ed_journals_path", lambda _config: str(journals))
@@ -57,10 +58,6 @@ def test_loadout_prompt_preserves_partial_grade_and_canonical_experimental():
     assert module["Engineering"]["ExperimentalEffect"] == "special_powerplant_cooled"
 
 
-@pytest.mark.xfail(
-    reason="The current ship_upgrade_manager plugin has no voice_aliases and hides the progress section without a helper.",
-    strict=False,
-)
 def test_real_upgrade_view_routes_french_business_names_independently_of_gui_language(tmp_path, monkeypatch):
     cache = {}
     store = Mock()
@@ -81,9 +78,16 @@ def test_real_upgrade_view_routes_french_business_names_independently_of_gui_lan
     ))
     manager.plugin_list["voice-upgrades"] = plugin
     manager.register_settings()
+    helper = _PluginDataHelper(
+        manager, _PromptGenerator(), {}, action_manager, _EventManager(),
+        None, None, None, None, _Assistant(), data_path=tmp_path / "runtime",
+    )
+    manager.on_chat_start(helper)
     actions_ui.configure_plugin_ui(manager, action_manager)
     tools = action_manager.getToolsList("mainship", False, False, True)
     commands = [
+        ("affiche les améliorations du vaisseau", None),
+        ("show ship upgrades", None),
         ("affiche la progression", "session"),
         ("affiche la progression du vaisseau", "session"),
         ("affiche la progression de l'amelioration du vaisseau", "session"),
@@ -95,25 +99,27 @@ def test_real_upgrade_view_routes_french_business_names_independently_of_gui_lan
         ("affiche les plans a debloquer", "broker"),
         ("affiche les d\u00e9blocages", "broker"),
         ("affiche la route d'am\u00e9lioration", "route"),
+        ("show ship upgrade route", "route"),
+        ("show technology broker unlocks", "broker"),
     ]
-    for command, section in commands:
-        prediction = action_manager.predict_action(command, tools)
-        assert prediction is not None, command
-        assert prediction[0].function.name == "showUI"
-        assert json.loads(prediction[0].function.arguments) == {
-            "tab": "plugin:voice-upgrades:upgrades", "submenu": section,
-        }
-        action_manager.runAction(prediction[0], {})
-        assert messages[-1] == {"type": "ui", "show": "plugin:voice-upgrades:upgrades", "submenu": section}
-    cache.clear()
-    for command, section in commands:
-        direct = actions_ui.predict_plugin_ui_action(command, action_manager, tools)
-        assert direct is not None, command
-        assert json.loads(direct[0].function.arguments) == {
-            "tab": "plugin:voice-upgrades:upgrades", "submenu": section,
-        }
-        action_manager.runAction(direct[0], {})
-        assert messages[-1] == {"type": "ui", "show": "plugin:voice-upgrades:upgrades", "submenu": section}
+    for predict in (
+        lambda command: action_manager.predict_action(command, tools),
+        lambda command: actions_ui.predict_plugin_ui_action(command, action_manager, tools),
+    ):
+        for command, section in commands:
+            prediction = predict(command)
+            assert prediction is not None, command
+            assert prediction[0].function.name == "showUI"
+            arguments = {"tab": "plugin:voice-upgrades:upgrades"}
+            if section:
+                arguments["submenu"] = section
+            assert json.loads(prediction[0].function.arguments) == arguments
+            action_manager.runAction(prediction[0], {})
+            message = {"type": "ui", "show": arguments["tab"]}
+            if section:
+                message["submenu"] = section
+            assert messages[-1] == message
+        cache.clear()
     description = action_manager.actions["showUI"]["tool"]["function"]["parameters"]["properties"]["tab"]["description"]
     assert "session = Progress / Progression" in description
 

@@ -11,6 +11,10 @@ import contextMenu from 'electron-context-menu';
 import pino from 'pino';
 import { WebSocketServer } from 'ws';
 import {VROverlay} from '@covas-labs/electron-vr';
+import { createOptionalVrGazeZoom, createVrHeadPoseReader, createVrHeightInitialization } from './vr-head-pose.js';
+import { createOpenXrGazeIntegration } from './openxr-gaze-integration.js';
+import { validateReducedOpacity } from './vr-gaze-zoom.js';
+import { createVrPlacementAdjustment, handleVrPlacementRequest } from './vr-placement-adjustment.js';
 import { describeVrStatus } from './vr-status.js';
 import { getOverlayPlacement, normalizeVrPlacementOptions } from './vr-placement.js';
 import { createGameProbe } from './vr-game-probe.js';
@@ -1030,6 +1034,27 @@ async function createVrOverlayWindow(opts) {
     throw error;
   }
 
+  const placementAdjustment = createVrPlacementAdjustment({
+    controller: vrOverlay, options: opts, placement, gazeZoom,
+    async readHeadPose() {
+      const reader = await createVrHeadPoseReader(vrOverlay);
+      try {
+        return reader.read();
+      } finally {
+        reader.close();
+      }
+    },
+  });
+  const heightInitialization = await createVrHeightInitialization({
+    controller: vrOverlay, options: opts, adjustment: placementAdjustment, logger,
+  });
+  overlayWindow.once('close', () => {
+    try {
+      heightInitialization.close();
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to close VR height initialization.');
+    }
+  });
   activeVrOverlay = vrOverlay;
   return {
     kind: 'vr',
@@ -1541,6 +1566,12 @@ app.whenReady().then(async ()=>{
   ipcMain.handle('get_remote_interface_state', async () => getRemoteInterfaceState());
   ipcMain.handle('get_remote_interface_bind_addresses', async () => getRemoteInterfaceBindAddresses());
   ipcMain.handle('get_overlay_runtime_info', async () => getOverlayRuntimeInfo());
+  ipcMain.handle('get_openxr_gaze_integration_status', async () => gazeIntegration.getStatus());
+  ipcMain.handle('openxr_gaze_integration_action', async (_event, action) => {
+    if (action === 'install') return gazeIntegration.install();
+    if (action === 'uninstall') return gazeIntegration.uninstall();
+    throw new TypeError('Invalid OpenXR gaze integration action.');
+  });
   ipcMain.handle('copy_vr_diagnostics', async () => {
     const info = await getOverlayRuntimeInfo();
     clipboard.writeText(JSON.stringify(info.vrDiagnostics ?? { error: info.error, sampledAt: new Date().toISOString() }, null, 2));

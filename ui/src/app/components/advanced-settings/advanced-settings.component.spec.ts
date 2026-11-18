@@ -40,7 +40,6 @@ describe("VR slider configuration updates", () => {
         wake_word_timeout: 10, wake_word_source: "main", wake_word_first_command: "retranscribe",
         ptt_inverted_var: false, mute_during_response_var: false, game_actions_var: true,
         web_search_actions_var: true, ui_actions_var: true, use_action_cache_var: true,
-        selected_action_languages: [], available_action_languages: [],
         allowed_actions: {}, discovery_primary_var: true, discovery_firegroup_var: 1,
         weapon_types: [], prefer_primary_bindings: false, in_system_navigation: true,
         chat_local_tabbed_var: false, chat_wing_tabbed_var: false, chat_system_tabbed_var: true,
