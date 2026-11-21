@@ -903,6 +903,7 @@ class Config(TypedDict):
     vision_var: bool
     ptt_var: Literal['voice_activation', 'push_to_talk', 'push_to_mute', 'toggle', 'wake_word']
     wake_word_timeout: float
+    wake_word_push_to_mute: bool
     wake_word_source: Literal['main', 'parakeet']
     wake_word_first_command: Literal['retranscribe', 'reuse']
     ptt_inverted_var: bool
@@ -1739,6 +1740,7 @@ def load_config() -> Config:
         'vision_var': False,
         'ptt_var': 'voice_activation',
         'wake_word_timeout': 10.0,
+        'wake_word_push_to_mute': False,
         'wake_word_source': 'main',
         'wake_word_first_command': 'retranscribe',
         'ptt_inverted_var': False,

@@ -10,6 +10,7 @@ describe("VoiceActivationSettingsComponent", () => {
     const config: VoiceActivationConfig = {
         stt_provider: "remote", wake_word_timeout: 10,
         wake_word_source: "main", wake_word_first_command: "retranscribe",
+        wake_word_push_to_mute: false,
     };
 
     beforeEach(async () => {
@@ -33,6 +34,20 @@ describe("VoiceActivationSettingsComponent", () => {
         expect(text).toContain("even in standby");
         expect(text).toContain("install the optional Parakeet plugin");
         expect(fixture.componentInstance.hybrid).toBeFalse();
+    });
+
+    it("allows opting into the existing hold-to-mute shortcuts", () => {
+        const changed = jasmine.createSpy("configChange");
+        fixture.componentInstance.configChange.subscribe(changed);
+        const toggle: HTMLButtonElement = fixture.nativeElement.querySelector('button[role="switch"]');
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+        toggle.click();
+        fixture.detectChanges();
+        expect(changed).toHaveBeenCalledWith({ wake_word_push_to_mute: true });
+        fixture.componentInstance.config = { ...config, wake_word_push_to_mute: true };
+        fixture.detectChanges();
+        toggle.click();
+        expect(changed).toHaveBeenCalledWith({ wake_word_push_to_mute: false });
     });
 
     it("shows the first-command choice only in an actual hybrid configuration", () => {

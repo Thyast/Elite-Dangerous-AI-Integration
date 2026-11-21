@@ -3,6 +3,7 @@ import { FormsModule, NgModel } from "@angular/forms";
 import { MatFormFieldModule } from "@angular/material/form-field";
 import { MatInputModule } from "@angular/material/input";
 import { MatSelectModule } from "@angular/material/select";
+import { MatSlideToggleModule } from "@angular/material/slide-toggle";
 import { TranslateModule } from "@ngx-translate/core";
 import { Config } from "../../services/config.service";
 import { modelProviderLabel, ModelProviderDefinition } from "../../services/plugin-settings";
@@ -16,10 +17,15 @@ import {
 @Component({
     selector: "app-voice-activation-settings",
     standalone: true,
-    imports: [FormsModule, MatFormFieldModule, MatInputModule, MatSelectModule, TranslateModule],
+    imports: [FormsModule, MatFormFieldModule, MatInputModule, MatSelectModule, MatSlideToggleModule, TranslateModule],
     template: `
         @if (config; as c) {
             <p>{{ 'voice.replacesRequiredWord' | translate }}</p>
+            <mat-slide-toggle [checked]="c.wake_word_push_to_mute"
+                (change)="configChange.emit({wake_word_push_to_mute: $event.checked})">
+                {{ 'voice.pushToMute' | translate }}
+            </mat-slide-toggle>
+            <p>{{ 'voice.pushToMuteHelp' | translate }}</p>
             <div class="fields">
                 <mat-form-field>
                     <mat-label>{{ 'voice.name' | translate }}</mat-label>

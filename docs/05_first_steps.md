@@ -19,6 +19,8 @@ In **Reactions**, choose which in-game events your assistant should comment on. 
 
 Choose **Name-triggered Dialogue** under **Microphone Mode** in the general or advanced audio settings. The existing microphone modes, including Push-to-Talk, are unchanged. Start or restart the assistant after changing the microphone mode or activation settings.
 
+Optionally enable **Push-to-Mute** in this mode and assign **Hotkey 1** and/or **Hotkey 2**. These are the same shortcuts and hold-to-mute behavior as the existing Push-to-Mute microphone mode: hold either key to pause microphone recognition in standby or during a dialogue, then release to resume. This does not mute TTS, close the dialogue, or suspend its inactivity timeout. A session held open with "keep listening" remains held. The option is off by default; restart the assistant after changing it or its shortcuts.
+
 The **active avatar's first name** is used for activation. It is separate from the technical **Profile name** displayed in the character selector. Each avatar has a **First name** field in Character Settings, initialized to `Simone`, including existing profiles when upgrading. A profile named `Default (Copy)` therefore responds to "Simone", not "Default Copy". Edit or duplicate an avatar to change its first name, then select it. Duplicating a profile preserves its first name without adding "(Copy)" to the spoken name. Set the global **inactivity timeout** (initially 10 seconds) in the microphone settings. Restart the assistant after changing the avatar or its first name. Say the first name at the beginning of a phrase:
 
 - "Simone, plot a route to Sol."

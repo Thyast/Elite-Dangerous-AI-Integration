@@ -114,6 +114,7 @@ export interface Config {
     vision_var: boolean;
     ptt_var: "voice_activation" | "push_to_talk" | "push_to_mute" | "toggle" | "wake_word";
     wake_word_timeout: number;
+    wake_word_push_to_mute: boolean;
     wake_word_source: "main" | "parakeet";
     wake_word_first_command: "retranscribe" | "reuse";
     ptt_inverted_var: boolean;

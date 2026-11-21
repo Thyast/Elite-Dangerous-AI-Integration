@@ -98,10 +98,28 @@ def test_toggle_listening_preserves_manual_state_during_responses(
     assert chat.controller_manager.register_hotkey.call_args.args[0] == [expected_key]
 
 
-def test_push_to_mute_stays_muted_until_release_during_responses(chat, monkeypatch):
-    chat.config.update({"ptt_var": "push_to_mute", "mute_during_response_var": True})
+@pytest.mark.parametrize("mode", ["push_to_mute", "wake_word"])
+@pytest.mark.parametrize("secondary_only", [False, True])
+@pytest.mark.parametrize("held_session", [False, True])
+def test_push_to_mute_stays_muted_until_release_during_responses(
+    chat, monkeypatch, mode, secondary_only, held_session
+):
+    chat.config.update({
+        "ptt_var": mode, "wake_word_push_to_mute": True, "mute_during_response_var": True,
+    })
+    if secondary_only:
+        chat.config.update({"ptt_key": "", "ptt_key_secondary": "Button.x2"})
+    if mode == "wake_word":
+        from lib.VoiceActivation import VoiceActivation
+        session = VoiceActivation("Simone", 10, MagicMock(), MagicMock())
+        chat.stt.voice_activation = session
+        if held_session:
+            session.recognize(session.begin_audio(), lambda _: "Simone, keep listening")
+            session.end_audio()
+            session.finish_control()
     chat.tts.get_is_playing.return_value = False
     observed_states = []
+    session_states = []
 
     def tick(_duration):
         observed_states.append(chat.stt.continuous_listening_paused)
@@ -114,6 +132,10 @@ def test_push_to_mute_stays_muted_until_release_during_responses(chat, monkeypat
         elif len(observed_states) == 3:
             on_release(None)
         else:
+            if mode == "wake_word":
+                session._clock = lambda: 10000
+                session.tick(False)
+                session_states.append(session.state)
             raise KeyboardInterrupt
 
     monkeypatch.setattr(ChatModule, "sleep", tick)
@@ -121,3 +143,23 @@ def test_push_to_mute_stays_muted_until_release_during_responses(chat, monkeypat
     ChatModule.Chat.run(chat)
 
     assert observed_states == [False, True, True, False]
+    chat.stt.listen_continuous.assert_called_once()
+    expected_key = "Button.x2" if secondary_only else "Key.space"
+    assert chat.controller_manager.register_hotkey.call_args.args[0] == [expected_key]
+    if mode == "wake_word":
+        assert session_states == ["active" if held_session else "standby"]
+
+
+@pytest.mark.parametrize("enabled", [None, False, True])
+def test_name_triggered_mute_requires_opt_in_and_hotkey(chat, monkeypatch, enabled):
+    chat.config["ptt_var"] = "wake_word"
+    if enabled is not None:
+        chat.config["wake_word_push_to_mute"] = enabled
+    if enabled:
+        chat.config["ptt_key"] = ""
+    monkeypatch.setattr(ChatModule, "sleep", MagicMock(side_effect=KeyboardInterrupt))
+
+    ChatModule.Chat.run(chat)
+
+    chat.stt.listen_continuous.assert_called_once()
+    chat.controller_manager.register_hotkey.assert_not_called()

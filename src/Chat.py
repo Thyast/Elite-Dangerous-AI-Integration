@@ -559,6 +559,9 @@ class Chat:
                     )
                 return
         self.tts.abort()
+        if self.vr_adjustment.handle_input(result.text):
+            show_chat_message("cmdr", result.text)
+            return
         self.event_manager.add_conversation_event("user", result.text)
 
     def on_event(self, event: Event, projected_states: dict[str, Any]):
@@ -937,7 +940,10 @@ class Chat:
                 lambda _: self.stt.listen_once_start(),
                 lambda _: self.stt.listen_once_end(),
             )
-        elif mode == "push_to_mute" and ptt_keys:
+        elif (
+            mode == "push_to_mute"
+            or (mode == "wake_word" and self.config.get("wake_word_push_to_mute", False))
+        ) and ptt_keys:
             log("info", f"Setting push-to-mute hotkeys {ptt_keys}.")
             self.stt.listen_continuous()
             self.controller_manager.register_hotkey(

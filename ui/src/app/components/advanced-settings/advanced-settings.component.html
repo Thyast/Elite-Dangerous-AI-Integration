@@ -235,7 +235,8 @@
                             <mat-option value="toggle">Toggle Mic On/Off</mat-option>
                         </mat-select>
                     </mat-form-field>
-                    @if (config.ptt_var !== 'voice_activation' && config.ptt_var !== 'wake_word') {
+                    @if ((config.ptt_var !== 'voice_activation' && config.ptt_var !== 'wake_word')
+                        || (config.ptt_var === 'wake_word' && config.wake_word_push_to_mute)) {
                         <mat-form-field (click)="onAssignPTT($event, 0)">
                             <mat-label>Hotkey 1</mat-label>
                             <input required matInput [value]="assigningPTTIndex === 0 ? 'Press any key...' : config.ptt_key" readonly>

@@ -38,6 +38,8 @@ export const TRANSLATIONS: Record<string, object> = {
     },
     "voice": {
       "mode": "Name-triggered Dialogue",
+      "pushToMute": "Enable Push-to-Mute",
+      "pushToMuteHelp": "Hold either microphone hotkey to mute, release to resume. Uses the same Hotkey 1 and Hotkey 2 as Push-to-Mute mode. Works in standby and during a dialogue; the normal inactivity timeout still applies. Restart the assistant after changing this setting.",
       "replacesRequiredWord": "Replaces the required-word filter: say the name to open a dialogue, then speak without repeating it.",
       "name": "Active avatar first name", "timeout": "Inactivity timeout (seconds)",
       "nameFromAvatar": "Uses the avatar's first name, not its profile name. Edit or duplicate the avatar to change it.",
@@ -122,6 +124,8 @@ export const TRANSLATIONS: Record<string, object> = {
     },
     "voice": {
       "mode": "Dialogue par prénom",
+      "pushToMute": "Activer Push-to-Mute",
+      "pushToMuteHelp": "Maintenez un raccourci micro pour couper l'écoute, relâchez pour la reprendre. Utilise les mêmes raccourcis 1 et 2 que le mode Push-to-Mute. Fonctionne en veille et pendant un dialogue ; le délai d'inactivité habituel reste applicable. Redémarrez l'assistant après modification.",
       "replacesRequiredWord": "Remplace le mot obligatoire : prononcez le prénom pour ouvrir un dialogue, puis parlez sans le répéter.",
       "name": "Prénom de l'avatar actif", "timeout": "Délai d'inactivité (secondes)",
       "nameFromAvatar": "Utilise le prénom de l'avatar, pas le nom du profil. Modifiez ou dupliquez l'avatar pour le changer.",
