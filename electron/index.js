@@ -225,7 +225,11 @@ function normalizeOverlayOptions(opts = {}) {
     vrSizeMeters: Number.isFinite(opts.vrSizeMeters) && opts.vrSizeMeters > 0
       ? opts.vrSizeMeters
       : 0.9,
-    vrAnchor: opts.vrAnchor === 'world' ? 'world' : 'head',
+    vrAnchor: mode === 'vr-full' || opts.vrAnchor === 'world' ? 'world' : 'head',
+    vrContent: mode === 'vr-full' ? 'interface' : 'hud',
+    vrGazeZoom: mode === 'vr-full' && reductionFactor > 1,
+    vrGazeReductionFactor: reductionFactor,
+    vrGazeReducedOpacity: reducedOpacity,
     ...normalizeVrPlacementOptions(opts),
     vrCurvature,
     standaloneTransparent: opts.standaloneTransparent !== false,

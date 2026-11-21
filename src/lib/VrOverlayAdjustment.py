@@ -55,7 +55,10 @@ def ship_profile_key(ship: Mapping[str, Any]) -> str | None:
 def normalize(text: str) -> str:
     text = unicodedata.normalize("NFKD", text.casefold())
     text = "".join(char for char in text if not unicodedata.combining(char))
-    return re.sub(r"\s+", " ", text.replace("\u2019", "'")).strip().rstrip(".!?")
+    text = text.replace("\u2019", "'")
+    # Drop STT punctuation but keep decimal commas such as "0,5".
+    text = re.sub(r"(?<!\d),|,(?!\d)|[;:!?]", " ", text)
+    return re.sub(r"\s+", " ", text).strip().strip(".").strip()
 
 
 def normalize_command(text: str, assistant_name: str = "") -> str:
@@ -89,8 +92,8 @@ def is_adjustment_request(text: str, assistant_name: str = "") -> bool:
 
 def is_recenter_request(text: str) -> bool:
     return bool(re.fullmatch(
-        r"(?:(?:reinitialise[rz]?|recentre[rz]?) la vue(?: vr)?"
-        r"|(?:reset|recenter|recentre) (?:the )?(?:vr )?view)",
+        r"(?:(?:reinitialise[rz]?|(?:re)?centre[rz]?) la vue(?: vr)?"
+        r"|(?:reset|(?:re)?center|(?:re)?centre) (?:the )?(?:vr )?view)",
         text,
     ))
 

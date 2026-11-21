@@ -311,7 +311,7 @@ def test_unrelated_or_negated_requests_are_not_intercepted(command):
 
 @pytest.mark.parametrize("command", [
     "r\u00e9initialise la vue", "recentre la vue",
-    "Simonne, recentre la vue.", "Simon, r\u00e9initialise la vue s'il te pla\u00eet",
+    "centre la vue VR", "recentre, la vue VR", "Simonne, recentre, la vue.", "Simon, r\u00e9initialise la vue s'il te pla\u00eet",
     "peux-tu recentrer la vue", "recenter the VR view", "reset the view", "recentre view",
 ])
 def test_recenter_commands_bypass_the_llm_without_changing_overlay_settings(command):

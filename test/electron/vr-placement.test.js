@@ -1,8 +1,43 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import vm from 'node:vm';
 
 import { getOverlayPlacement, normalizeVrPlacementOptions } from '../../electron/vr-placement.js';
+import { normalizeDesktopOverlayScreen } from '../../electron/desktop-overlay-lifecycle.js';
+import { validateReducedOpacity } from '../../electron/vr-gaze-zoom.js';
+
+const mainSource = fs.readFileSync(new URL('../../electron/index.js', import.meta.url), 'utf8');
+const normalizeOverlayOptions = vm.runInNewContext(`(${
+  mainSource.slice(mainSource.indexOf('function normalizeOverlayOptions('),
+    mainSource.indexOf('async function getOverlayRuntimeInfo(')).trim()
+})`, {
+  normalizeDesktopOverlayScreen,
+  normalizeVrPlacementOptions,
+  validateReducedOpacity,
+  clamp: (value, min, max) => Math.max(min, Math.min(max, value)),
+});
+
+test('full-window options select the interface and retain adaptive sizing settings', () => {
+  const options = normalizeOverlayOptions({
+    mode: 'vr-full', vrAnchor: 'head', vrGazeReductionFactor: 3, vrGazeReducedOpacity: 0.4,
+  });
+  assert.equal(options.vrContent, 'interface');
+  assert.equal(options.vrAnchor, 'world');
+  assert.equal(options.vrGazeZoom, true);
+  assert.equal(options.vrGazeReductionFactor, 3);
+  assert.equal(options.vrGazeReducedOpacity, 0.4);
+  assert.equal(normalizeOverlayOptions({ mode: 'vr-full', vrGazeReductionFactor: 1 }).vrGazeZoom, false);
+});
+
+test('HUD options retain HUD content and do not enable adaptive sizing', () => {
+  for (const mode of ['vr', 'both']) {
+    const options = normalizeOverlayOptions({ mode, vrGazeReductionFactor: 5 });
+    assert.equal(options.vrContent, 'hud');
+    assert.equal(options.vrAnchor, 'head');
+    assert.equal(options.vrGazeZoom, false);
+  }
+});
 
 const placementKeys = [
   'vrHorizontalOffset',
