@@ -37,7 +37,7 @@ describe("VR slider configuration updates", () => {
         llm_provider: "none", agent_llm_provider: "none", agent_llm_max_tries: 7, mute_search: false,
         vision_provider: "none", stt_provider: "none", stt_required_word: "", tts_provider: "none",
         embedding_provider: "none", vision_var: false, ptt_var: "voice_activation",
-        wake_word_timeout: 10, wake_word_source: "main", wake_word_first_command: "retranscribe",
+        wake_word_timeout: 10, wake_word_source: "main", wake_word_first_command: "retranscribe", wake_word_push_to_mute: false,
         ptt_inverted_var: false, mute_during_response_var: false, game_actions_var: true,
         web_search_actions_var: true, ui_actions_var: true, use_action_cache_var: true,
         allowed_actions: {}, discovery_primary_var: true, discovery_firegroup_var: 1,

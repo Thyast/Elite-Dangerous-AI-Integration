@@ -76,9 +76,12 @@ describe("generic list settings", () => {
         const title = root.querySelector<HTMLElement>(".list-row-title")!;
         expect(input.checked).toBeFalse();
         expect(root.querySelector(".list-row")?.classList.contains("row-suspended")).toBeTrue();
-        expect(getComputedStyle(input).borderTopColor).toBe("rgb(255, 152, 0)");
+        expect(getComputedStyle(input).borderTopColor).toContain("255, 152, 0");
+        expect(getComputedStyle(input).borderTopWidth).toBe("1px");
         expect(getComputedStyle(title).color).toBe("rgb(136, 136, 136)");
-        expect(input.getBoundingClientRect().left).toBeLessThan(title.getBoundingClientRect().left);
+        const inputLeft = input.getBoundingClientRect().left;
+        expect(inputLeft).toBeLessThan(title.getBoundingClientRect().left);
+        expect(title.getBoundingClientRect().left - input.getBoundingClientRect().right).toBeLessThan(20);
         const actions: unknown[] = [];
         fixture.componentInstance.uiAction.subscribe(action => actions.push(action));
         input.click();
