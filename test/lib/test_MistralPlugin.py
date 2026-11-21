@@ -1,6 +1,10 @@
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 from typing import cast
+
+import httpx
+import pytest
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -9,7 +13,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 
-from lib.Models import OpenAIEmbeddingModel, OpenAILLMModel, OpenAISTTModel
+from lib.Models import LLMError, OpenAIEmbeddingModel, OpenAILLMModel, OpenAISTTModel
 from lib.Config import Config
 from lib.PluginBase import PluginManifest
 from lib.PluginManager import PluginManager
@@ -112,3 +116,29 @@ def test_mistral_plugin_creates_models_with_defaults() -> None:
     assert vlm.provider_name == "mistral"
     assert vlm.model_name == "mistral-small-latest"
     assert str(vlm.client.base_url) == "https://api.mistral.ai/v1/"
+
+
+def test_mistral_tts_reports_http_error_body_for_streaming_response() -> None:
+    plugin = create_plugin()
+    model = plugin.create_model("tts", {"api_key": "test-key"})
+    assert isinstance(model, MistralTTSModel)
+
+    response = httpx.Response(
+        401,
+        request=httpx.Request("POST", "https://api.mistral.ai/v1/audio/speech"),
+        stream=httpx.ByteStream(b'{"message":"invalid key"}'),
+    )
+
+    @contextmanager
+    def stream_response(*args, **kwargs):
+        try:
+            yield response
+        finally:
+            response.close()
+
+    model.client = type("StreamingClient", (), {"stream": stream_response})()
+
+    with pytest.raises(LLMError, match="TTS Mistral HTTP 401") as error:
+        list(model.synthesize("Hello", "en_paul_neutral"))
+
+    assert "invalid key" in str(error.value)

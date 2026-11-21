@@ -231,16 +231,21 @@ class MistralTTSModel(TTSModel):
                     "stream": True,
                 },
             ) as response:
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    response.read()
+                    try:
+                        detail = response.json()
+                    except ValueError:
+                        detail = response.text
+                    raise LLMError(
+                        f"TTS Mistral HTTP {response.status_code}: {detail}",
+                        e,
+                    ) from e
                 yield from self._to_pcm16(self._iter_audio_deltas(response))
         except LLMError:
             raise
-        except httpx.HTTPStatusError as e:
-            try:
-                detail = e.response.json()
-            except Exception:
-                detail = e.response.text
-            raise LLMError(f"TTS Mistral HTTP {e.response.status_code}: {detail}", e)
         except Exception as e:
             raise LLMError(f"TTS Mistral error: {e}", e)
 

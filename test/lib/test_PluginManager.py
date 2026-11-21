@@ -353,18 +353,22 @@ def test_metadata_free_third_party_provider_contract_remains_compatible() -> Non
     assert embedding.create_embedding("hello") == ("compatible-embedding", [5.0])
 
 
-def test_unchanged_elevenlabs_plugin_loads_creates_and_executes_tts() -> None:
+def test_elevenlabs_plugin_uses_configured_voice_id_for_tts_settings(monkeypatch) -> None:
     plugin_dir = ROOT_DIR / "plugins" / "plugin-elevenlabs"
+    if not (plugin_dir / "manifest.json").is_file():
+        plugin_dir = ROOT_DIR / "plugins" / "cn-plugin-elevenlabs-windows"
     manifest_path = plugin_dir / "manifest.json"
     if not manifest_path.is_file():
         pytest.skip("ElevenLabs plugin checkout is not available")
 
+    monkeypatch.syspath_prepend(str(plugin_dir.parent))
     manifest = PluginManifest(manifest_path.read_text(encoding="utf-8"))
     manager = PluginManager({
         "plugin_settings": {
             manifest.guid: {
                 "elevenlabs_api_key": "test-key",
                 "elevenlabs_model_id": "eleven_flash_v2_5",
+                "elevenlabs_voice_id": "configured-voice-id",
             },
         },
     })  # type: ignore[arg-type]
@@ -377,10 +381,11 @@ def test_unchanged_elevenlabs_plugin_loads_creates_and_executes_tts() -> None:
     assert isinstance(model, TTSModel)
     model._client = MagicMock()  # type: ignore[attr-defined]
     model._client.text_to_speech.stream.return_value = [b"first", b"second"]  # type: ignore[attr-defined]
-    assert b"".join(model.synthesize("hello", "voice-id")) == b"firstsecond"
+    settings = {"elevenlabs_voice_id": "configured-voice-id"}
+    assert b"".join(model.synthesize_with_settings("hello", settings)) == b"firstsecond"
     model._client.text_to_speech.stream.assert_called_once_with(  # type: ignore[attr-defined]
         text="hello",
-        voice_id="voice-id",
+        voice_id="configured-voice-id",
         model_id="eleven_flash_v2_5",
         output_format="pcm_24000",
         voice_settings={

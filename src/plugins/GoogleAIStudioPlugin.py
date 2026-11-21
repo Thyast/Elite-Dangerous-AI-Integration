@@ -126,7 +126,7 @@ class GoogleAIStudioLLMModel(OpenAILLMModel):
         params.pop("reasoning_effort", None)
         if not self.custom_temperature:
             params.pop("temperature", None)
-        if self.reasoning_effort and self.reasoning_effort != "default":
+        if self.reasoning_effort in {"minimal", "low", "medium", "high"}:
             # The SDK consumes the outer extra_body argument; Google expects the
             # inner extra_body property in the serialized compatibility payload.
             params["extra_body"] = {

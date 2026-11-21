@@ -532,6 +532,19 @@ def test_google_native_thinking_and_temperature_opt_in() -> None:
     assert params["extra_body"]["extra_body"]["google"]["thinking_config"]["thinking_level"] == "minimal"
 
 
+@pytest.mark.parametrize("effort", ["none", "disabled"])
+def test_google_unknown_model_omits_unsupported_disabled_thinking_level(effort: str) -> None:
+    plugin = GoogleAIStudioPlugin(manifest(GOOGLE_AI_STUDIO_PLUGIN_GUID, "Google"))
+    params = capture_llm_request(plugin.create_model("llm", {
+        "llm_model": "gemini-3.1-flash-lite",
+        "llm_reasoning_effort": effort,
+    }))
+
+    assert params["model"] == "gemini-3.1-flash-lite"
+    assert "extra_body" not in params
+    assert "reasoning_effort" not in params
+
+
 def test_google_thinking_config_uses_documented_wire_format() -> None:
     plugin = GoogleAIStudioPlugin(manifest(GOOGLE_AI_STUDIO_PLUGIN_GUID, "Google"))
     model = plugin.create_model("llm", {
